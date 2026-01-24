@@ -219,6 +219,9 @@ void basic_print_double(double value);
 // Print string
 void basic_print_string(BasicString* str);
 
+// Print C string literal (for compile-time constants)
+void basic_print_cstr(const char* str);
+
 // Print newline
 void basic_print_newline(void);
 

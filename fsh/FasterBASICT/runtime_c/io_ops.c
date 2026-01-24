@@ -40,6 +40,13 @@ void basic_print_string(BasicString* str) {
     fflush(stdout);
 }
 
+// Print a C string literal (for compile-time string constants)
+void basic_print_cstr(const char* str) {
+    if (!str) return;
+    printf("%s", str);
+    fflush(stdout);
+}
+
 void basic_print_newline(void) {
     printf("\n");
     fflush(stdout);

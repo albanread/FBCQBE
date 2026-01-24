@@ -20,7 +20,7 @@ namespace FasterBASIC {
 
 void QBECodeGenerator::emitPrintValue(const std::string& value, VariableType type) {
     if (type == VariableType::STRING) {
-        emit("    call $basic_print_string(l " + value + ")\n");
+        emit("    call $basic_print_cstr(l " + value + ")\n");
     } else if (type == VariableType::INT) {
         emit("    call $basic_print_int(w " + value + ")\n");
     } else if (type == VariableType::DOUBLE) {
