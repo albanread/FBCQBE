@@ -1,0 +1,48 @@
+# Compiled binaries
+fbc_qbe
+fbc
+*.out
+a.out
+test
+test_*
+!test_*.bas
+
+# Object files
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+
+# Assembly output
+*.s
+*.asm
+
+# QBE intermediate
+*.ssa
+
+# Build directories
+build/
+bin/
+obj/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# Test output
+output/
+results/
+
+# C/C++ compilation artifacts
+*.d
+*.dSYM/

@@ -1,0 +1,338 @@
+//
+// fasterbasic_qbe_codegen.h
+// FasterBASIC QBE Code Generator
+//
+// Generates QBE IL (Intermediate Language) from FasterBASIC CFG/AST.
+// The generated QBE IL calls the C runtime library (libbasic_runtime.a)
+// for high-level operations like strings, arrays, I/O, etc.
+//
+// This is a modular implementation split across multiple files:
+// - qbe_codegen_main.cpp        - Main orchestration, block emission
+// - qbe_codegen_expressions.cpp - Expression emission
+// - qbe_codegen_statements.cpp  - Statement emission
+// - qbe_codegen_runtime.cpp     - Runtime library call wrappers
+// - qbe_codegen_helpers.cpp     - Helper functions
+//
+
+#ifndef FASTERBASIC_QBE_CODEGEN_H
+#define FASTERBASIC_QBE_CODEGEN_H
+
+#include "fasterbasic_cfg.h"
+#include "fasterbasic_semantic.h"
+#include "fasterbasic_ast.h"
+#include "fasterbasic_options.h"
+#include <string>
+#include <sstream>
+#include <vector>
+#include <unordered_map>
+#include <unordered_set>
+#include <map>
+#include <memory>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// QBE Code Generation Configuration
+// =============================================================================
+
+struct QBECodeGenConfig {
+    bool emitComments = true;        // Include source line comments
+    bool emitDebugInfo = false;      // Generate debug metadata
+    bool optimizeLocals = true;      // Use locals where possible
+    int maxLocalVariables = 200;     // Max local variables (QBE limit)
+    
+    QBECodeGenConfig() = default;
+};
+
+// =============================================================================
+// QBE Code Generation Statistics
+// =============================================================================
+
+struct QBECodeGenStats {
+    size_t instructionsGenerated = 0;
+    size_t labelsGenerated = 0;
+    size_t variablesUsed = 0;
+    size_t arraysUsed = 0;
+    size_t functionsGenerated = 0;
+    double generationTimeMs = 0.0;
+    
+    void print() const;
+};
+
+// =============================================================================
+// QBE Code Generator
+// =============================================================================
+
+class QBECodeGenerator {
+public:
+    QBECodeGenerator();
+    explicit QBECodeGenerator(const QBECodeGenConfig& config);
+    ~QBECodeGenerator();
+    
+    // Main API: Generate QBE IL from ProgramCFG (main + functions)
+    std::string generate(const ProgramCFG& programCFG, 
+                        const SymbolTable& symbols,
+                        const CompilerOptions& options);
+    
+    // Get generation statistics
+    const QBECodeGenStats& getStats() const { return m_stats; }
+    
+    // Configuration
+    void setConfig(const QBECodeGenConfig& config) { m_config = config; }
+    const QBECodeGenConfig& getConfig() const { return m_config; }
+
+private:
+    // Code generation state
+    std::ostringstream m_output;
+    QBECodeGenConfig m_config;
+    QBECodeGenStats m_stats;
+    const ProgramCFG* m_programCFG;
+    const ControlFlowGraph* m_cfg;  // Points to current CFG being generated
+    const SymbolTable* m_symbols;
+    CompilerOptions m_options;
+    
+    // Symbol tables and tracking
+    std::unordered_map<std::string, int> m_variables;      // varName -> slot
+    std::unordered_map<std::string, std::string> m_varTypes; // varName -> QBE type
+    std::unordered_map<std::string, int> m_arrays;         // arrayName -> id
+    std::unordered_map<int, std::string> m_labels;         // blockId/lineNum -> label
+    std::unordered_map<std::string, int> m_stringLiterals; // literal -> id
+    
+    // Temporary variable counter
+    int m_tempCounter = 0;
+    int m_labelCounter = 0;
+    int m_stringCounter = 0;
+    
+    // Current function context
+    std::string m_currentFunction;
+    bool m_inFunction = false;
+    std::unordered_set<std::string> m_localVariables;  // Local variables in current function
+    std::unordered_set<std::string> m_sharedVariables; // Shared (global) variables accessed in function
+    std::unordered_set<std::string> m_forLoopVariables; // FOR loop indices (always INTEGER)
+    
+    // Current block being emitted (for statement handlers)
+    const BasicBlock* m_currentBlock = nullptr;
+    
+    // Last evaluated condition (for conditional branches)
+    std::string m_lastCondition;
+    
+    // SELECT CASE context (for emitting test blocks)
+    std::string m_selectCaseValue;
+    std::vector<std::vector<std::string>> m_caseClauseValues;
+    size_t m_currentCaseClauseIndex = 0;
+    
+    // Flag: did last statement emit a terminator (jump/return)?
+    bool m_lastStatementWasTerminator = false;
+    
+    // Loop context stack (for EXIT statements)
+    struct LoopContext {
+        std::string exitLabel;      // Label to jump to on EXIT
+        std::string continueLabel;  // Label to jump to on CONTINUE
+        std::string type;           // "FOR", "WHILE", "DO", etc.
+    };
+    std::vector<LoopContext> m_loopStack;
+    
+    // GOSUB return stack (for RETURN statements)
+    std::vector<std::string> m_gosubReturnLabels;
+    
+    // Data section strings
+    std::vector<std::string> m_dataStrings;
+    
+    // =============================================================================
+    // Main Generation Functions (qbe_codegen_main.cpp)
+    // =============================================================================
+    
+    void emitHeader();
+    void emitDataSection();
+    void emitMainFunction();
+    void emitFunction(const std::string& functionName);
+    void emitBlock(const BasicBlock* block);
+    
+    // Helper for entering/exiting function context
+    void enterFunctionContext(const std::string& functionName);
+    void exitFunctionContext();
+    
+    // =============================================================================
+    // Statement Emission (qbe_codegen_statements.cpp)
+    // =============================================================================
+    
+    void emitStatement(const Statement* stmt);
+    void emitPrint(const PrintStatement* stmt);
+    void emitInput(const InputStatement* stmt);
+    void emitLet(const LetStatement* stmt);
+    void emitIf(const IfStatement* stmt);
+    void emitFor(const ForStatement* stmt);
+    void emitNext(const NextStatement* stmt);
+    void emitWhile(const WhileStatement* stmt);
+    void emitWend(const WendStatement* stmt);
+    void emitGoto(const GotoStatement* stmt);
+    void emitGosub(const GosubStatement* stmt);
+    void emitReturn(const ReturnStatement* stmt);
+    void emitDim(const DimStatement* stmt);
+    void emitEnd(const EndStatement* stmt);
+    void emitRem(const RemStatement* stmt);
+    void emitCall(const CallStatement* stmt);
+    void emitExit(const ExitStatement* stmt);
+    void emitRepeat(const RepeatStatement* stmt);
+    void emitUntil(const UntilStatement* stmt);
+    void emitDo(const DoStatement* stmt);
+    void emitLoop(const LoopStatement* stmt);
+    void emitCase(const CaseStatement* stmt);
+    void emitLocal(const LocalStatement* stmt);
+    void emitShared(const SharedStatement* stmt);
+    
+    // =============================================================================
+    // Expression Emission (qbe_codegen_expressions.cpp)
+    // =============================================================================
+    
+    std::string emitExpression(const Expression* expr);
+    std::string emitNumberLiteral(const NumberExpression* expr);
+    std::string emitStringLiteral(const StringExpression* expr);
+    std::string emitVariableRef(const VariableExpression* expr);
+    std::string emitBinaryOp(const BinaryExpression* expr);
+    std::string emitUnaryOp(const UnaryExpression* expr);
+    std::string emitFunctionCall(const FunctionCallExpression* expr);
+    std::string emitArrayAccessExpr(const ArrayAccessExpression* expr);
+    
+    // Helper for function mapping
+    std::string mapToRuntimeFunction(const std::string& basicFunc);
+    
+    // =============================================================================
+    // Runtime Library Calls (qbe_codegen_runtime.cpp)
+    // =============================================================================
+    
+    // I/O operations
+    void emitPrintValue(const std::string& value, VariableType type);
+    void emitPrintNewline();
+    void emitPrintTab();
+    std::string emitInputString();
+    std::string emitInputInt();
+    std::string emitInputDouble();
+    
+    // String operations
+    std::string emitStringConstant(const std::string& str);
+    std::string emitStringConcat(const std::string& left, const std::string& right);
+    std::string emitStringCompare(const std::string& left, const std::string& right);
+    std::string emitStringLength(const std::string& str);
+    std::string emitStringSubstr(const std::string& str, const std::string& start, const std::string& length);
+    
+    // Array operations
+    std::string emitArrayCreate(const std::string& arrayName, const std::vector<std::string>& bounds);
+    std::string emitArrayGet(const std::string& arrayName, const std::vector<std::string>& indices);
+    void emitArrayStore(const std::string& arrayName, const std::vector<std::string>& indices, const std::string& value);
+    
+    // Type conversions
+    std::string emitIntToString(const std::string& value);
+    std::string emitDoubleToString(const std::string& value);
+    std::string emitStringToInt(const std::string& value);
+    std::string emitStringToDouble(const std::string& value);
+    std::string emitIntToDouble(const std::string& value);
+    std::string emitDoubleToInt(const std::string& value);
+    
+    // Math operations
+    std::string emitMathFunction(const std::string& funcName, const std::vector<std::string>& args);
+    std::string emitAbs(const std::string& value);
+    std::string emitSqrt(const std::string& value);
+    std::string emitSin(const std::string& value);
+    std::string emitCos(const std::string& value);
+    std::string emitTan(const std::string& value);
+    std::string emitPow(const std::string& base, const std::string& exp);
+    std::string emitRnd();
+    
+    // File I/O operations
+    void emitFileOpen(const std::string& filename, const std::string& mode, const std::string& fileNum);
+    void emitFileClose(const std::string& fileNum);
+    std::string emitFileRead(const std::string& fileNum);
+    void emitFileWrite(const std::string& fileNum, const std::string& data);
+    std::string emitFileEof(const std::string& fileNum);
+    
+    // =============================================================================
+    // Helper Functions (qbe_codegen_helpers.cpp)
+    // =============================================================================
+    
+    // Emit raw QBE IL
+    void emit(const std::string& code);
+    void emitLine(const std::string& code);
+    void emitComment(const std::string& comment);
+    void emitLabel(const std::string& label);
+    
+    // Temporary variable management
+    std::string allocTemp(const std::string& qbeType = "w");
+    std::string allocLabel();
+    void freeTemp(const std::string& temp);
+    
+    // Label generation
+    std::string makeLabel(const std::string& prefix);
+    std::string getBlockLabel(int blockId);
+    std::string getLineLabel(int lineNumber);
+    
+    // Type mapping
+    std::string getQBEType(VariableType type);
+    std::string getQBETypeFromSuffix(char suffix);
+    char getTypeSuffix(const std::string& varName);
+    VariableType getVariableType(const std::string& varName);
+    
+    // Variable management
+    std::string getVariableRef(const std::string& varName);
+    std::string getArrayRef(const std::string& arrayName);
+    void declareVariable(const std::string& varName, VariableType type);
+    void declareArray(const std::string& arrayName, VariableType type);
+    
+    // String escaping
+    std::string escapeString(const std::string& str);
+    
+    // Get runtime function name
+    std::string getRuntimeFunction(const std::string& operation, VariableType type);
+    
+    // Check if expression is constant
+    bool isConstantExpression(const Expression* expr);
+    int evaluateConstantInt(const Expression* expr);
+    double evaluateConstantDouble(const Expression* expr);
+    
+    // Loop management
+    void pushLoop(const std::string& exitLabel, const std::string& continueLabel, const std::string& type);
+    void popLoop();
+    LoopContext* getCurrentLoop();
+    
+    // GOSUB return stack
+    void pushGosubReturn(const std::string& returnLabel);
+    void popGosubReturn();
+    std::string getCurrentGosubReturn();
+    
+    // Type inference and promotion
+    VariableType inferExpressionType(const Expression* expr);
+    std::string promoteToType(const std::string& value, VariableType fromType, VariableType toType);
+    
+    // Utility functions
+    std::string toUpper(const std::string& str);
+    std::string toLower(const std::string& str);
+    bool isNumericType(VariableType type);
+    bool isIntegerType(VariableType type);
+    bool isFloatingType(VariableType type);
+    bool isStringType(VariableType type);
+};
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+// Quick helper to generate QBE IL from CFG
+inline std::string generateQBECode(const ProgramCFG& programCFG, 
+                                  const SymbolTable& symbols,
+                                  const CompilerOptions& options) {
+    QBECodeGenerator gen;
+    return gen.generate(programCFG, symbols, options);
+}
+
+// Generate with custom configuration
+inline std::string generateQBECode(const ProgramCFG& programCFG, 
+                                  const SymbolTable& symbols,
+                                  const CompilerOptions& options,
+                                  const QBECodeGenConfig& config) {
+    QBECodeGenerator gen(config);
+    return gen.generate(programCFG, symbols, options);
+}
+
+} // namespace FasterBASIC
+
+#endif // FASTERBASIC_QBE_CODEGEN_H
