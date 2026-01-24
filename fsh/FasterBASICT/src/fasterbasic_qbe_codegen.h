@@ -191,6 +191,8 @@ private:
     void emitEnd(const EndStatement* stmt);
     void emitRem(const RemStatement* stmt);
     void emitCall(const CallStatement* stmt);
+    void emitErase(const EraseStatement* stmt);
+    void emitRedim(const RedimStatement* stmt);
     void emitExit(const ExitStatement* stmt);
     void emitRepeat(const RepeatStatement* stmt);
     void emitUntil(const UntilStatement* stmt);

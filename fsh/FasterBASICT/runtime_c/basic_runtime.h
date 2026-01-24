@@ -155,8 +155,14 @@ double str_to_double(BasicString* str);
 // bounds is array of [lower1, upper1, lower2, upper2, ...]
 BasicArray* array_new(char type_suffix, int32_t dimensions, int32_t* bounds, int32_t base);
 
+// Simple array creation wrapper (for codegen convenience)
+BasicArray* array_create(int32_t dimensions, ...);
+
 // Free array
 void array_free(BasicArray* array);
+
+// Erase array (set to length 0)
+void array_erase(BasicArray* array);
 
 // Get element address (for load/store operations)
 void* array_get_address(BasicArray* array, int32_t* indices);

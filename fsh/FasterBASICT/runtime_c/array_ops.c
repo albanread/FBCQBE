@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 // =============================================================================
 // Array Creation
@@ -436,4 +437,64 @@ void basic_check_bounds(BasicArray* array, int32_t* indices) {
             return;
         }
     }
+}
+
+// =============================================================================
+// Convenience Wrappers for Codegen
+// =============================================================================
+
+// Simple array creation wrapper for codegen
+// Creates a 1D array with default type (double '#')
+BasicArray* array_create(int32_t dimensions, ...) {
+if (dimensions <= 0 || dimensions > 8) {
+    basic_error_msg("Invalid array dimensions in array_create");
+    return NULL;
+}
+    
+// Allocate bounds array
+int32_t* bounds = (int32_t*)malloc(dimensions * 2 * sizeof(int32_t));
+if (!bounds) {
+    basic_error_msg("Out of memory (array_create bounds)");
+    return NULL;
+}
+    
+// Extract dimension sizes from varargs
+va_list args;
+va_start(args, dimensions);
+    
+for (int32_t i = 0; i < dimensions; i++) {
+    int32_t size = va_arg(args, int32_t);
+    bounds[i * 2] = 0;      // Lower bound (OPTION BASE 0 by default)
+    bounds[i * 2 + 1] = size;  // Upper bound
+}
+    
+va_end(args);
+    
+// Create array with default type (double '#')
+BasicArray* array = array_new('#', dimensions, bounds, 0);
+    
+free(bounds);
+return array;
+}
+
+// Erase an array (set to length 0)
+void array_erase(BasicArray* array) {
+if (!array) return;
+    
+// Create new bounds with size 0 for all dimensions
+int32_t* new_bounds = (int32_t*)malloc(array->dimensions * 2 * sizeof(int32_t));
+if (!new_bounds) {
+    basic_error_msg("Out of memory (array_erase)");
+    return;
+}
+    
+for (int32_t i = 0; i < array->dimensions; i++) {
+    new_bounds[i * 2] = 0;
+    new_bounds[i * 2 + 1] = -1;  // Make upper < lower to indicate empty
+}
+    
+// Redim to size 0 without preserve
+array_redim(array, new_bounds, false);
+    
+free(new_bounds);
 }

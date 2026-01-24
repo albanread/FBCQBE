@@ -86,6 +86,14 @@ void QBECodeGenerator::emitStatement(const Statement* stmt) {
             emitCall(static_cast<const CallStatement*>(stmt));
             break;
             
+        case ASTNodeType::STMT_ERASE:
+            emitErase(static_cast<const EraseStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_REDIM:
+            emitRedim(static_cast<const RedimStatement*>(stmt));
+            break;
+            
         case ASTNodeType::STMT_EXIT:
             emitExit(static_cast<const ExitStatement*>(stmt));
             break;
@@ -897,6 +905,150 @@ void QBECodeGenerator::emitCall(const CallStatement* stmt) {
     }
     
     m_stats.instructionsGenerated++;
+}
+
+// =============================================================================
+// ERASE Statement
+// =============================================================================
+
+void QBECodeGenerator::emitErase(const EraseStatement* stmt) {
+    if (!stmt) return;
+    
+    emitComment("ERASE arrays (clear to length 0)");
+    
+    for (const auto& arrayName : stmt->arrayNames) {
+        std::string arrayRef = getArrayRef(arrayName);
+        
+        // Check if this is a UDT array (uses malloc) or regular array (uses array_create)
+        auto elemTypeIt = m_arrayElementTypes.find(arrayName);
+        if (elemTypeIt != m_arrayElementTypes.end()) {
+            // UDT array - free the memory and set to null
+            emitComment("ERASE UDT array " + arrayName);
+            emit("    call $free(l " + arrayRef + ")\n");
+            emit("    " + arrayRef + " =l copy 0\n");
+            m_stats.instructionsGenerated += 2;
+        } else {
+            // Regular array - call runtime erase function to clear it
+            emitComment("ERASE array " + arrayName);
+            emit("    call $array_erase(l " + arrayRef + ")\n");
+            m_stats.instructionsGenerated++;
+        }
+    }
+}
+
+// =============================================================================
+// REDIM Statement
+// =============================================================================
+
+void QBECodeGenerator::emitRedim(const RedimStatement* stmt) {
+    if (!stmt) return;
+    
+    emitComment(stmt->preserve ? "REDIM PRESERVE" : "REDIM");
+    
+    for (const auto& arrayRedim : stmt->arrays) {
+        std::string arrayName = arrayRedim.name;
+        std::string arrayRef = getArrayRef(arrayName);
+        
+        // Check if this is a UDT array
+        auto elemTypeIt = m_arrayElementTypes.find(arrayName);
+        if (elemTypeIt != m_arrayElementTypes.end()) {
+            // UDT array - reallocate
+            std::string udtTypeName = elemTypeIt->second;
+            
+            // Evaluate dimension expressions
+            std::vector<std::string> dimTemps;
+            for (const auto& dimExpr : arrayRedim.dimensions) {
+                dimTemps.push_back(emitExpression(dimExpr.get()));
+            }
+            
+            // For now, only support 1D arrays
+            if (dimTemps.size() != 1) {
+                emitComment("ERROR: Multi-dimensional UDT arrays not yet supported in REDIM");
+                continue;
+            }
+            
+            // Calculate new size
+            size_t elementSize = calculateTypeSize(udtTypeName);
+            std::string dimTemp = dimTemps[0];
+            
+            // Convert dimension to INT
+            VariableType dimType = inferExpressionType(arrayRedim.dimensions[0].get());
+            if (dimType != VariableType::INT) {
+                dimTemp = promoteToType(dimTemp, dimType, VariableType::INT);
+            }
+            
+            std::string dimPlusOne = allocTemp("w");
+            emit("    " + dimPlusOne + " =w add " + dimTemp + ", 1\n");
+            m_stats.instructionsGenerated++;
+            
+            std::string dimLong = allocTemp("l");
+            emit("    " + dimLong + " =l extsw " + dimPlusOne + "\n");
+            m_stats.instructionsGenerated++;
+            
+            std::string newSize = allocTemp("l");
+            emit("    " + newSize + " =l mul " + dimLong + ", " + std::to_string(elementSize) + "\n");
+            m_stats.instructionsGenerated++;
+            
+            if (stmt->preserve) {
+                // PRESERVE: allocate new, copy old to new, free old
+                emitComment("REDIM PRESERVE UDT array " + arrayName + " (allocate new, copy, free old)");
+                std::string newPtr = allocTemp("l");
+                emit("    " + newPtr + " =l call $malloc(l " + newSize + ")\n");
+                m_stats.instructionsGenerated++;
+                
+                // Copy data from old to new (use memcpy for simplicity)
+                // We need to copy min(oldSize, newSize) bytes
+                // For now, just copy the new size worth (may be more than old had)
+                std::string oldPtr = allocTemp("l");
+                emit("    " + oldPtr + " =l copy " + arrayRef + "\n");
+                emit("    call $basic_memcpy(l " + newPtr + ", l " + oldPtr + ", l " + newSize + ")\n");
+                m_stats.instructionsGenerated += 2;
+                
+                // Free old array
+                emit("    call $free(l " + oldPtr + ")\n");
+                m_stats.instructionsGenerated++;
+                
+                // Update array reference to point to new allocation
+                emit("    " + arrayRef + " =l copy " + newPtr + "\n");
+                m_stats.instructionsGenerated++;
+            } else {
+                // No PRESERVE: just free old and allocate new
+                emitComment("REDIM UDT array " + arrayName + " (discard old data)");
+                emit("    call $free(l " + arrayRef + ")\n");
+                emit("    " + arrayRef + " =l call $malloc(l " + newSize + ")\n");
+                m_stats.instructionsGenerated += 2;
+            }
+        } else {
+            // Regular array - use runtime array_redim
+            emitComment("REDIM array " + arrayName);
+            
+            // Evaluate dimension expressions
+            std::vector<std::string> dimTemps;
+            for (const auto& dimExpr : arrayRedim.dimensions) {
+                dimTemps.push_back(emitExpression(dimExpr.get()));
+            }
+            
+            if (stmt->preserve) {
+                // Call runtime array_redim with preserve flag
+                emitComment("TODO: array_redim with preserve not yet implemented");
+                // For now, just recreate without preserving
+                emit("    call $array_free(l " + arrayRef + ")\n");
+                m_stats.instructionsGenerated++;
+                
+                std::string newArrayPtr = emitArrayCreate(arrayName, dimTemps);
+                emit("    " + arrayRef + " =l copy " + newArrayPtr + "\n");
+                m_stats.instructionsGenerated++;
+            } else {
+                // Free and recreate
+                emit("    call $array_free(l " + arrayRef + ")\n");
+                m_stats.instructionsGenerated++;
+                
+                std::string newArrayPtr = emitArrayCreate(arrayName, dimTemps);
+                emit("    " + arrayRef + " =l copy " + newArrayPtr + "\n");
+                m_stats.instructionsGenerated++;
+            }
+        }
+    }
 }
 
 // =============================================================================
