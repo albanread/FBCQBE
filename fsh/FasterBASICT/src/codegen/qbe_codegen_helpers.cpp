@@ -91,6 +91,15 @@ std::string QBECodeGenerator::getLineLabel(int lineNumber) {
     return label;
 }
 
+std::string QBECodeGenerator::getFunctionExitLabel() {
+    // If in a function, return tidy_exit label for cleanup
+    // Otherwise, return regular exit label
+    if (!m_functionStack.empty()) {
+        return m_functionStack.top().tidyExitLabel;
+    }
+    return "exit";
+}
+
 // =============================================================================
 // Type System - QBE Type Mapping
 // =============================================================================
@@ -119,7 +128,7 @@ std::string QBECodeGenerator::getQBETypeFromSuffix(char suffix) {
         case '#': return "d";  // DOUBLE
         case '$': return "l";  // STRING (pointer)
         case '&': return "l";  // LONG (64-bit int in QBE is 'l')
-        default: return "w";   // Default to INTEGER
+        default: return "d";   // Default to DOUBLE (like Lua, numbers are doubles by default)
     }
 }
 
@@ -128,18 +137,36 @@ std::string QBECodeGenerator::getQBETypeFromSuffix(char suffix) {
 // =============================================================================
 
 char QBECodeGenerator::getTypeSuffix(const std::string& varName) {
-    if (varName.empty()) return '%';
+    if (varName.empty()) return '#';  // Default to DOUBLE
     char last = varName.back();
     if (last == '%' || last == '!' || last == '#' || last == '$' || last == '&') {
         return last;
     }
-    return '%';  // Default to integer
+    return '#';  // Default to DOUBLE (numeric default in BASIC)
 }
 
 VariableType QBECodeGenerator::getVariableType(const std::string& varName) {
     // FOR loop indices are ALWAYS integers (hard rule in BASIC)
     if (m_forLoopVariables.count(varName) > 0) {
         return VariableType::INT;
+    }
+    
+    // Check if this is a function return variable (function name = return variable)
+    if (m_inFunction && m_cfg && varName == m_currentFunction) {
+        return m_cfg->returnType;
+    }
+    
+    // Check if this is a function parameter
+    if (m_inFunction && m_cfg) {
+        for (size_t i = 0; i < m_cfg->parameters.size(); ++i) {
+            if (m_cfg->parameters[i] == varName) {
+                // Found the parameter - return its type
+                if (i < m_cfg->parameterTypes.size()) {
+                    return m_cfg->parameterTypes[i];
+                }
+                break;
+            }
+        }
     }
     
     // First check symbol table
@@ -158,7 +185,7 @@ VariableType QBECodeGenerator::getVariableType(const std::string& varName) {
         case '#': return VariableType::DOUBLE;
         case '$': return VariableType::STRING;
         case '&': return VariableType::INT;  // LONG treated as INT in our system
-        default: return VariableType::INT;   // Default in BASIC
+        default: return VariableType::DOUBLE;   // Default numeric type is DOUBLE (like Lua)
     }
 }
 
@@ -370,17 +397,15 @@ std::string QBECodeGenerator::getCurrentGosubReturn() {
 // =============================================================================
 
 VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
-    if (!expr) return VariableType::INT;
+    if (!expr) return VariableType::DOUBLE;  // Default to DOUBLE
     
     ASTNodeType nodeType = expr->getType();
     
     switch (nodeType) {
         case ASTNodeType::EXPR_NUMBER: {
             const NumberExpression* numExpr = static_cast<const NumberExpression*>(expr);
-            double value = numExpr->value;
-            if (value == static_cast<int>(value)) {
-                return VariableType::INT;
-            }
+            // Numbers default to DOUBLE unless explicitly marked with % suffix
+            // This matches Lua behavior and simplifies type handling
             return VariableType::DOUBLE;
         }
         
@@ -394,21 +419,100 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
         
         case ASTNodeType::EXPR_BINARY: {
             const BinaryExpression* binExpr = static_cast<const BinaryExpression*>(expr);
+            
+            // Check operator type first - some operations always return INT
+            TokenType op = binExpr->op;
+            bool integerOnlyOp = (op == TokenType::MOD || 
+                                  op == TokenType::AND || 
+                                  op == TokenType::OR || 
+                                  op == TokenType::XOR);
+            
+            // Comparison operations also return INT (0 or 1)
+            bool comparisonOp = (op == TokenType::EQUAL ||
+                                op == TokenType::NOT_EQUAL ||
+                                op == TokenType::LESS_THAN ||
+                                op == TokenType::LESS_EQUAL ||
+                                op == TokenType::GREATER_THAN ||
+                                op == TokenType::GREATER_EQUAL);
+            
+            if (integerOnlyOp || comparisonOp) {
+                return VariableType::INT;
+            }
+            
+            // For arithmetic operations, infer from operand types
             VariableType leftType = inferExpressionType(binExpr->left.get());
             VariableType rightType = inferExpressionType(binExpr->right.get());
             
-            // Type promotion rules
+            // Type promotion rules: DOUBLE is the default numeric type
+            // Only use INT if BOTH operands are explicitly INT
             if (leftType == VariableType::DOUBLE || rightType == VariableType::DOUBLE) {
                 return VariableType::DOUBLE;
             }
             if (leftType == VariableType::FLOAT || rightType == VariableType::FLOAT) {
-                return VariableType::FLOAT;
+                return VariableType::DOUBLE;  // FLOAT and DOUBLE both map to QBE 'd'
             }
-            return VariableType::INT;
+            if (leftType == VariableType::INT && rightType == VariableType::INT) {
+                return VariableType::INT;
+            }
+            return VariableType::DOUBLE;  // Default to DOUBLE
+        }
+        
+        case ASTNodeType::EXPR_MEMBER_ACCESS: {
+            // Member access - need to look up the field type
+            const MemberAccessExpression* memberExpr = static_cast<const MemberAccessExpression*>(expr);
+            
+            // Get the base type name (could be variable or array element)
+            std::string baseTypeName = inferMemberAccessType(memberExpr->object.get());
+            if (baseTypeName.empty()) {
+                return VariableType::DOUBLE;  // Default if can't determine
+            }
+            
+            // Look up the field in the type
+            const TypeSymbol* typeSymbol = getTypeSymbol(baseTypeName);
+            if (!typeSymbol) {
+                return VariableType::DOUBLE;
+            }
+            
+            const TypeSymbol::Field* field = typeSymbol->findField(memberExpr->memberName);
+            if (!field) {
+                return VariableType::DOUBLE;
+            }
+            
+            // Return the field's type
+            if (field->isBuiltIn) {
+                return field->builtInType;
+            } else {
+                // Nested UDT - return as USER_DEFINED
+                return VariableType::USER_DEFINED;
+            }
+        }
+        
+        case ASTNodeType::EXPR_FUNCTION_CALL: {
+            // Function call - look up return type
+            const FunctionCallExpression* funcExpr = static_cast<const FunctionCallExpression*>(expr);
+            
+            // Check if this is a user-defined function in the CFG
+            if (m_programCFG) {
+                const ControlFlowGraph* funcCFG = m_programCFG->getFunctionCFG(funcExpr->name);
+                if (funcCFG) {
+                    return funcCFG->returnType;
+                }
+            }
+            
+            // Check symbol table
+            if (m_symbols) {
+                auto it = m_symbols->functions.find(funcExpr->name);
+                if (it != m_symbols->functions.end()) {
+                    return it->second.returnType;
+                }
+            }
+            
+            // Default for unknown functions
+            return VariableType::DOUBLE;
         }
         
         default:
-            return VariableType::INT;
+            return VariableType::DOUBLE;  // Default to DOUBLE
     }
 }
 
@@ -485,6 +589,262 @@ bool QBECodeGenerator::isFloatingType(VariableType type) {
 bool QBECodeGenerator::isStringType(VariableType type) {
     return (type == VariableType::STRING || 
             type == VariableType::UNICODE);
+}
+
+// =============================================================================
+// User-Defined Type Helpers
+// =============================================================================
+
+size_t QBECodeGenerator::calculateTypeSize(const std::string& typeName) {
+    // Check cache first
+    auto it = m_typeSizes.find(typeName);
+    if (it != m_typeSizes.end()) {
+        return it->second;
+    }
+    
+    // Get type definition from symbol table
+    const TypeSymbol* typeSymbol = getTypeSymbol(typeName);
+    if (!typeSymbol) {
+        // Type not found - return minimal size
+        return 8;
+    }
+    
+    size_t totalSize = 0;
+    size_t maxAlignment = 8;  // Default to 8-byte alignment
+    
+    // Calculate size of each field
+    for (const auto& field : typeSymbol->fields) {
+        size_t fieldSize = 0;
+        size_t fieldAlignment = 0;
+        
+        if (field.isBuiltIn) {
+            // Built-in type sizes
+            switch (field.builtInType) {
+                case VariableType::INT:
+                    fieldSize = 4;
+                    fieldAlignment = 4;
+                    break;
+                case VariableType::FLOAT:
+                case VariableType::DOUBLE:
+                    fieldSize = 8;
+                    fieldAlignment = 8;
+                    break;
+                case VariableType::STRING:
+                case VariableType::UNICODE:
+                    fieldSize = 8;  // Pointer
+                    fieldAlignment = 8;
+                    break;
+                default:
+                    fieldSize = 8;
+                    fieldAlignment = 8;
+                    break;
+            }
+        } else {
+            // Nested user-defined type (recursive)
+            fieldSize = calculateTypeSize(field.typeName);
+            fieldAlignment = 8;  // Assume 8-byte alignment for nested structs
+        }
+        
+        // Apply alignment padding
+        if (totalSize % fieldAlignment != 0) {
+            totalSize += fieldAlignment - (totalSize % fieldAlignment);
+        }
+        
+        totalSize += fieldSize;
+        
+        if (fieldAlignment > maxAlignment) {
+            maxAlignment = fieldAlignment;
+        }
+    }
+    
+    // Final padding to align to struct alignment
+    if (totalSize % maxAlignment != 0) {
+        totalSize += maxAlignment - (totalSize % maxAlignment);
+    }
+    
+    // Cache and return
+    m_typeSizes[typeName] = totalSize;
+    return totalSize;
+}
+
+size_t QBECodeGenerator::calculateFieldOffset(const std::string& typeName, const std::string& fieldName) {
+    // Check cache first
+    auto typeIt = m_fieldOffsets.find(typeName);
+    if (typeIt != m_fieldOffsets.end()) {
+        auto fieldIt = typeIt->second.find(fieldName);
+        if (fieldIt != typeIt->second.end()) {
+            return fieldIt->second;
+        }
+    }
+    
+    // Get type definition
+    const TypeSymbol* typeSymbol = getTypeSymbol(typeName);
+    if (!typeSymbol) {
+        return 0;
+    }
+    
+    size_t currentOffset = 0;
+    
+    // Calculate offset for each field
+    for (const auto& field : typeSymbol->fields) {
+        size_t fieldSize = 0;
+        size_t fieldAlignment = 0;
+        
+        if (field.isBuiltIn) {
+            switch (field.builtInType) {
+                case VariableType::INT:
+                    fieldSize = 4;
+                    fieldAlignment = 4;
+                    break;
+                case VariableType::FLOAT:
+                case VariableType::DOUBLE:
+                    fieldSize = 8;
+                    fieldAlignment = 8;
+                    break;
+                case VariableType::STRING:
+                case VariableType::UNICODE:
+                    fieldSize = 8;
+                    fieldAlignment = 8;
+                    break;
+                default:
+                    fieldSize = 8;
+                    fieldAlignment = 8;
+                    break;
+            }
+        } else {
+            fieldSize = calculateTypeSize(field.typeName);
+            fieldAlignment = 8;
+        }
+        
+        // Apply alignment padding before this field
+        if (currentOffset % fieldAlignment != 0) {
+            currentOffset += fieldAlignment - (currentOffset % fieldAlignment);
+        }
+        
+        // Cache this field's offset
+        m_fieldOffsets[typeName][field.name] = currentOffset;
+        
+        // If this is the field we're looking for, return it
+        if (field.name == fieldName) {
+            return currentOffset;
+        }
+        
+        // Move to next field
+        currentOffset += fieldSize;
+    }
+    
+    // Field not found
+    return 0;
+}
+
+size_t QBECodeGenerator::getFieldOffset(const std::string& typeName, const std::vector<std::string>& memberChain) {
+    if (memberChain.empty()) {
+        return 0;
+    }
+    
+    size_t totalOffset = 0;
+    std::string currentTypeName = typeName;
+    
+    for (const auto& memberName : memberChain) {
+        // Get offset of this member in current type
+        size_t memberOffset = calculateFieldOffset(currentTypeName, memberName);
+        totalOffset += memberOffset;
+        
+        // Get the field to determine if it's a nested type
+        const TypeSymbol* typeSymbol = getTypeSymbol(currentTypeName);
+        if (typeSymbol) {
+            const TypeSymbol::Field* field = typeSymbol->findField(memberName);
+            if (field && !field->isBuiltIn) {
+                // This is a nested type, continue with it
+                currentTypeName = field->typeName;
+            }
+        }
+    }
+    
+    return totalOffset;
+}
+
+std::string QBECodeGenerator::inferMemberAccessType(const Expression* expr) {
+    if (!expr) return "";
+    
+    ASTNodeType nodeType = expr->getType();
+    
+    if (nodeType == ASTNodeType::EXPR_VARIABLE) {
+        // Base variable - look up its type
+        const VariableExpression* varExpr = static_cast<const VariableExpression*>(expr);
+        return getVariableTypeName(varExpr->name);
+    } else if (nodeType == ASTNodeType::EXPR_MEMBER_ACCESS) {
+        // Nested member access - recursively resolve
+        const MemberAccessExpression* memberExpr = static_cast<const MemberAccessExpression*>(expr);
+        std::string baseTypeName = inferMemberAccessType(memberExpr->object.get());
+        
+        if (baseTypeName.empty()) {
+            return "";
+        }
+        
+        // Look up the member in the base type
+        const TypeSymbol* typeSymbol = getTypeSymbol(baseTypeName);
+        if (typeSymbol) {
+            const TypeSymbol::Field* field = typeSymbol->findField(memberExpr->memberName);
+            if (field) {
+                if (field->isBuiltIn) {
+                    // Built-in type, no further nesting
+                    return "";
+                } else {
+                    // Return the nested type name
+                    return field->typeName;
+                }
+            }
+        }
+    } else if (nodeType == ASTNodeType::EXPR_ARRAY_ACCESS) {
+        // Array element - if it's an array of UDTs, return the UDT type
+        const ArrayAccessExpression* arrayExpr = static_cast<const ArrayAccessExpression*>(expr);
+        
+        if (m_symbols) {
+            auto it = m_symbols->arrays.find(arrayExpr->name);
+            if (it != m_symbols->arrays.end()) {
+                if (it->second.type == VariableType::USER_DEFINED && !it->second.asTypeName.empty()) {
+                    return it->second.asTypeName;
+                }
+            }
+        }
+    }
+    
+    return "";
+}
+
+std::string QBECodeGenerator::getVariableTypeName(const std::string& varName) {
+    // Check cache first
+    auto it = m_varTypeNames.find(varName);
+    if (it != m_varTypeNames.end()) {
+        return it->second;
+    }
+    
+    // Look up in symbol table
+    if (m_symbols) {
+        auto varIt = m_symbols->variables.find(varName);
+        if (varIt != m_symbols->variables.end()) {
+            if (varIt->second.type == VariableType::USER_DEFINED) {
+                m_varTypeNames[varName] = varIt->second.typeName;
+                return varIt->second.typeName;
+            }
+        }
+    }
+    
+    return "";
+}
+
+const TypeSymbol* QBECodeGenerator::getTypeSymbol(const std::string& typeName) {
+    if (!m_symbols) {
+        return nullptr;
+    }
+    
+    auto it = m_symbols->types.find(typeName);
+    if (it != m_symbols->types.end()) {
+        return &it->second;
+    }
+    
+    return nullptr;
 }
 
 } // namespace FasterBASIC

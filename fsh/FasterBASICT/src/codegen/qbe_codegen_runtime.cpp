@@ -215,7 +215,7 @@ std::string QBECodeGenerator::emitStringToDouble(const std::string& value) {
 
 std::string QBECodeGenerator::emitIntToDouble(const std::string& value) {
     std::string result = allocTemp("d");
-    emit("    " + result + " =d swtof " + value + "\n");
+    emit("    " + result + " =d extsw " + value + "\n");
     m_stats.instructionsGenerated++;
     return result;
 }

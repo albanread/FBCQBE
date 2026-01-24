@@ -95,8 +95,9 @@ private:
     std::unordered_map<std::string, int> m_variables;      // varName -> slot
     std::unordered_map<std::string, std::string> m_varTypes; // varName -> QBE type
     std::unordered_map<std::string, int> m_arrays;         // arrayName -> id
+    std::unordered_map<std::string, std::string> m_arrayElementTypes; // arrayName -> typeName (for UDT arrays)
     std::unordered_map<int, std::string> m_labels;         // blockId/lineNum -> label
-    std::unordered_map<std::string, int> m_stringLiterals; // literal -> id
+    std::unordered_map<std::string, int> m_stringLiterals; // literal -> id</parameter>
     
     // Temporary variable counter
     int m_tempCounter = 0;
@@ -137,6 +138,24 @@ private:
     
     // Data section strings
     std::vector<std::string> m_dataStrings;
+    
+    // User-Defined Types (UDT) support
+    std::unordered_map<std::string, size_t> m_typeSizes;        // typeName -> size in bytes
+    std::unordered_map<std::string, std::unordered_map<std::string, size_t>> m_fieldOffsets;  // typeName -> (fieldName -> offset)
+    std::unordered_map<std::string, std::string> m_varTypeNames; // varName -> typeName (for USER_DEFINED types)
+    
+    // Function context for local array cleanup
+    struct FunctionContext {
+        std::string name;
+        std::vector<std::string> localArrays;  // Heap-allocated arrays to free on exit
+        std::string tidyExitLabel;             // Label for cleanup block
+        VariableType returnType;
+        bool isSub;                            // SUB vs FUNCTION
+        
+        FunctionContext(const std::string& n, VariableType ret, bool sub)
+            : name(n), returnType(ret), isSub(sub), tidyExitLabel("") {}
+    };
+    std::stack<FunctionContext> m_functionStack;
     
     // =============================================================================
     // Main Generation Functions (qbe_codegen_main.cpp)
@@ -193,6 +212,7 @@ private:
     std::string emitUnaryOp(const UnaryExpression* expr);
     std::string emitFunctionCall(const FunctionCallExpression* expr);
     std::string emitArrayAccessExpr(const ArrayAccessExpression* expr);
+    std::string emitMemberAccessExpr(const MemberAccessExpression* expr);
     
     // Helper for function mapping
     std::string mapToRuntimeFunction(const std::string& basicFunc);
@@ -265,6 +285,7 @@ private:
     std::string makeLabel(const std::string& prefix);
     std::string getBlockLabel(int blockId);
     std::string getLineLabel(int lineNumber);
+    std::string getFunctionExitLabel();  // Returns tidy_exit for functions, exit for main
     
     // Type mapping
     std::string getQBEType(VariableType type);
@@ -310,6 +331,14 @@ private:
     bool isIntegerType(VariableType type);
     bool isFloatingType(VariableType type);
     bool isStringType(VariableType type);
+    
+    // User-Defined Type helpers
+    size_t calculateTypeSize(const std::string& typeName);
+    size_t calculateFieldOffset(const std::string& typeName, const std::string& fieldName);
+    size_t getFieldOffset(const std::string& typeName, const std::vector<std::string>& memberChain);
+    std::string inferMemberAccessType(const Expression* expr);
+    std::string getVariableTypeName(const std::string& varName);
+    const TypeSymbol* getTypeSymbol(const std::string& typeName);
 };
 
 // =============================================================================

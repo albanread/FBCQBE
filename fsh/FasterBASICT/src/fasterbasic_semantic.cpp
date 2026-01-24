@@ -387,6 +387,24 @@ void SemanticAnalyzer::collectDimStatements(Program& program) {
             if (stmt->getType() == ASTNodeType::STMT_DIM) {
                 processDimStatement(static_cast<const DimStatement&>(*stmt));
             }
+            // Also process DIM statements inside FUNCTION bodies
+            else if (stmt->getType() == ASTNodeType::STMT_FUNCTION) {
+                const FunctionStatement* funcStmt = static_cast<const FunctionStatement*>(stmt.get());
+                for (const auto& bodyStmt : funcStmt->body) {
+                    if (bodyStmt->getType() == ASTNodeType::STMT_DIM) {
+                        processDimStatement(static_cast<const DimStatement&>(*bodyStmt));
+                    }
+                }
+            }
+            // Also process DIM statements inside SUB bodies
+            else if (stmt->getType() == ASTNodeType::STMT_SUB) {
+                const SubStatement* subStmt = static_cast<const SubStatement*>(stmt.get());
+                for (const auto& bodyStmt : subStmt->body) {
+                    if (bodyStmt->getType() == ASTNodeType::STMT_DIM) {
+                        processDimStatement(static_cast<const DimStatement&>(*bodyStmt));
+                    }
+                }
+            }
         }
     }
 }
@@ -575,6 +593,9 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
         return;
     }
     
+    // Set current function scope for tracking local symbols
+    m_currentFunctionName = stmt.functionName;
+    
     FunctionSymbol sym;
     sym.name = stmt.functionName;
     sym.parameters = stmt.parameters;
@@ -618,7 +639,7 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
             // Has type suffix
             paramType = inferTypeFromSuffix(stmt.parameterTypes[i]);
         } else {
-            paramType = VariableType::FLOAT;  // Default type
+            paramType = VariableType::DOUBLE;  // Default type (DOUBLE, not FLOAT)
         }
         
         sym.parameterTypes.push_back(paramType);
@@ -660,6 +681,19 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
     }
     
     m_symbolTable.functions[stmt.functionName] = sym;
+    
+    // Add function name as a variable (for return value assignment)
+    VariableSymbol returnVar;
+    returnVar.name = stmt.functionName;
+    returnVar.type = sym.returnType;
+    returnVar.typeName = sym.returnTypeName;
+    returnVar.isDeclared = true;
+    returnVar.firstUse = stmt.location;
+    returnVar.functionScope = stmt.functionName;  // Mark as belonging to this function
+    m_symbolTable.variables[stmt.functionName] = returnVar;
+    
+    // Clear current function scope
+    m_currentFunctionName = "";
 }
 
 void SemanticAnalyzer::processSubStatement(const SubStatement& stmt) {
@@ -670,6 +704,9 @@ void SemanticAnalyzer::processSubStatement(const SubStatement& stmt) {
               stmt.location);
         return;
     }
+    
+    // Set current function scope for tracking local symbols
+    m_currentFunctionName = stmt.subName;
     
     FunctionSymbol sym;
     sym.name = stmt.subName;
@@ -715,7 +752,7 @@ void SemanticAnalyzer::processSubStatement(const SubStatement& stmt) {
             // Has type suffix
             paramType = inferTypeFromSuffix(stmt.parameterTypes[i]);
         } else {
-            paramType = VariableType::FLOAT;  // Default type
+            paramType = VariableType::DOUBLE;  // Default type (DOUBLE, not FLOAT)
         }
         
         sym.parameterTypes.push_back(paramType);
@@ -723,6 +760,9 @@ void SemanticAnalyzer::processSubStatement(const SubStatement& stmt) {
     }
     
     m_symbolTable.functions[stmt.subName] = sym;
+    
+    // Clear current function scope
+    m_currentFunctionName = "";
 }
 
 void SemanticAnalyzer::collectDataStatements(Program& program) {
@@ -784,10 +824,86 @@ void SemanticAnalyzer::collectDataStatements(Program& program) {
 }
 
 void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
-    // TODO: Add support for DIM var AS TypeName in future enhancement
-    // For now, process arrays as usual
-    
     for (const auto& arrayDim : stmt.arrays) {
+        // Check if this is a scalar user-defined type declaration
+        // DIM P AS Point (no dimensions) should create a variable, not an array
+        if (arrayDim.dimensions.empty() && arrayDim.hasAsType && !arrayDim.asTypeName.empty()) {
+            // This is a scalar UDT variable declaration (inside function or global)
+            if (m_symbolTable.variables.find(arrayDim.name) != m_symbolTable.variables.end()) {
+                error(SemanticErrorType::ARRAY_REDECLARED,
+                      "Variable '" + arrayDim.name + "' already declared",
+                      stmt.location);
+                continue;
+            }
+            
+            // Check if the type exists
+            if (m_symbolTable.types.find(arrayDim.asTypeName) == m_symbolTable.types.end()) {
+                error(SemanticErrorType::UNDEFINED_TYPE,
+                      "Type '" + arrayDim.asTypeName + "' not defined",
+                      stmt.location);
+                continue;
+            }
+            
+            VariableSymbol sym;
+            sym.name = arrayDim.name;
+            sym.type = VariableType::USER_DEFINED;
+            sym.typeName = arrayDim.asTypeName;
+            sym.isDeclared = true;
+            sym.firstUse = stmt.location;
+            sym.functionScope = m_currentFunctionName;  // Track function scope
+            
+            m_symbolTable.variables[arrayDim.name] = sym;
+            continue;
+        }
+        
+        // Check if this is a scalar variable of a built-in type
+        // DIM x AS INTEGER or DIM x% (no dimensions) should create a variable, not an array
+        if (arrayDim.dimensions.empty()) {
+            // This is a scalar variable declaration
+            if (m_symbolTable.variables.find(arrayDim.name) != m_symbolTable.variables.end()) {
+                error(SemanticErrorType::ARRAY_REDECLARED,
+                      "Variable '" + arrayDim.name + "' already declared",
+                      stmt.location);
+                continue;
+            }
+            
+            VariableSymbol sym;
+            sym.name = arrayDim.name;
+            
+            // Infer type from suffix or explicit AS type
+            if (arrayDim.hasAsType && !arrayDim.asTypeName.empty()) {
+                // AS INTEGER, AS DOUBLE, etc. but check if it's actually a UDT
+                // (UDT case was already handled above, so this must be built-in)
+                // Try to map type name to VariableType
+                std::string typeName = arrayDim.asTypeName;
+                if (typeName == "INTEGER" || typeName == "INT") {
+                    sym.type = VariableType::INT;
+                } else if (typeName == "DOUBLE") {
+                    sym.type = VariableType::DOUBLE;
+                } else if (typeName == "FLOAT" || typeName == "SINGLE") {
+                    sym.type = VariableType::FLOAT;
+                } else if (typeName == "STRING") {
+                    sym.type = VariableType::STRING;
+                } else {
+                    // Unknown built-in type name, default to DOUBLE
+                    sym.type = VariableType::DOUBLE;
+                }
+            } else {
+                // Infer from suffix or name
+                sym.type = inferTypeFromSuffix(arrayDim.typeSuffix);
+                if (sym.type == VariableType::UNKNOWN) {
+                    sym.type = inferTypeFromName(arrayDim.name);
+                }
+            }
+            
+            sym.isDeclared = true;
+            sym.firstUse = stmt.location;
+            sym.functionScope = m_currentFunctionName;  // Track function scope
+            
+            m_symbolTable.variables[arrayDim.name] = sym;
+            continue;
+        }
+        
         // Check if already declared
         if (m_symbolTable.arrays.find(arrayDim.name) != m_symbolTable.arrays.end()) {
             error(SemanticErrorType::ARRAY_REDECLARED,
@@ -854,17 +970,32 @@ void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
         
         ArraySymbol sym;
         sym.name = arrayDim.name;
-        sym.type = inferTypeFromSuffix(arrayDim.typeSuffix);
-        if (sym.type == VariableType::UNKNOWN) {
-            sym.type = inferTypeFromName(arrayDim.name);
+        
+        // Check if this is a UDT array (has AS TypeName)
+        if (arrayDim.hasAsType && !arrayDim.asTypeName.empty()) {
+            // Verify the type exists
+            if (m_symbolTable.types.find(arrayDim.asTypeName) == m_symbolTable.types.end()) {
+                error(SemanticErrorType::UNDEFINED_TYPE,
+                      "Type '" + arrayDim.asTypeName + "' not defined",
+                      stmt.location);
+                continue;
+            }
+            sym.type = VariableType::USER_DEFINED;
+            sym.asTypeName = arrayDim.asTypeName;
+        } else {
+            // Regular typed array - infer from suffix or name
+            sym.type = inferTypeFromSuffix(arrayDim.typeSuffix);
+            if (sym.type == VariableType::UNKNOWN) {
+                sym.type = inferTypeFromName(arrayDim.name);
+            }
         }
+        
         sym.dimensions = dimensions;
         sym.isDeclared = true;
         sym.declaration = stmt.location;
         // Only store totalSize if all dimensions are known at compile time
         sym.totalSize = hasUnknownDimensions ? -1 : totalSize;
-        // Store the AS TypeName for user-defined types
-        sym.asTypeName = arrayDim.asTypeName;
+        sym.functionScope = m_currentFunctionName;  // Track function scope
         
         m_symbolTable.arrays[arrayDim.name] = sym;
     }
@@ -2518,7 +2649,7 @@ VariableType SemanticAnalyzer::inferTypeFromSuffix(TokenType suffix) {
 }
 
 VariableType SemanticAnalyzer::inferTypeFromName(const std::string& name) {
-    if (name.empty()) return VariableType::FLOAT;
+    if (name.empty()) return VariableType::DOUBLE;  // Default numeric type is DOUBLE
     
     // Check for normalized suffixes first (e.g., A_STRING, B_INT, C_DOUBLE)
     if (name.length() > 7 && name.substr(name.length() - 7) == "_STRING") {
@@ -2540,7 +2671,7 @@ VariableType SemanticAnalyzer::inferTypeFromName(const std::string& name) {
         case '%': return VariableType::INT;
         case '!': return VariableType::FLOAT;
         case '#': return VariableType::DOUBLE;
-        default:  return VariableType::FLOAT;  // Default in BASIC
+        default:  return VariableType::DOUBLE;  // Default numeric type is DOUBLE (like Lua)
     }
 }
 

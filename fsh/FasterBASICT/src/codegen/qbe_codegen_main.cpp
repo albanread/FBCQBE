@@ -154,7 +154,7 @@ void QBECodeGenerator::emitMainFunction() {
     m_stats.labelsGenerated++;
     
     emitComment("Initialize runtime");
-    emit("    call $basic_init()\n");
+    emit("    call $basic_runtime_init()\n");
     m_stats.instructionsGenerated++;
     emit("\n");
     
@@ -174,11 +174,18 @@ void QBECodeGenerator::emitMainFunction() {
             m_varTypes[name] = qbeType;
             
             // Initialize to zero
-            if (varSym.type == VariableType::STRING) {
+            if (varSym.type == VariableType::USER_DEFINED) {
+                // User-defined type - allocate memory on stack
+                size_t typeSize = calculateTypeSize(varSym.typeName);
+                emit("    " + varRef + " =l alloc8 " + std::to_string(typeSize) + "\n");
+                m_varTypes[name] = "l";  // UDTs are pointers
+                m_varTypeNames[name] = varSym.typeName;  // Cache type name
+            } else if (varSym.type == VariableType::STRING) {
                 emit("    " + varRef + " =l call $str_alloc(w 0)\n");
             } else if (varSym.type == VariableType::INT) {
                 emit("    " + varRef + " =w copy 0\n");
-            } else if (varSym.type == VariableType::DOUBLE) {
+            } else if (varSym.type == VariableType::DOUBLE || varSym.type == VariableType::FLOAT) {
+                // FLOAT and DOUBLE both map to QBE 'd' (64-bit double)
                 emit("    " + varRef + " =d copy d_0.0\n");
             }
             m_stats.instructionsGenerated++;
@@ -189,7 +196,30 @@ void QBECodeGenerator::emitMainFunction() {
         for (const auto& [name, arraySym] : m_symbols->arrays) {
             std::string arrayRef = "%arr_" + name;
             m_arrays[name] = m_arrays.size();
-            emit("    " + arrayRef + " =l copy 0\n");
+            
+            // Check if this is a UDT array with known dimensions
+            if (arraySym.type == VariableType::USER_DEFINED && 
+                !arraySym.asTypeName.empty() && 
+                arraySym.totalSize > 0) {
+                // UDT array - allocate on heap with malloc
+                size_t elementSize = calculateTypeSize(arraySym.asTypeName);
+                size_t totalSize = elementSize * arraySym.totalSize;
+                
+                std::string sizeTemp = allocTemp("l");
+                emit("    " + sizeTemp + " =l copy " + std::to_string(totalSize) + "\n");
+                emit("    " + arrayRef + " =l call $malloc(l " + sizeTemp + ")\n");
+                
+                // Store the element type name for later access
+                m_arrayElementTypes[name] = arraySym.asTypeName;
+                
+                emitComment("Array " + name + ": " + std::to_string(arraySym.totalSize) + 
+                           " elements of " + arraySym.asTypeName + 
+                           " (" + std::to_string(elementSize) + " bytes each, heap-allocated)");
+            } else {
+                // Regular array or dynamic array - initialize to null, will be created at DIM
+                emit("    " + arrayRef + " =l copy 0\n");
+            }
+            
             m_stats.instructionsGenerated++;
             m_stats.arraysUsed++;
         }
@@ -218,7 +248,21 @@ void QBECodeGenerator::emitMainFunction() {
     emit("@exit\n");
     m_stats.labelsGenerated++;
     emitComment("Cleanup and return");
-    emit("    call $basic_cleanup()\n");
+    
+    // Free all heap-allocated UDT arrays
+    if (m_symbols) {
+        for (const auto& [name, arraySym] : m_symbols->arrays) {
+            if (arraySym.type == VariableType::USER_DEFINED && 
+                !arraySym.asTypeName.empty() && 
+                arraySym.totalSize > 0) {
+                std::string arrayRef = "%arr_" + name;
+                emit("    call $free(l " + arrayRef + ")\n");
+                m_stats.instructionsGenerated++;
+            }
+        }
+    }
+    
+    emit("    call $basic_runtime_cleanup()\n");
     emit("    ret 0\n");
     m_stats.instructionsGenerated += 2;
     
@@ -234,9 +278,30 @@ void QBECodeGenerator::enterFunctionContext(const std::string& functionName) {
     m_currentFunction = functionName;
     m_localVariables.clear();
     m_sharedVariables.clear();
+    
+    // Create function context for local array tracking
+    // Determine if SUB or FUNCTION and return type
+    bool isSub = true;  // Default to SUB
+    VariableType returnType = VariableType::VOID;
+    
+    // Look up function in symbol table to get actual return type
+    if (m_symbols && m_symbols->functions.find(functionName) != m_symbols->functions.end()) {
+        const auto& funcSym = m_symbols->functions.at(functionName);
+        returnType = funcSym.returnType;
+        isSub = (returnType == VariableType::VOID);
+    }
+    
+    FunctionContext ctx(functionName, returnType, isSub);
+    ctx.tidyExitLabel = "tidy_exit_" + functionName;
+    m_functionStack.push(ctx);
 }
 
 void QBECodeGenerator::exitFunctionContext() {
+    // Pop function context (cleanup happens in emitFunctionEpilogue)
+    if (!m_functionStack.empty()) {
+        m_functionStack.pop();
+    }
+    
     m_inFunction = false;
     m_currentFunction = "";
     m_localVariables.clear();
@@ -344,6 +409,24 @@ void QBECodeGenerator::emitFunction(const std::string& functionName) {
     // Emit each basic block
     for (const auto& block : m_cfg->blocks) {
         emitBlock(block.get());
+    }
+    
+    // Tidy exit block - cleanup local arrays, then fall through to exit
+    if (!m_functionStack.empty()) {
+        emit("@" + m_functionStack.top().tidyExitLabel + "\n");
+        m_stats.labelsGenerated++;
+        emitComment("Cleanup local arrays");
+        
+        // Free all local heap-allocated arrays
+        for (const auto& arrayName : m_functionStack.top().localArrays) {
+            std::string arrayRef = "%arr_" + arrayName;
+            emit("    call $free(l " + arrayRef + ")\n");
+            m_stats.instructionsGenerated++;
+        }
+        
+        if (!m_functionStack.top().localArrays.empty()) {
+            emitComment("Fall through to exit");
+        }
     }
     
     // Exit block - return the function-name variable (or 0 for SUBs)
@@ -508,8 +591,8 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
     }
     
     if (block->successors.empty()) {
-        // No successors - jump to exit
-        emit("    jmp @exit\n");
+        // No successors - jump to exit (tidy_exit for functions)
+        emit("    jmp @" + getFunctionExitLabel() + "\n");
         m_stats.instructionsGenerated++;
     } else if (block->successors.size() == 1) {
         // Single successor - unconditional jump (if not fallthrough to next block)

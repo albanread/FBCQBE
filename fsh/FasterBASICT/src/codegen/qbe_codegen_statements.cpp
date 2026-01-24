@@ -118,6 +118,16 @@ void QBECodeGenerator::emitStatement(const Statement* stmt) {
             emitShared(static_cast<const SharedStatement*>(stmt));
             break;
             
+        case ASTNodeType::STMT_TYPE:
+            // TYPE declarations are pure compile-time metadata
+            // No runtime code needed - handled by semantic analyzer
+            break;
+            
+        case ASTNodeType::STMT_CONSTANT:
+            // CONSTANT declarations are pure compile-time metadata
+            // No runtime code needed - values inlined at use sites
+            break;
+            
         default:
             emitComment("TODO: Unhandled statement type " + std::to_string(static_cast<int>(nodeType)));
             break;
@@ -197,32 +207,154 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
     // Evaluate right-hand side
     std::string valueTemp = emitExpression(stmt->value.get());
     
-    // Check if this is array assignment or variable assignment
-    if (stmt->indices.empty()) {
+    // Check if this is member assignment (UDT)
+    if (!stmt->memberChain.empty()) {
+        // Member assignment: Player.Position.X = 100 or points(0).x = 5
+        
+        std::string baseRef;
+        std::string currentTypeName;
+        
+        // 1. Check if this is an array element or a simple variable
+        if (!stmt->indices.empty()) {
+            // Array element with member access: points(0).x = 5
+            
+            // Get array element pointer using array access logic
+            auto elemTypeIt = m_arrayElementTypes.find(stmt->variable);
+            if (elemTypeIt == m_arrayElementTypes.end()) {
+                emitComment("ERROR: Array element member access on non-UDT array: " + stmt->variable);
+                return;
+            }
+            
+            // Evaluate array indices
+            std::vector<std::string> indexTemps;
+            for (const auto& indexExpr : stmt->indices) {
+                std::string indexTemp = emitExpression(indexExpr.get());
+                VariableType indexType = inferExpressionType(indexExpr.get());
+                if (indexType != VariableType::INT) {
+                    indexTemp = promoteToType(indexTemp, indexType, VariableType::INT);
+                }
+                indexTemps.push_back(indexTemp);
+            }
+            
+            // For now, only support 1D arrays
+            if (indexTemps.size() != 1) {
+                emitComment("ERROR: Multi-dimensional UDT arrays not yet supported");
+                return;
+            }
+            
+            // Compute element address using pointer arithmetic
+            std::string arrayRef = getArrayRef(stmt->variable);
+            currentTypeName = elemTypeIt->second;
+            size_t elementSize = calculateTypeSize(currentTypeName);
+            
+            std::string indexTemp = indexTemps[0];
+            std::string indexLong = allocTemp("l");
+            emit("    " + indexLong + " =l extsw " + indexTemp + "\n");
+            m_stats.instructionsGenerated++;
+            
+            std::string offsetTemp = allocTemp("l");
+            emit("    " + offsetTemp + " =l mul " + indexLong + ", " + std::to_string(elementSize) + "\n");
+            m_stats.instructionsGenerated++;
+            
+            baseRef = allocTemp("l");
+            emit("    " + baseRef + " =l add " + arrayRef + ", " + offsetTemp + "\n");
+            m_stats.instructionsGenerated++;
+        } else {
+            // Simple variable member access: Player.X = 100
+            baseRef = getVariableRef(stmt->variable);
+            VariableType baseType = getVariableType(stmt->variable);
+            
+            if (baseType != VariableType::USER_DEFINED) {
+                emitComment("ERROR: Member access on non-UDT variable: " + stmt->variable);
+                return;
+            }
+            
+            currentTypeName = getVariableTypeName(stmt->variable);
+            if (currentTypeName.empty()) {
+                emitComment("ERROR: Could not determine type of variable: " + stmt->variable);
+                return;
+            }
+        }
+        
+        // 3. Walk member chain to compute final address
+        std::string currentPtr = baseRef;
+        
+        for (size_t i = 0; i < stmt->memberChain.size(); ++i) {
+            const std::string& memberName = stmt->memberChain[i];
+            size_t offset = calculateFieldOffset(currentTypeName, memberName);
+            
+            std::string nextPtr = allocTemp("l");
+            if (offset == 0) {
+                emit("    " + nextPtr + " =l copy " + currentPtr + "\n");
+            } else {
+                emit("    " + nextPtr + " =l add " + currentPtr + ", " + std::to_string(offset) + "\n");
+            }
+            m_stats.instructionsGenerated++;
+            currentPtr = nextPtr;
+            
+            // Update type for next iteration (in case of nested UDTs)
+            const TypeSymbol* typeSym = getTypeSymbol(currentTypeName);
+            if (typeSym) {
+                const TypeSymbol::Field* field = typeSym->findField(memberName);
+                if (field && !field->isBuiltIn) {
+                    currentTypeName = field->typeName;
+                }
+            }
+        }
+        
+        // 4. Get final field type
+        const TypeSymbol* finalTypeSym = getTypeSymbol(currentTypeName);
+        if (!finalTypeSym) {
+            emitComment("ERROR: Type not found: " + currentTypeName);
+            return;
+        }
+        
+        const TypeSymbol::Field* finalField = finalTypeSym->findField(stmt->memberChain.back());
+        if (!finalField) {
+            emitComment("ERROR: Field not found: " + stmt->memberChain.back());
+            return;
+        }
+        
+        VariableType fieldType = finalField->builtInType;
+        
+        // 5. Type conversion if needed
+        VariableType exprType = inferExpressionType(stmt->value.get());
+        if (fieldType != exprType) {
+            valueTemp = promoteToType(valueTemp, exprType, fieldType);
+        }
+        
+        // 6. Store value
+        std::string qbeType = getQBEType(fieldType);
+        if (qbeType == "w") {
+            emit("    storew " + valueTemp + ", " + currentPtr + "\n");
+        } else if (qbeType == "d") {
+            emit("    stored " + valueTemp + ", " + currentPtr + "\n");
+        } else if (qbeType == "l") {
+            emit("    storel " + valueTemp + ", " + currentPtr + "\n");
+        } else {
+            // Default to word
+            emit("    storew " + valueTemp + ", " + currentPtr + "\n");
+        }
+        
+        m_stats.instructionsGenerated++;
+    } else if (stmt->indices.empty()) {
         // Simple variable assignment
         std::string varRef = getVariableRef(stmt->variable);
         VariableType varType = getVariableType(stmt->variable);
         std::string qbeType = getQBEType(varType);
         
-        // QBE requires explicit type conversions
-        // Always convert int literals to double when assigning to double variables
-        std::string convertedValue = valueTemp;
+        // Infer the type of the expression value
+        VariableType exprType = inferExpressionType(stmt->value.get());
         
-        // Check if we need int->double conversion
-        // If target is double and source looks like int (number literal, binary op result, etc.)
-        if (qbeType == "d") {
-            // Always convert to double - this handles number literals and int expressions
-            std::string convertTemp = allocTemp("d");
-            emit("    " + convertTemp + " =d swtof " + valueTemp + "\n");
-            convertedValue = convertTemp;
-            m_stats.instructionsGenerated++;
-        } else if (qbeType == "w" && stmt->value->getType() == ASTNodeType::EXPR_FUNCTION_CALL) {
-            // May need double->int conversion (truncate)
-            // For now just copy - will fix if needed
-            convertedValue = valueTemp;
+        // Convert value to match variable type if needed
+        if (varType != exprType) {
+            // promoteToType emits the conversion and returns the result temp
+            std::string convertedValue = promoteToType(valueTemp, exprType, varType);
+            emit("    " + varRef + " =" + qbeType + " copy " + convertedValue + "\n");
+        } else {
+            // Types match, just copy
+            emit("    " + varRef + " =" + qbeType + " copy " + valueTemp + "\n");
         }
-        
-        emit("    " + varRef + " =" + qbeType + " copy " + convertedValue + "\n");
         m_stats.instructionsGenerated++;
     } else {
         // Array element assignment
@@ -333,6 +465,11 @@ void QBECodeGenerator::emitFor(const ForStatement* stmt) {
     
     // Initialize loop variable
     std::string startTemp = emitExpression(stmt->start.get());
+    
+    // Coerce start value to INTEGER (FOR loop variables are ALWAYS integers)
+    VariableType startType = inferExpressionType(stmt->start.get());
+    startTemp = promoteToType(startTemp, startType, VariableType::INT);
+    
     std::string varRef = getVariableRef(stmt->variable);
     emit("    " + varRef + " =w copy " + startTemp + "\n");
     m_stats.instructionsGenerated++;
@@ -341,6 +478,10 @@ void QBECodeGenerator::emitFor(const ForStatement* stmt) {
     std::string stepTemp;
     if (stmt->step) {
         stepTemp = emitExpression(stmt->step.get());
+        
+        // Coerce step value to INTEGER (ALWAYS)
+        VariableType stepType = inferExpressionType(stmt->step.get());
+        stepTemp = promoteToType(stepTemp, stepType, VariableType::INT);
     } else {
         stepTemp = allocTemp("w");
         emit("    " + stepTemp + " =w copy 1\n");
@@ -354,6 +495,11 @@ void QBECodeGenerator::emitFor(const ForStatement* stmt) {
     
     // Emit end value (evaluate once and store)
     std::string endTemp = emitExpression(stmt->end.get());
+    
+    // Coerce end value to INTEGER (ALWAYS)
+    VariableType endType = inferExpressionType(stmt->end.get());
+    endTemp = promoteToType(endTemp, endType, VariableType::INT);
+    
     std::string endVar = "%end_" + stmt->variable;
     emit("    " + endVar + " =w copy " + endTemp + "\n");
     m_stats.instructionsGenerated++;
@@ -526,8 +672,8 @@ void QBECodeGenerator::emitReturn(const ReturnStatement* stmt) {
             m_stats.instructionsGenerated++;
         }
         
-        // Jump to function exit
-        emit("    jmp @exit\n");
+        // Jump to function exit (tidy_exit for cleanup)
+        emit("    jmp @" + getFunctionExitLabel() + "\n");
         m_stats.instructionsGenerated++;
         m_lastStatementWasTerminator = true;
     } else {
@@ -547,17 +693,95 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
     for (const auto& arrayDecl : stmt->arrays) {
         std::string arrayName = arrayDecl.name;
         
-        // Evaluate dimension expressions
-        std::vector<std::string> dimTemps;
-        for (const auto& dimExpr : arrayDecl.dimensions) {
-            dimTemps.push_back(emitExpression(dimExpr.get()));
+        // Skip scalar variables (DIM x AS INTEGER, DIM p AS Point with no dimensions)
+        // These are variables, not arrays
+        if (arrayDecl.dimensions.empty()) {
+            emitComment("Scalar variable " + arrayName + " (no array allocation needed)");
+            continue;
         }
         
-        // Create array
-        std::string arrayPtr = emitArrayCreate(arrayName, dimTemps);
+        // Check if this is a UDT array that was already allocated on the heap (global scope only)
+        // Local arrays in functions need to be allocated here
+        bool isLocalArray = !m_functionStack.empty();
+        auto elemTypeIt = m_arrayElementTypes.find(arrayName);
+        if (!isLocalArray && elemTypeIt != m_arrayElementTypes.end()) {
+            // Global UDT array - already allocated in emitMainFunction, skip runtime creation
+            emitComment("Array " + arrayName + " already allocated on heap");
+            continue;
+        }
+        
+
+        
+        // Check if this is a UDT array (needs malloc instead of runtime array_create)
+        // Check the DimStatement itself for the type (works for both global and local arrays)
+        bool isUDTArray = arrayDecl.hasAsType && !arrayDecl.asTypeName.empty();
+        std::string udtTypeName = arrayDecl.asTypeName;
+        
         std::string arrayRef = getArrayRef(arrayName);
-        emit("    " + arrayRef + " =l copy " + arrayPtr + "\n");
-        m_stats.instructionsGenerated++;
+        
+        if (isUDTArray) {
+            // UDT array - allocate with malloc
+            // Evaluate dimension expressions
+            std::vector<std::string> dimTemps;
+            for (const auto& dimExpr : arrayDecl.dimensions) {
+                dimTemps.push_back(emitExpression(dimExpr.get()));
+            }
+            
+            // For now, only support 1D arrays
+            if (dimTemps.size() != 1) {
+                emitComment("ERROR: Multi-dimensional UDT arrays not yet supported");
+                continue;
+            }
+            
+            // Calculate total size: (dimSize + 1) * elementSize
+            // BASIC arrays: DIM A(N) creates indices 0 to N inclusive
+            size_t elementSize = calculateTypeSize(udtTypeName);
+            
+            std::string dimTemp = dimTemps[0];
+            
+            // Convert dimension to INT (dimensions are evaluated as DOUBLE by default)
+            VariableType dimType = inferExpressionType(arrayDecl.dimensions[0].get());
+            if (dimType != VariableType::INT) {
+                dimTemp = promoteToType(dimTemp, dimType, VariableType::INT);
+            }
+            
+            std::string dimPlusOne = allocTemp("w");
+            emit("    " + dimPlusOne + " =w add " + dimTemp + ", 1\n");
+            m_stats.instructionsGenerated++;
+            
+            std::string dimLong = allocTemp("l");
+            emit("    " + dimLong + " =l extsw " + dimPlusOne + "\n");
+            m_stats.instructionsGenerated++;
+            
+            std::string totalSize = allocTemp("l");
+            emit("    " + totalSize + " =l mul " + dimLong + ", " + std::to_string(elementSize) + "\n");
+            m_stats.instructionsGenerated++;
+            
+            emit("    " + arrayRef + " =l call $malloc(l " + totalSize + ")\n");
+            m_stats.instructionsGenerated++;
+            
+            // Track element type for array access
+            m_arrayElementTypes[arrayName] = udtTypeName;
+            
+            emitComment("UDT array " + arrayName + " (element size: " + std::to_string(elementSize) + " bytes)");
+        } else {
+            // Regular array - use runtime array_create
+            // Evaluate dimension expressions
+            std::vector<std::string> dimTemps;
+            for (const auto& dimExpr : arrayDecl.dimensions) {
+                dimTemps.push_back(emitExpression(dimExpr.get()));
+            }
+            
+            std::string arrayPtr = emitArrayCreate(arrayName, dimTemps);
+            emit("    " + arrayRef + " =l copy " + arrayPtr + "\n");
+            m_stats.instructionsGenerated++;
+        }
+        
+        // If in function, track for cleanup
+        if (isLocalArray) {
+            m_functionStack.top().localArrays.push_back(arrayName);
+            emitComment("Local array " + arrayName + " (will be freed on function exit)");
+        }
     }
 }
 
@@ -566,7 +790,7 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
 // =============================================================================
 
 void QBECodeGenerator::emitEnd(const EndStatement* stmt) {
-    emit("    jmp @exit\n");
+    emit("    jmp @" + getFunctionExitLabel() + "\n");
     m_stats.instructionsGenerated++;
     m_lastStatementWasTerminator = true;  // END is a terminator
 }
@@ -588,9 +812,91 @@ void QBECodeGenerator::emitRem(const RemStatement* stmt) {
 void QBECodeGenerator::emitCall(const CallStatement* stmt) {
     if (!stmt) return;
     
-    // CALL statement - invoke subroutine
-    // TODO: Implement based on actual CallStatement structure
-    emitComment("CALL statement (TODO: implement)");
+    emitComment("CALL " + stmt->subName);
+    
+    // Evaluate arguments (get raw temporaries)
+    std::vector<std::string> argTemps;
+    std::vector<VariableType> argTypes;
+    for (const auto& arg : stmt->arguments) {
+        argTemps.push_back(emitExpression(arg.get()));
+        argTypes.push_back(inferExpressionType(arg.get()));
+    }
+    
+    std::string subName = stmt->subName;
+    
+    // Check if this is a user-defined SUB/FUNCTION
+    bool isUserDefined = false;
+    const ControlFlowGraph* subCFG = nullptr;
+    if (m_programCFG) {
+        subCFG = m_programCFG->getFunctionCFG(subName);
+        isUserDefined = (subCFG != nullptr);
+    }
+    
+    // Pre-convert arguments to match parameter types BEFORE emitting the call
+    std::vector<std::string> convertedArgTemps;
+    std::vector<std::string> convertedArgTypes;
+    
+    if (isUserDefined) {
+        for (size_t i = 0; i < argTemps.size(); ++i) {
+            std::string argTemp = argTemps[i];
+            VariableType argType = argTypes[i];
+            VariableType paramType = VariableType::DOUBLE;  // Default
+            
+            // Look up actual parameter type if available
+            if (subCFG && i < subCFG->parameterTypes.size()) {
+                paramType = subCFG->parameterTypes[i];
+            } else if (m_symbols) {
+                // Try to find in symbol table
+                auto it = m_symbols->functions.find(subName);
+                if (it != m_symbols->functions.end() && i < it->second.parameterTypes.size()) {
+                    paramType = it->second.parameterTypes[i];
+                }
+            }
+            
+            // Coerce argument to match parameter type (this emits conversion instructions)
+            if (argType != paramType) {
+                argTemp = promoteToType(argTemp, argType, paramType);
+            }
+            
+            convertedArgTemps.push_back(argTemp);
+            convertedArgTypes.push_back(getQBEType(paramType));
+        }
+    } else {
+        // For runtime functions, just use the argument types as-is
+        for (size_t i = 0; i < argTemps.size(); ++i) {
+            convertedArgTemps.push_back(argTemps[i]);
+            convertedArgTypes.push_back(getQBEType(argTypes[i]));
+        }
+    }
+    
+    if (isUserDefined) {
+        // Call user-defined SUB with pre-converted arguments
+        // SUBs return a dummy value (0) which we discard
+        std::string resultTemp = allocTemp("w");
+        emit("    " + resultTemp + " =w call $" + subName + "(");
+        
+        for (size_t i = 0; i < convertedArgTemps.size(); ++i) {
+            if (i > 0) emit(", ");
+            emit(convertedArgTypes[i] + " " + convertedArgTemps[i]);
+        }
+        
+        emit(")\n");
+    } else {
+        // Call runtime library function (shouldn't normally happen with CALL, but handle it)
+        std::string runtimeFunc = mapToRuntimeFunction(subName);
+        std::string resultTemp = allocTemp("w");
+        
+        emit("    " + resultTemp + " =w call $" + runtimeFunc + "(");
+        
+        for (size_t i = 0; i < convertedArgTemps.size(); ++i) {
+            if (i > 0) emit(", ");
+            emit(convertedArgTypes[i] + " " + convertedArgTemps[i]);
+        }
+        
+        emit(")\n");
+    }
+    
+    m_stats.instructionsGenerated++;
 }
 
 // =============================================================================
@@ -631,9 +937,9 @@ void QBECodeGenerator::emitExit(const ExitStatement* stmt) {
     // Check for EXIT FUNCTION/SUB first
     if (stmt->exitType == ExitStatement::ExitType::FUNCTION ||
         stmt->exitType == ExitStatement::ExitType::SUB) {
-        if (m_inFunction) {
-            // Jump to function exit block
-            emit("    jmp @exit\n");
+        if (m_inFunction && !m_functionStack.empty()) {
+            // Jump to tidy_exit for cleanup
+            emit("    jmp @" + m_functionStack.top().tidyExitLabel + "\n");
             m_stats.instructionsGenerated++;
             m_lastStatementWasTerminator = true;
         } else {

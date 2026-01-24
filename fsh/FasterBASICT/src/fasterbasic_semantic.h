@@ -36,6 +36,7 @@ enum class VariableType {
     STRING,     // String ($) - byte-based
     UNICODE,    // Unicode string ($) - codepoint array (OPTION UNICODE mode)
     VOID,       // No return value (for SUB)
+    USER_DEFINED, // User-defined type (TYPE...END TYPE)
     UNKNOWN     // Not yet determined
 };
 
@@ -45,6 +46,9 @@ inline const char* typeToString(VariableType type) {
         case VariableType::FLOAT: return "FLOAT";
         case VariableType::DOUBLE: return "DOUBLE";
         case VariableType::STRING: return "STRING";
+        case VariableType::USER_DEFINED: return "USER_DEFINED";
+        case VariableType::UNICODE: return "UNICODE";
+        case VariableType::VOID: return "VOID";
         case VariableType::UNKNOWN: return "UNKNOWN";
     }
     return "UNKNOWN";
@@ -58,18 +62,22 @@ inline const char* typeToString(VariableType type) {
 struct VariableSymbol {
     std::string name;
     VariableType type;
+    std::string typeName;   // For USER_DEFINED types (e.g., "Point", "Sprite")
     bool isDeclared;        // Explicit declaration vs implicit
     bool isUsed;
     SourceLocation firstUse;
+    std::string functionScope;  // Empty string = global, otherwise function name
 
     VariableSymbol()
-        : type(VariableType::UNKNOWN), isDeclared(false), isUsed(false) {}
+        : type(VariableType::UNKNOWN), isDeclared(false), isUsed(false), functionScope("") {}
 
     std::string toString() const {
         std::ostringstream oss;
-        oss << name << " : " << typeToString(type);
+        oss << name << ": " << typeToString(type);
+        if (type == VariableType::USER_DEFINED && !typeName.empty()) {
+            oss << " (" << typeName << ")";
+        }
         if (!isDeclared) oss << " [implicit]";
-        if (!isUsed) oss << " [unused]";
         return oss.str();
     }
 };
@@ -83,9 +91,10 @@ struct ArraySymbol {
     SourceLocation declaration;
     int totalSize;          // Product of all dimensions
     std::string asTypeName; // For user-defined types (AS TypeName)
+    std::string functionScope;  // Empty string = global, otherwise function name
 
     ArraySymbol()
-        : type(VariableType::UNKNOWN), isDeclared(false), totalSize(0) {}
+        : type(VariableType::UNKNOWN), isDeclared(false), totalSize(0), functionScope("") {}
 
     std::string toString() const {
         std::ostringstream oss;

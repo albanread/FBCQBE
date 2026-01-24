@@ -608,16 +608,37 @@ void CFGBuilder::processFunctionStatement(const FunctionStatement& stmt, BasicBl
     // Store function metadata
     funcCFG->functionName = stmt.functionName;
     funcCFG->parameters = stmt.parameters;
-    for (size_t i = 0; i < stmt.parameterTypes.size(); i++) {
-        // Convert TokenType to VariableType
-        VariableType vt = VariableType::UNKNOWN;
-        switch (stmt.parameterTypes[i]) {
-            case TokenType::TYPE_INT: vt = VariableType::INT; break;
-            case TokenType::TYPE_FLOAT: vt = VariableType::FLOAT; break;
-            case TokenType::TYPE_DOUBLE: vt = VariableType::DOUBLE; break;
-            case TokenType::TYPE_STRING: vt = VariableType::STRING; break;
-            default: break;
+    
+    // Process parameter types - check both AS types and type suffixes
+    for (size_t i = 0; i < stmt.parameters.size(); i++) {
+        VariableType vt = VariableType::DOUBLE;  // Default type
+        
+        // First check if there's an AS typename declaration
+        if (i < stmt.parameterAsTypes.size() && !stmt.parameterAsTypes[i].empty()) {
+            std::string asType = stmt.parameterAsTypes[i];
+            if (asType == "INTEGER" || asType == "INT") {
+                vt = VariableType::INT;
+            } else if (asType == "DOUBLE") {
+                vt = VariableType::DOUBLE;
+            } else if (asType == "SINGLE" || asType == "FLOAT") {
+                vt = VariableType::FLOAT;
+            } else if (asType == "STRING") {
+                vt = VariableType::STRING;
+            } else if (asType == "LONG") {
+                vt = VariableType::INT;
+            }
+            // TODO: Handle user-defined types
+        } else if (i < stmt.parameterTypes.size()) {
+            // Check type suffix
+            switch (stmt.parameterTypes[i]) {
+                case TokenType::TYPE_INT: vt = VariableType::INT; break;
+                case TokenType::TYPE_FLOAT: vt = VariableType::FLOAT; break;
+                case TokenType::TYPE_DOUBLE: vt = VariableType::DOUBLE; break;
+                case TokenType::TYPE_STRING: vt = VariableType::STRING; break;
+                default: break;
+            }
         }
+        
         funcCFG->parameterTypes.push_back(vt);
     }
     
@@ -737,16 +758,37 @@ void CFGBuilder::processSubStatement(const SubStatement& stmt, BasicBlock* curre
     // Store SUB metadata
     subCFG->functionName = stmt.subName;
     subCFG->parameters = stmt.parameters;
-    for (size_t i = 0; i < stmt.parameterTypes.size(); i++) {
-        // Convert TokenType to VariableType
-        VariableType vt = VariableType::UNKNOWN;
-        switch (stmt.parameterTypes[i]) {
-            case TokenType::TYPE_INT: vt = VariableType::INT; break;
-            case TokenType::TYPE_FLOAT: vt = VariableType::FLOAT; break;
-            case TokenType::TYPE_DOUBLE: vt = VariableType::DOUBLE; break;
-            case TokenType::TYPE_STRING: vt = VariableType::STRING; break;
-            default: break;
+    
+    // Process parameter types - check both AS types and type suffixes
+    for (size_t i = 0; i < stmt.parameters.size(); i++) {
+        VariableType vt = VariableType::DOUBLE;  // Default type
+        
+        // First check if there's an AS typename declaration
+        if (i < stmt.parameterAsTypes.size() && !stmt.parameterAsTypes[i].empty()) {
+            std::string asType = stmt.parameterAsTypes[i];
+            if (asType == "INTEGER" || asType == "INT") {
+                vt = VariableType::INT;
+            } else if (asType == "DOUBLE") {
+                vt = VariableType::DOUBLE;
+            } else if (asType == "SINGLE" || asType == "FLOAT") {
+                vt = VariableType::FLOAT;
+            } else if (asType == "STRING") {
+                vt = VariableType::STRING;
+            } else if (asType == "LONG") {
+                vt = VariableType::INT;
+            }
+            // TODO: Handle user-defined types
+        } else if (i < stmt.parameterTypes.size()) {
+            // Check type suffix
+            switch (stmt.parameterTypes[i]) {
+                case TokenType::TYPE_INT: vt = VariableType::INT; break;
+                case TokenType::TYPE_FLOAT: vt = VariableType::FLOAT; break;
+                case TokenType::TYPE_DOUBLE: vt = VariableType::DOUBLE; break;
+                case TokenType::TYPE_STRING: vt = VariableType::STRING; break;
+                default: break;
+            }
         }
+        
         subCFG->parameterTypes.push_back(vt);
     }
     subCFG->returnType = VariableType::UNKNOWN; // SUBs don't return values
