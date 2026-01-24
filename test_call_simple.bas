@@ -52,11 +52,11 @@ SUB MixedTypes(x AS INTEGER, y AS DOUBLE, s AS STRING)
     PRINT "  String: "; s
 END SUB
 
-SUB Outer(val AS INTEGER)
-    PRINT "  Outer called with "; val
-    CALL Inner(val * 2)
+SUB Outer(num AS INTEGER)
+    PRINT "  Outer called with "; num
+    CALL Inner(num * 2)
 END SUB
 
-SUB Inner(val AS INTEGER)
-    PRINT "    Inner called with "; val
+SUB Inner(num AS INTEGER)
+    PRINT "    Inner called with "; num
 END SUB

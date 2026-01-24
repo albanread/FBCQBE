@@ -1,0 +1,15 @@
+' Simple constant test
+CONSTANT MYPI = 3.14159
+CONSTANT MAXVAL = 10
+
+PRINT "MYPI = "; MYPI
+PRINT "MAXVAL = "; MAXVAL
+
+x = MYPI * 2
+PRINT "x = "; x
+
+FOR i = 1 TO MAXVAL
+    PRINT i
+NEXT i
+
+PRINT "Done"

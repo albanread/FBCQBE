@@ -1,0 +1,5 @@
+10 FUNCTION Add(X, Y)
+20   Add = X + Y
+30 END FUNCTION
+40 PRINT Add(3, 4)
+50 END
