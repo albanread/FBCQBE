@@ -214,6 +214,7 @@ private:
     std::string emitUnaryOp(const UnaryExpression* expr);
     std::string emitFunctionCall(const FunctionCallExpression* expr);
     std::string emitArrayAccessExpr(const ArrayAccessExpression* expr);
+    std::string emitArrayElementPtr(const std::string& arrayName, const std::vector<std::unique_ptr<Expression>>& indices);
     std::string emitMemberAccessExpr(const MemberAccessExpression* expr);
     
     // Helper for function mapping

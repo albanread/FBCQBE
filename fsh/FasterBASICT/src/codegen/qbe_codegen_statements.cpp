@@ -365,12 +365,27 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
         }
         m_stats.instructionsGenerated++;
     } else {
-        // Array element assignment
-        std::vector<std::string> indexTemps;
-        for (const auto& indexExpr : stmt->indices) {
-            indexTemps.push_back(emitExpression(indexExpr.get()));
+        // Array element assignment using descriptor-based approach
+        emitComment("Array assignment: " + stmt->variable + "(...) = value");
+        
+        // Get element pointer (this includes bounds checking)
+        std::string elementPtr = emitArrayElementPtr(stmt->variable, stmt->indices);
+        
+        // Determine value type and store
+        VariableType valueType = inferExpressionType(stmt->value.get());
+        
+        // Store value at element pointer
+        if (valueType == VariableType::INT) {
+            emit("    storew " + valueTemp + ", " + elementPtr + "\n");
+        } else if (valueType == VariableType::DOUBLE || valueType == VariableType::FLOAT) {
+            emit("    stored " + valueTemp + ", " + elementPtr + "\n");
+        } else if (valueType == VariableType::STRING) {
+            emit("    storel " + valueTemp + ", " + elementPtr + "\n");
+        } else {
+            // Default to word storage
+            emit("    storew " + valueTemp + ", " + elementPtr + "\n");
         }
-        emitArrayStore(stmt->variable, indexTemps, valueTemp);
+        m_stats.instructionsGenerated++;
     }
 }
 
@@ -718,8 +733,6 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
             continue;
         }
         
-
-        
         // Check if this is a UDT array (needs malloc instead of runtime array_create)
         // Check the DimStatement itself for the type (works for both global and local arrays)
         bool isUDTArray = arrayDecl.hasAsType && !arrayDecl.asTypeName.empty();
@@ -727,63 +740,113 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
         
         std::string arrayRef = getArrayRef(arrayName);
         
-        if (isUDTArray) {
-            // UDT array - allocate with malloc
-            // Evaluate dimension expressions
-            std::vector<std::string> dimTemps;
-            for (const auto& dimExpr : arrayDecl.dimensions) {
-                dimTemps.push_back(emitExpression(dimExpr.get()));
-            }
-            
-            // For now, only support 1D arrays
-            if (dimTemps.size() != 1) {
-                emitComment("ERROR: Multi-dimensional UDT arrays not yet supported");
-                continue;
-            }
-            
-            // Calculate total size: (dimSize + 1) * elementSize
-            // BASIC arrays: DIM A(N) creates indices 0 to N inclusive
-            size_t elementSize = calculateTypeSize(udtTypeName);
-            
-            std::string dimTemp = dimTemps[0];
-            
-            // Convert dimension to INT (dimensions are evaluated as DOUBLE by default)
-            VariableType dimType = inferExpressionType(arrayDecl.dimensions[0].get());
-            if (dimType != VariableType::INT) {
-                dimTemp = promoteToType(dimTemp, dimType, VariableType::INT);
-            }
-            
-            std::string dimPlusOne = allocTemp("w");
-            emit("    " + dimPlusOne + " =w add " + dimTemp + ", 1\n");
-            m_stats.instructionsGenerated++;
-            
-            std::string dimLong = allocTemp("l");
-            emit("    " + dimLong + " =l extsw " + dimPlusOne + "\n");
-            m_stats.instructionsGenerated++;
-            
-            std::string totalSize = allocTemp("l");
-            emit("    " + totalSize + " =l mul " + dimLong + ", " + std::to_string(elementSize) + "\n");
-            m_stats.instructionsGenerated++;
-            
-            emit("    " + arrayRef + " =l call $malloc(l " + totalSize + ")\n");
-            m_stats.instructionsGenerated++;
-            
-            // Track element type for array access
-            m_arrayElementTypes[arrayName] = udtTypeName;
-            
-            emitComment("UDT array " + arrayName + " (element size: " + std::to_string(elementSize) + " bytes)");
-        } else {
-            // Regular array - use runtime array_create
-            // Evaluate dimension expressions
-            std::vector<std::string> dimTemps;
-            for (const auto& dimExpr : arrayDecl.dimensions) {
-                dimTemps.push_back(emitExpression(dimExpr.get()));
-            }
-            
-            std::string arrayPtr = emitArrayCreate(arrayName, dimTemps);
-            emit("    " + arrayRef + " =l copy " + arrayPtr + "\n");
-            m_stats.instructionsGenerated++;
+        // Use array descriptor approach for all arrays
+        emitComment("DIM " + arrayName + " with descriptor (dope vector)");
+        
+        // Evaluate dimension expressions
+        std::vector<std::string> dimTemps;
+        for (const auto& dimExpr : arrayDecl.dimensions) {
+            dimTemps.push_back(emitExpression(dimExpr.get()));
         }
+        
+        // For now, only support 1D arrays
+        if (dimTemps.size() != 1) {
+            emitComment("ERROR: Multi-dimensional arrays not yet supported with descriptors");
+            continue;
+        }
+        
+        // Determine element size
+        size_t elementSize;
+        if (isUDTArray) {
+            elementSize = calculateTypeSize(udtTypeName);
+            m_arrayElementTypes[arrayName] = udtTypeName;
+        } else {
+            // Regular BASIC types: INT=4, DOUBLE=8, STRING=8 (pointer)
+            elementSize = 8; // Default to 8 for now (handles most types)
+        }
+        
+        std::string dimTemp = dimTemps[0];
+        
+        // Convert dimension to INT if needed
+        VariableType dimType = inferExpressionType(arrayDecl.dimensions[0].get());
+        if (dimType != VariableType::INT) {
+            dimTemp = promoteToType(dimTemp, dimType, VariableType::INT);
+        }
+        
+        // Get array descriptor address (assuming descriptor is stored with array reference)
+        // For now, arrayRef points to the descriptor structure
+        std::string descPtr = arrayRef;
+        
+        // Calculate bounds (BASIC: DIM A(N) creates 0 to N, or 1 to N with OPTION BASE 1)
+        // We'll use 0-based for simplicity (lowerBound=0, upperBound=N)
+        int64_t lowerBound = 0; // TODO: respect OPTION BASE
+        
+        // upperBound = dimTemp (N)
+        std::string upperBoundTemp = dimTemp;
+        
+        // count = upperBound - lowerBound + 1 = N + 1
+        std::string countTemp = allocTemp("w");
+        emit("    " + countTemp + " =w add " + upperBoundTemp + ", 1\n");
+        m_stats.instructionsGenerated++;
+        
+        // Convert to long for size calculations
+        std::string countLong = allocTemp("l");
+        emit("    " + countLong + " =l extsw " + countTemp + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // totalBytes = count * elementSize
+        std::string totalBytes = allocTemp("l");
+        emit("    " + totalBytes + " =l mul " + countLong + ", " + std::to_string(elementSize) + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Allocate array data
+        std::string dataPtr = allocTemp("l");
+        emit("    " + dataPtr + " =l call $malloc(l " + totalBytes + ")\n");
+        m_stats.instructionsGenerated++;
+        
+        // Zero-initialize the array
+        emit("    call $memset(l " + dataPtr + ", w 0, l " + totalBytes + ")\n");
+        m_stats.instructionsGenerated++;
+        
+        // Initialize descriptor fields
+        // ArrayDescriptor layout:
+        //   offset 0:  data pointer (8 bytes)
+        //   offset 8:  lowerBound (8 bytes)
+        //   offset 16: upperBound (8 bytes)
+        //   offset 24: elementSize (8 bytes)
+        //   offset 32: dimensions (4 bytes)
+        
+        // Store data pointer at offset 0
+        emit("    storel " + dataPtr + ", " + descPtr + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Store lowerBound at offset 8
+        std::string lowerBoundAddr = allocTemp("l");
+        emit("    " + lowerBoundAddr + " =l add " + descPtr + ", 8\n");
+        emit("    storel " + std::to_string(lowerBound) + ", " + lowerBoundAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Store upperBound at offset 16
+        std::string upperBoundAddr = allocTemp("l");
+        emit("    " + upperBoundAddr + " =l add " + descPtr + ", 16\n");
+        std::string upperBoundLong = allocTemp("l");
+        emit("    " + upperBoundLong + " =l extsw " + upperBoundTemp + "\n");
+        emit("    storel " + upperBoundLong + ", " + upperBoundAddr + "\n");
+        m_stats.instructionsGenerated += 3;
+        
+        // Store elementSize at offset 24
+        std::string elemSizeAddr = allocTemp("l");
+        emit("    " + elemSizeAddr + " =l add " + descPtr + ", 24\n");
+        emit("    storel " + std::to_string(elementSize) + ", " + elemSizeAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Store dimensions at offset 32
+        std::string dimCountAddr = allocTemp("l");
+        emit("    " + dimCountAddr + " =l add " + descPtr + ", 32\n");
+        emit("    storew 1, " + dimCountAddr + "\n"); // 1 dimension
+        m_stats.instructionsGenerated += 2;
+        
+        emitComment("Array " + arrayName + " descriptor initialized (element size: " + std::to_string(elementSize) + " bytes)");
         
         // If in function, track for cleanup
         if (isLocalArray) {
@@ -914,25 +977,33 @@ void QBECodeGenerator::emitCall(const CallStatement* stmt) {
 void QBECodeGenerator::emitErase(const EraseStatement* stmt) {
     if (!stmt) return;
     
-    emitComment("ERASE arrays (clear to length 0)");
+    emitComment("ERASE arrays (free data and reset descriptor)");
     
     for (const auto& arrayName : stmt->arrayNames) {
-        std::string arrayRef = getArrayRef(arrayName);
+        std::string descPtr = getArrayRef(arrayName);
         
-        // Check if this is a UDT array (uses malloc) or regular array (uses array_create)
-        auto elemTypeIt = m_arrayElementTypes.find(arrayName);
-        if (elemTypeIt != m_arrayElementTypes.end()) {
-            // UDT array - free the memory and set to null
-            emitComment("ERASE UDT array " + arrayName);
-            emit("    call $free(l " + arrayRef + ")\n");
-            emit("    " + arrayRef + " =l copy 0\n");
-            m_stats.instructionsGenerated += 2;
-        } else {
-            // Regular array - call runtime erase function to clear it
-            emitComment("ERASE array " + arrayName);
-            emit("    call $array_erase(l " + arrayRef + ")\n");
-            m_stats.instructionsGenerated++;
-        }
+        emitComment("ERASE array " + arrayName);
+        
+        // Load data pointer from descriptor (offset 0)
+        std::string dataPtr = allocTemp("l");
+        emit("    " + dataPtr + " =l loadl " + descPtr + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Free the data
+        emit("    call $free(l " + dataPtr + ")\n");
+        m_stats.instructionsGenerated++;
+        
+        // Set data pointer to NULL (offset 0)
+        emit("    storel 0, " + descPtr + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Set upperBound to -1 to indicate empty array (offset 16)
+        std::string upperBoundAddr = allocTemp("l");
+        emit("    " + upperBoundAddr + " =l add " + descPtr + ", 16\n");
+        emit("    storel -1, " + upperBoundAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        emitComment("Array " + arrayName + " erased");
     }
 }
 
@@ -943,111 +1014,152 @@ void QBECodeGenerator::emitErase(const EraseStatement* stmt) {
 void QBECodeGenerator::emitRedim(const RedimStatement* stmt) {
     if (!stmt) return;
     
-    emitComment(stmt->preserve ? "REDIM PRESERVE" : "REDIM");
+    emitComment(stmt->preserve ? "REDIM PRESERVE (with realloc)" : "REDIM (free and malloc)");
     
     for (const auto& arrayRedim : stmt->arrays) {
         std::string arrayName = arrayRedim.name;
-        std::string arrayRef = getArrayRef(arrayName);
+        std::string descPtr = getArrayRef(arrayName);
         
-        // Check if this is a UDT array
-        auto elemTypeIt = m_arrayElementTypes.find(arrayName);
-        if (elemTypeIt != m_arrayElementTypes.end()) {
-            // UDT array - reallocate
-            std::string udtTypeName = elemTypeIt->second;
-            
-            // Evaluate dimension expressions
-            std::vector<std::string> dimTemps;
-            for (const auto& dimExpr : arrayRedim.dimensions) {
-                dimTemps.push_back(emitExpression(dimExpr.get()));
-            }
-            
-            // For now, only support 1D arrays
-            if (dimTemps.size() != 1) {
-                emitComment("ERROR: Multi-dimensional UDT arrays not yet supported in REDIM");
-                continue;
-            }
-            
-            // Calculate new size
-            size_t elementSize = calculateTypeSize(udtTypeName);
-            std::string dimTemp = dimTemps[0];
-            
-            // Convert dimension to INT
-            VariableType dimType = inferExpressionType(arrayRedim.dimensions[0].get());
-            if (dimType != VariableType::INT) {
-                dimTemp = promoteToType(dimTemp, dimType, VariableType::INT);
-            }
-            
-            std::string dimPlusOne = allocTemp("w");
-            emit("    " + dimPlusOne + " =w add " + dimTemp + ", 1\n");
-            m_stats.instructionsGenerated++;
-            
-            std::string dimLong = allocTemp("l");
-            emit("    " + dimLong + " =l extsw " + dimPlusOne + "\n");
-            m_stats.instructionsGenerated++;
-            
-            std::string newSize = allocTemp("l");
-            emit("    " + newSize + " =l mul " + dimLong + ", " + std::to_string(elementSize) + "\n");
-            m_stats.instructionsGenerated++;
-            
-            if (stmt->preserve) {
-                // PRESERVE: allocate new, copy old to new, free old
-                emitComment("REDIM PRESERVE UDT array " + arrayName + " (allocate new, copy, free old)");
-                std::string newPtr = allocTemp("l");
-                emit("    " + newPtr + " =l call $malloc(l " + newSize + ")\n");
-                m_stats.instructionsGenerated++;
-                
-                // Copy data from old to new (use memcpy for simplicity)
-                // We need to copy min(oldSize, newSize) bytes
-                // For now, just copy the new size worth (may be more than old had)
-                std::string oldPtr = allocTemp("l");
-                emit("    " + oldPtr + " =l copy " + arrayRef + "\n");
-                emit("    call $basic_memcpy(l " + newPtr + ", l " + oldPtr + ", l " + newSize + ")\n");
-                m_stats.instructionsGenerated += 2;
-                
-                // Free old array
-                emit("    call $free(l " + oldPtr + ")\n");
-                m_stats.instructionsGenerated++;
-                
-                // Update array reference to point to new allocation
-                emit("    " + arrayRef + " =l copy " + newPtr + "\n");
-                m_stats.instructionsGenerated++;
-            } else {
-                // No PRESERVE: just free old and allocate new
-                emitComment("REDIM UDT array " + arrayName + " (discard old data)");
-                emit("    call $free(l " + arrayRef + ")\n");
-                emit("    " + arrayRef + " =l call $malloc(l " + newSize + ")\n");
-                m_stats.instructionsGenerated += 2;
-            }
-        } else {
-            // Regular array - use runtime array_redim
-            emitComment("REDIM array " + arrayName);
-            
-            // Evaluate dimension expressions
-            std::vector<std::string> dimTemps;
-            for (const auto& dimExpr : arrayRedim.dimensions) {
-                dimTemps.push_back(emitExpression(dimExpr.get()));
-            }
-            
-            if (stmt->preserve) {
-                // Call runtime array_redim with preserve flag
-                emitComment("TODO: array_redim with preserve not yet implemented");
-                // For now, just recreate without preserving
-                emit("    call $array_free(l " + arrayRef + ")\n");
-                m_stats.instructionsGenerated++;
-                
-                std::string newArrayPtr = emitArrayCreate(arrayName, dimTemps);
-                emit("    " + arrayRef + " =l copy " + newArrayPtr + "\n");
-                m_stats.instructionsGenerated++;
-            } else {
-                // Free and recreate
-                emit("    call $array_free(l " + arrayRef + ")\n");
-                m_stats.instructionsGenerated++;
-                
-                std::string newArrayPtr = emitArrayCreate(arrayName, dimTemps);
-                emit("    " + arrayRef + " =l copy " + newArrayPtr + "\n");
-                m_stats.instructionsGenerated++;
-            }
+        // Evaluate dimension expressions
+        std::vector<std::string> dimTemps;
+        for (const auto& dimExpr : arrayRedim.dimensions) {
+            dimTemps.push_back(emitExpression(dimExpr.get()));
         }
+        
+        // For now, only support 1D arrays
+        if (dimTemps.size() != 1) {
+            emitComment("ERROR: Multi-dimensional arrays not yet supported in REDIM");
+            continue;
+        }
+        
+        std::string dimTemp = dimTemps[0];
+        
+        // Convert dimension to INT if needed
+        VariableType dimType = inferExpressionType(arrayRedim.dimensions[0].get());
+        if (dimType != VariableType::INT) {
+            dimTemp = promoteToType(dimTemp, dimType, VariableType::INT);
+        }
+        
+        // Load element size from descriptor (offset 24)
+        std::string elemSizeAddr = allocTemp("l");
+        emit("    " + elemSizeAddr + " =l add " + descPtr + ", 24\n");
+        std::string elemSize = allocTemp("l");
+        emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Calculate new count = dimTemp + 1
+        std::string newCount = allocTemp("w");
+        emit("    " + newCount + " =w add " + dimTemp + ", 1\n");
+        m_stats.instructionsGenerated++;
+        
+        std::string newCountLong = allocTemp("l");
+        emit("    " + newCountLong + " =l extsw " + newCount + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Calculate new size in bytes
+        std::string newSize = allocTemp("l");
+        emit("    " + newSize + " =l mul " + newCountLong + ", " + elemSize + "\n");
+        m_stats.instructionsGenerated++;
+        
+        if (stmt->preserve) {
+            // REDIM PRESERVE: use realloc to resize and keep data
+            emitComment("REDIM PRESERVE " + arrayName + " (using realloc)");
+            
+            // Load old data pointer from descriptor (offset 0)
+            std::string oldPtr = allocTemp("l");
+            emit("    " + oldPtr + " =l loadl " + descPtr + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Load old upper bound (offset 16) to calculate old size
+            std::string oldUpperAddr = allocTemp("l");
+            emit("    " + oldUpperAddr + " =l add " + descPtr + ", 16\n");
+            std::string oldUpper = allocTemp("l");
+            emit("    " + oldUpper + " =l loadl " + oldUpperAddr + "\n");
+            m_stats.instructionsGenerated += 2;
+            
+            // oldCount = oldUpper + 1 (assuming lowerBound=0)
+            std::string oldCount = allocTemp("l");
+            emit("    " + oldCount + " =l add " + oldUpper + ", 1\n");
+            m_stats.instructionsGenerated++;
+            
+            std::string oldSize = allocTemp("l");
+            emit("    " + oldSize + " =l mul " + oldCount + ", " + elemSize + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Call realloc
+            std::string newPtr = allocTemp("l");
+            emit("    " + newPtr + " =l call $realloc(l " + oldPtr + ", l " + newSize + ")\n");
+            m_stats.instructionsGenerated++;
+            
+            // If growing, zero-fill new elements
+            std::string isGrowing = allocTemp("w");
+            emit("    " + isGrowing + " =w cultl " + oldSize + ", " + newSize + "\n");
+            m_stats.instructionsGenerated++;
+            
+            std::string zeroFillLabel = allocLabel();
+            std::string updateDescLabel = allocLabel();
+            
+            emit("    jnz " + isGrowing + ", @" + zeroFillLabel + ", @" + updateDescLabel + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Zero-fill block
+            emit("@" + zeroFillLabel + "\n");
+            std::string fillStart = allocTemp("l");
+            emit("    " + fillStart + " =l add " + newPtr + ", " + oldSize + "\n");
+            std::string fillSize = allocTemp("l");
+            emit("    " + fillSize + " =l sub " + newSize + ", " + oldSize + "\n");
+            emit("    call $memset(l " + fillStart + ", w 0, l " + fillSize + ")\n");
+            m_stats.instructionsGenerated += 3;
+            
+            // Update descriptor
+            emit("@" + updateDescLabel + "\n");
+            emit("    storel " + newPtr + ", " + descPtr + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Update upperBound in descriptor (offset 16)
+            std::string upperBoundAddr = allocTemp("l");
+            emit("    " + upperBoundAddr + " =l add " + descPtr + ", 16\n");
+            std::string newUpperLong = allocTemp("l");
+            emit("    " + newUpperLong + " =l extsw " + dimTemp + "\n");
+            emit("    storel " + newUpperLong + ", " + upperBoundAddr + "\n");
+            m_stats.instructionsGenerated += 3;
+            
+        } else {
+            // REDIM without PRESERVE: free old, allocate new
+            emitComment("REDIM " + arrayName + " (discard old data)");
+            
+            // Load old data pointer (offset 0)
+            std::string oldPtr = allocTemp("l");
+            emit("    " + oldPtr + " =l loadl " + descPtr + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Free old data
+            emit("    call $free(l " + oldPtr + ")\n");
+            m_stats.instructionsGenerated++;
+            
+            // Allocate new data
+            std::string newPtr = allocTemp("l");
+            emit("    " + newPtr + " =l call $malloc(l " + newSize + ")\n");
+            m_stats.instructionsGenerated++;
+            
+            // Zero-initialize
+            emit("    call $memset(l " + newPtr + ", w 0, l " + newSize + ")\n");
+            m_stats.instructionsGenerated++;
+            
+            // Update descriptor: store new data pointer (offset 0)
+            emit("    storel " + newPtr + ", " + descPtr + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Update upperBound in descriptor (offset 16)
+            std::string upperBoundAddr = allocTemp("l");
+            emit("    " + upperBoundAddr + " =l add " + descPtr + ", 16\n");
+            std::string newUpperLong = allocTemp("l");
+            emit("    " + newUpperLong + " =l extsw " + dimTemp + "\n");
+            emit("    storel " + newUpperLong + ", " + upperBoundAddr + "\n");
+            m_stats.instructionsGenerated += 3;
+        }
+        
+        emitComment("REDIM " + arrayName + " complete");
     }
 }
 

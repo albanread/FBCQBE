@@ -471,59 +471,231 @@ std::string QBECodeGenerator::emitArrayAccessExpr(const ArrayAccessExpression* e
         indexTemps.push_back(indexTemp);
     }
     
-    // Get array pointer
-    std::string arrayRef = getArrayRef(expr->name);
+    // For now, only support 1D arrays
+    if (indexTemps.size() != 1) {
+        emitComment("ERROR: Multi-dimensional arrays not yet supported");
+        std::string temp = allocTemp("l");
+        emit("    " + temp + " =l copy 0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
     
-    // Check if this is a UDT array - use pointer arithmetic instead of runtime call
+    std::string indexTemp = indexTemps[0];
+    
+    // Get array descriptor pointer
+    std::string descPtr = getArrayRef(expr->name);
+    
+    emitComment("Array access " + expr->name + " with bounds check");
+    
+    // Load lowerBound from descriptor (offset 8)
+    std::string lowerBoundAddr = allocTemp("l");
+    emit("    " + lowerBoundAddr + " =l add " + descPtr + ", 8\n");
+    std::string lowerBound = allocTemp("l");
+    emit("    " + lowerBound + " =l loadl " + lowerBoundAddr + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // Load upperBound from descriptor (offset 16)
+    std::string upperBoundAddr = allocTemp("l");
+    emit("    " + upperBoundAddr + " =l add " + descPtr + ", 16\n");
+    std::string upperBound = allocTemp("l");
+    emit("    " + upperBound + " =l loadl " + upperBoundAddr + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // Convert index to long for comparison
+    std::string indexLong = allocTemp("l");
+    emit("    " + indexLong + " =l extsw " + indexTemp + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Bounds check: index >= lowerBound
+    std::string checkLower = allocTemp("w");
+    emit("    " + checkLower + " =w csge" + "l " + indexLong + ", " + lowerBound + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Bounds check: index <= upperBound
+    std::string checkUpper = allocTemp("w");
+    emit("    " + checkUpper + " =w csle" + "l " + indexLong + ", " + upperBound + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Combined check: both must be true
+    std::string checkBoth = allocTemp("w");
+    emit("    " + checkBoth + " =w and " + checkLower + ", " + checkUpper + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Branch: if out of bounds, call error handler
+    std::string boundsOkLabel = allocLabel();
+    std::string boundsErrLabel = allocLabel();
+    
+    emit("    jnz " + checkBoth + ", @" + boundsOkLabel + ", @" + boundsErrLabel + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Bounds error block
+    emit("@" + boundsErrLabel + "\n");
+    emit("    call $basic_array_bounds_error(l " + indexLong + ", l " + lowerBound + ", l " + upperBound + ")\n");
+    m_stats.instructionsGenerated++;
+    
+    // Bounds OK block
+    emit("@" + boundsOkLabel + "\n");
+    
+    // Calculate offset: (index - lowerBound) * elementSize
+    std::string adjustedIndex = allocTemp("l");
+    emit("    " + adjustedIndex + " =l sub " + indexLong + ", " + lowerBound + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Load elementSize from descriptor (offset 24)
+    std::string elemSizeAddr = allocTemp("l");
+    emit("    " + elemSizeAddr + " =l add " + descPtr + ", 24\n");
+    std::string elemSize = allocTemp("l");
+    emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // Calculate byte offset
+    std::string byteOffset = allocTemp("l");
+    emit("    " + byteOffset + " =l mul " + adjustedIndex + ", " + elemSize + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Load data pointer from descriptor (offset 0)
+    std::string dataPtr = allocTemp("l");
+    emit("    " + dataPtr + " =l loadl " + descPtr + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Calculate element address
+    std::string elementPtr = allocTemp("l");
+    emit("    " + elementPtr + " =l add " + dataPtr + ", " + byteOffset + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Check if this is a UDT array - return pointer for member access
     auto elemTypeIt = m_arrayElementTypes.find(expr->name);
     if (elemTypeIt != m_arrayElementTypes.end()) {
-        // UDT array - compute element address using pointer arithmetic
-        std::string typeName = elemTypeIt->second;
-        size_t elementSize = calculateTypeSize(typeName);
-        
-        // For now, only support 1D arrays (multi-dimensional coming later)
-        if (indexTemps.size() != 1) {
-            emitComment("ERROR: Multi-dimensional UDT arrays not yet supported");
-            std::string temp = allocTemp("l");
-            emit("    " + temp + " =l copy 0\n");
-            m_stats.instructionsGenerated++;
-            return temp;
-        }
-        
-        // Compute offset: index * elementSize
-        std::string indexTemp = indexTemps[0];
-        
-        // Convert index to long for pointer arithmetic
-        std::string indexLong = allocTemp("l");
-        emit("    " + indexLong + " =l extsw " + indexTemp + "\n");
-        m_stats.instructionsGenerated++;
-        
-        // Multiply by element size
-        std::string offsetTemp = allocTemp("l");
-        emit("    " + offsetTemp + " =l mul " + indexLong + ", " + std::to_string(elementSize) + "\n");
-        m_stats.instructionsGenerated++;
-        
-        // Add to base pointer to get element address
-        std::string elementPtr = allocTemp("l");
-        emit("    " + elementPtr + " =l add " + arrayRef + ", " + offsetTemp + "\n");
-        m_stats.instructionsGenerated++;
-        
-        // Return pointer to element (for member access or whole-element operations)
+        // UDT array - return pointer so member access can work
         return elementPtr;
     }
     
-    // Regular array - call runtime array access function
-    std::string resultTemp = allocTemp("w");
-    emit("    " + resultTemp + " =w call $array_get(l " + arrayRef);
-    
-    for (const auto& indexTemp : indexTemps) {
-        emit(", w " + indexTemp);
+    // Regular scalar array - load and return the value
+    // Determine array element type from symbol table
+    VariableType elementType = VariableType::INT; // Default
+    if (m_symbols && m_symbols->arrays.find(expr->name) != m_symbols->arrays.end()) {
+        elementType = m_symbols->arrays.at(expr->name).type;
     }
     
-    emit(")\n");
-    
+    std::string valueTemp;
+    if (elementType == VariableType::DOUBLE || elementType == VariableType::FLOAT) {
+        valueTemp = allocTemp("d");
+        emit("    " + valueTemp + " =d loadd " + elementPtr + "\n");
+    } else if (elementType == VariableType::STRING) {
+        valueTemp = allocTemp("l");
+        emit("    " + valueTemp + " =l loadl " + elementPtr + "\n");
+    } else {
+        // INT or default
+        valueTemp = allocTemp("w");
+        emit("    " + valueTemp + " =w loadw " + elementPtr + "\n");
+    }
     m_stats.instructionsGenerated++;
-    return resultTemp;
+    
+    return valueTemp;
+}
+
+// Helper to get array element pointer without loading (for lvalue assignment)
+std::string QBECodeGenerator::emitArrayElementPtr(const std::string& arrayName, 
+                                                    const std::vector<std::unique_ptr<Expression>>& indices) {
+    if (indices.size() != 1) {
+        emitComment("ERROR: Multi-dimensional arrays not yet supported");
+        std::string temp = allocTemp("l");
+        emit("    " + temp + " =l copy 0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    // Evaluate index
+    std::string indexTemp = emitExpression(indices[0].get());
+    VariableType indexType = inferExpressionType(indices[0].get());
+    
+    // Convert to integer if needed
+    if (indexType != VariableType::INT) {
+        indexTemp = promoteToType(indexTemp, indexType, VariableType::INT);
+    }
+    
+    // Get array descriptor pointer
+    std::string descPtr = getArrayRef(arrayName);
+    
+    emitComment("Get array element pointer for " + arrayName);
+    
+    // Load lowerBound from descriptor (offset 8)
+    std::string lowerBoundAddr = allocTemp("l");
+    emit("    " + lowerBoundAddr + " =l add " + descPtr + ", 8\n");
+    std::string lowerBound = allocTemp("l");
+    emit("    " + lowerBound + " =l loadl " + lowerBoundAddr + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // Load upperBound from descriptor (offset 16)
+    std::string upperBoundAddr = allocTemp("l");
+    emit("    " + upperBoundAddr + " =l add " + descPtr + ", 16\n");
+    std::string upperBound = allocTemp("l");
+    emit("    " + upperBound + " =l loadl " + upperBoundAddr + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // Convert index to long for comparison
+    std::string indexLong = allocTemp("l");
+    emit("    " + indexLong + " =l extsw " + indexTemp + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Bounds check: index >= lowerBound
+    std::string checkLower = allocTemp("w");
+    emit("    " + checkLower + " =w csge" + "l " + indexLong + ", " + lowerBound + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Bounds check: index <= upperBound
+    std::string checkUpper = allocTemp("w");
+    emit("    " + checkUpper + " =w csle" + "l " + indexLong + ", " + upperBound + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Combined check
+    std::string checkBoth = allocTemp("w");
+    emit("    " + checkBoth + " =w and " + checkLower + ", " + checkUpper + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Branch for bounds check
+    std::string boundsOkLabel = allocLabel();
+    std::string boundsErrLabel = allocLabel();
+    
+    emit("    jnz " + checkBoth + ", @" + boundsOkLabel + ", @" + boundsErrLabel + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Bounds error block
+    emit("@" + boundsErrLabel + "\n");
+    emit("    call $basic_array_bounds_error(l " + indexLong + ", l " + lowerBound + ", l " + upperBound + ")\n");
+    m_stats.instructionsGenerated++;
+    
+    // Bounds OK block
+    emit("@" + boundsOkLabel + "\n");
+    
+    // Calculate offset: (index - lowerBound) * elementSize
+    std::string adjustedIndex = allocTemp("l");
+    emit("    " + adjustedIndex + " =l sub " + indexLong + ", " + lowerBound + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Load elementSize from descriptor (offset 24)
+    std::string elemSizeAddr = allocTemp("l");
+    emit("    " + elemSizeAddr + " =l add " + descPtr + ", 24\n");
+    std::string elemSize = allocTemp("l");
+    emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // Calculate byte offset
+    std::string byteOffset = allocTemp("l");
+    emit("    " + byteOffset + " =l mul " + adjustedIndex + ", " + elemSize + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Load data pointer from descriptor (offset 0)
+    std::string dataPtr = allocTemp("l");
+    emit("    " + dataPtr + " =l loadl " + descPtr + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Calculate element address
+    std::string elementPtr = allocTemp("l");
+    emit("    " + elementPtr + " =l add " + dataPtr + ", " + byteOffset + "\n");
+    m_stats.instructionsGenerated++;
+    
+    return elementPtr;
 }
 
 // =============================================================================

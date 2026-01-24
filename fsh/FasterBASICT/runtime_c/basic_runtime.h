@@ -345,6 +345,9 @@ void basic_error_msg(const char* message);
 // Check array bounds (internal use)
 void basic_check_bounds(BasicArray* array, int32_t* indices);
 
+// Array bounds error handler (for descriptor-based arrays)
+void basic_array_bounds_error(int64_t index, int64_t lower, int64_t upper);
+
 // =============================================================================
 // DATA/READ/RESTORE Support
 // =============================================================================

@@ -192,36 +192,50 @@ void QBECodeGenerator::emitMainFunction() {
             m_stats.variablesUsed++;
         }
         
-        // Declare arrays (as pointers)
+        // Declare arrays (as descriptors - dope vectors)
+        // Each array descriptor is 40 bytes (aligned):
+        //   offset 0:  data pointer (8 bytes)
+        //   offset 8:  lowerBound (8 bytes)
+        //   offset 16: upperBound (8 bytes)
+        //   offset 24: elementSize (8 bytes)
+        //   offset 32: dimensions (4 bytes)
+        //   offset 36: padding (4 bytes)
         for (const auto& [name, arraySym] : m_symbols->arrays) {
             std::string arrayRef = "%arr_" + name;
             m_arrays[name] = m_arrays.size();
             
-            // Check if this is a UDT array with known dimensions
-            if (arraySym.type == VariableType::USER_DEFINED && 
-                !arraySym.asTypeName.empty() && 
-                arraySym.totalSize > 0) {
-                // UDT array - allocate on heap with malloc
-                size_t elementSize = calculateTypeSize(arraySym.asTypeName);
-                size_t totalSize = elementSize * arraySym.totalSize;
-                
-                std::string sizeTemp = allocTemp("l");
-                emit("    " + sizeTemp + " =l copy " + std::to_string(totalSize) + "\n");
-                emit("    " + arrayRef + " =l call $malloc(l " + sizeTemp + ")\n");
-                
-                // Store the element type name for later access
-                m_arrayElementTypes[name] = arraySym.asTypeName;
-                
-                emitComment("Array " + name + ": " + std::to_string(arraySym.totalSize) + 
-                           " elements of " + arraySym.asTypeName + 
-                           " (" + std::to_string(elementSize) + " bytes each, heap-allocated)");
-            } else {
-                // Regular array or dynamic array - initialize to null, will be created at DIM
-                emit("    " + arrayRef + " =l copy 0\n");
-            }
-            
+            // Allocate descriptor on stack (40 bytes, 8-byte aligned)
+            emit("    " + arrayRef + " =l alloc8 40\n");
             m_stats.instructionsGenerated++;
+            
+            // Initialize descriptor to null/zero state
+            // Data pointer = NULL
+            emit("    storel 0, " + arrayRef + "\n");
+            
+            // LowerBound = 0
+            std::string lowerAddr = allocTemp("l");
+            emit("    " + lowerAddr + " =l add " + arrayRef + ", 8\n");
+            emit("    storel 0, " + lowerAddr + "\n");
+            
+            // UpperBound = -1 (indicates uninitialized/empty)
+            std::string upperAddr = allocTemp("l");
+            emit("    " + upperAddr + " =l add " + arrayRef + ", 16\n");
+            emit("    storel -1, " + upperAddr + "\n");
+            
+            // ElementSize = 0 (will be set by DIM)
+            std::string elemSizeAddr = allocTemp("l");
+            emit("    " + elemSizeAddr + " =l add " + arrayRef + ", 24\n");
+            emit("    storel 0, " + elemSizeAddr + "\n");
+            
+            // Dimensions = 0 (will be set by DIM)
+            std::string dimsAddr = allocTemp("l");
+            emit("    " + dimsAddr + " =l add " + arrayRef + ", 32\n");
+            emit("    storew 0, " + dimsAddr + "\n");
+            
+            m_stats.instructionsGenerated += 10;
             m_stats.arraysUsed++;
+            
+            emitComment("Array descriptor " + name + " allocated (40 bytes)");
         }
     }
     emit("\n");
@@ -249,16 +263,19 @@ void QBECodeGenerator::emitMainFunction() {
     m_stats.labelsGenerated++;
     emitComment("Cleanup and return");
     
-    // Free all heap-allocated UDT arrays
+    // Free all array data (from descriptors)
     if (m_symbols) {
         for (const auto& [name, arraySym] : m_symbols->arrays) {
-            if (arraySym.type == VariableType::USER_DEFINED && 
-                !arraySym.asTypeName.empty() && 
-                arraySym.totalSize > 0) {
-                std::string arrayRef = "%arr_" + name;
-                emit("    call $free(l " + arrayRef + ")\n");
-                m_stats.instructionsGenerated++;
-            }
+            std::string arrayRef = "%arr_" + name;
+            
+            // Load data pointer from descriptor (offset 0)
+            std::string dataPtr = allocTemp("l");
+            emit("    " + dataPtr + " =l loadl " + arrayRef + "\n");
+            
+            // Free if not null
+            emit("    call $free(l " + dataPtr + ")\n");
+            
+            m_stats.instructionsGenerated += 2;
         }
     }
     

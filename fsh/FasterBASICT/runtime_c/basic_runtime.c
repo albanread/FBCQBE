@@ -123,6 +123,14 @@ int32_t basic_get_line(void) {
     return g_current_line;
 }
 
+void basic_array_bounds_error(int64_t index, int64_t lower, int64_t upper) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), 
+             "Array subscript out of bounds: index %lld not in [%lld, %lld]",
+             (long long)index, (long long)lower, (long long)upper);
+    basic_error_msg(msg);
+}
+
 // =============================================================================
 // DATA/READ/RESTORE Support
 // =============================================================================
