@@ -1,5 +1,7 @@
 # FBCQBE - FasterBASIC QBE Backend
 
+[![Build Status](https://github.com/albanread/FBCQBE/actions/workflows/build.yml/badge.svg)](https://github.com/albanread/FBCQBE/actions)
+
 A native-code ahead-of-time (AOT) compiler backend for FasterBASIC using the QBE intermediate language.
 
 ## Overview
