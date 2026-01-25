@@ -678,6 +678,147 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         return result;
     }
     
+    // ABS(x) - Absolute value
+    if (upper == "ABS" && expr->arguments.size() == 1) {
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        VariableType argType = inferExpressionType(expr->arguments[0].get());
+        
+        if (argType == VariableType::INT) {
+            // For integers: if negative, negate
+            std::string isNeg = allocTemp("w");
+            emit("    " + isNeg + " =w csltw " + argTemp + ", 0\n");
+            std::string negVal = allocTemp("w");
+            emit("    " + negVal + " =w neg " + argTemp + "\n");
+            std::string result = allocTemp("w");
+            emit("    " + result + " =w sel " + isNeg + ", " + negVal + ", " + argTemp + "\n");
+            m_stats.instructionsGenerated += 3;
+            return result;
+        } else {
+            // For doubles: use runtime function (fabs)
+            // Could be made intrinsic with conditional logic but keep simple for now
+        }
+    }
+    
+    // SGN(x) - Sign function (-1, 0, or 1)
+    if (upper == "SGN" && expr->arguments.size() == 1) {
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        VariableType argType = inferExpressionType(expr->arguments[0].get());
+        
+        if (argType == VariableType::INT) {
+            // For integers: use comparisons
+            std::string zero = allocTemp("w");
+            emit("    " + zero + " =w copy 0\n");
+            
+            std::string isNeg = allocTemp("w");
+            emit("    " + isNeg + " =w csltw " + argTemp + ", " + zero + "\n");
+            
+            std::string isPos = allocTemp("w");
+            emit("    " + isPos + " =w csgtw " + argTemp + ", " + zero + "\n");
+            
+            std::string negOne = allocTemp("w");
+            emit("    " + negOne + " =w copy -1\n");
+            
+            std::string posOne = allocTemp("w");
+            emit("    " + posOne + " =w copy 1\n");
+            
+            // Select: if negative return -1, else if positive return 1, else return 0
+            std::string result = allocTemp("w");
+            emit("    " + result + " =w sel " + isNeg + ", " + negOne + ", " + zero + "\n");
+            std::string finalResult = allocTemp("w");
+            emit("    " + finalResult + " =w sel " + isPos + ", " + posOne + ", " + result + "\n");
+            m_stats.instructionsGenerated += 8;
+            return finalResult;
+        } else {
+            // For doubles: use runtime function
+        }
+    }
+    
+    // MIN(a, b) - Minimum of two values
+    if (upper == "MIN" && expr->arguments.size() == 2) {
+        std::string leftTemp = emitExpression(expr->arguments[0].get());
+        std::string rightTemp = emitExpression(expr->arguments[1].get());
+        VariableType leftType = inferExpressionType(expr->arguments[0].get());
+        VariableType rightType = inferExpressionType(expr->arguments[1].get());
+        
+        // Ensure both operands are the same type
+        if (leftType != rightType) {
+            // Promote to double if types differ
+            if (leftType == VariableType::INT) {
+                std::string promoted = allocTemp("d");
+                emit("    " + promoted + " =d swtof " + leftTemp + "\n");
+                leftTemp = promoted;
+                m_stats.instructionsGenerated++;
+            }
+            if (rightType == VariableType::INT) {
+                std::string promoted = allocTemp("d");
+                emit("    " + promoted + " =d swtof " + rightTemp + "\n");
+                rightTemp = promoted;
+                m_stats.instructionsGenerated++;
+            }
+        }
+        
+        if (leftType == VariableType::INT || (leftType == rightType && leftType == VariableType::INT)) {
+            // Integer minimum
+            std::string isLess = allocTemp("w");
+            emit("    " + isLess + " =w csltw " + leftTemp + ", " + rightTemp + "\n");
+            std::string result = allocTemp("w");
+            emit("    " + result + " =w sel " + isLess + ", " + leftTemp + ", " + rightTemp + "\n");
+            m_stats.instructionsGenerated += 2;
+            return result;
+        } else {
+            // Double minimum
+            std::string isLess = allocTemp("w");
+            emit("    " + isLess + " =w cltd " + leftTemp + ", " + rightTemp + "\n");
+            std::string result = allocTemp("d");
+            emit("    " + result + " =d sel " + isLess + ", " + leftTemp + ", " + rightTemp + "\n");
+            m_stats.instructionsGenerated += 2;
+            return result;
+        }
+    }
+    
+    // MAX(a, b) - Maximum of two values
+    if (upper == "MAX" && expr->arguments.size() == 2) {
+        std::string leftTemp = emitExpression(expr->arguments[0].get());
+        std::string rightTemp = emitExpression(expr->arguments[1].get());
+        VariableType leftType = inferExpressionType(expr->arguments[0].get());
+        VariableType rightType = inferExpressionType(expr->arguments[1].get());
+        
+        // Ensure both operands are the same type
+        if (leftType != rightType) {
+            // Promote to double if types differ
+            if (leftType == VariableType::INT) {
+                std::string promoted = allocTemp("d");
+                emit("    " + promoted + " =d swtof " + leftTemp + "\n");
+                leftTemp = promoted;
+                m_stats.instructionsGenerated++;
+            }
+            if (rightType == VariableType::INT) {
+                std::string promoted = allocTemp("d");
+                emit("    " + promoted + " =d swtof " + rightTemp + "\n");
+                rightTemp = promoted;
+                m_stats.instructionsGenerated++;
+            }
+        }
+        
+        if (leftType == VariableType::INT || (leftType == rightType && leftType == VariableType::INT)) {
+            // Integer maximum
+            std::string isGreater = allocTemp("w");
+            emit("    " + isGreater + " =w csgtw " + leftTemp + ", " + rightTemp + "\n");
+            std::string result = allocTemp("w");
+            emit("    " + result + " =w sel " + isGreater + ", " + leftTemp + ", " + rightTemp + "\n");
+            m_stats.instructionsGenerated += 2;
+            return result;
+        } else {
+            // Double maximum
+            std::string isGreater = allocTemp("w");
+            emit("    " + isGreater + " =w cgtd " + leftTemp + ", " + rightTemp + "\n");
+            std::string result = allocTemp("d");
+            emit("    " + result + " =d sel " + isGreater + ", " + leftTemp + ", " + rightTemp + "\n");
+            m_stats.instructionsGenerated += 2;
+            return result;
+        }
+    }
+    
     // Evaluate arguments (get raw temporaries)
     std::vector<std::string> argTemps;
     std::vector<VariableType> argTypes;
