@@ -191,6 +191,38 @@ StringDescriptor* string_new_ascii(const char* ascii_str) {
     return desc;
 }
 
+// Create new ASCII string from buffer and length
+StringDescriptor* string_new_ascii_len(const uint8_t* data, int64_t length) {
+    if (!data || length <= 0) {
+        StringDescriptor* desc = (StringDescriptor*)calloc(1, sizeof(StringDescriptor));
+        if (desc) {
+            desc->refcount = 1;
+            desc->encoding = STRING_ENCODING_ASCII;
+            desc->dirty = 1;
+        }
+        return desc;
+    }
+    
+    StringDescriptor* desc = (StringDescriptor*)calloc(1, sizeof(StringDescriptor));
+    if (!desc) return NULL;
+    
+    desc->data = (uint8_t*)malloc(length * sizeof(uint8_t));
+    if (!desc->data) {
+        free(desc);
+        return NULL;
+    }
+    
+    memcpy(desc->data, data, length * sizeof(uint8_t));
+    desc->length = length;
+    desc->capacity = length;
+    desc->refcount = 1;
+    desc->encoding = STRING_ENCODING_ASCII;
+    desc->dirty = 1;
+    desc->utf8_cache = NULL;
+    
+    return desc;
+}
+
 // Create new string from UTF-8 C string (auto-detects ASCII vs UTF-32)
 StringDescriptor* string_new_utf8(const char* utf8_str) {
     if (!utf8_str || *utf8_str == '\0') {
@@ -303,6 +335,28 @@ StringDescriptor* string_new_capacity(int64_t capacity) {
     desc->length = 0;
     desc->refcount = 1;
     desc->encoding = STRING_ENCODING_UTF32;  // Default to UTF-32 (caller can override)
+    desc->dirty = 1;
+    desc->utf8_cache = NULL;
+    
+    return desc;
+}
+
+StringDescriptor* string_new_ascii_capacity(int64_t capacity) {
+    StringDescriptor* desc = (StringDescriptor*)calloc(1, sizeof(StringDescriptor));
+    if (!desc) return NULL;
+    
+    if (capacity > 0) {
+        desc->data = (uint8_t*)malloc(capacity * sizeof(uint8_t));
+        if (!desc->data) {
+            free(desc);
+            return NULL;
+        }
+        desc->capacity = capacity;
+    }
+    
+    desc->length = 0;
+    desc->refcount = 1;
+    desc->encoding = STRING_ENCODING_ASCII;
     desc->dirty = 1;
     desc->utf8_cache = NULL;
     
@@ -464,15 +518,60 @@ StringDescriptor* string_concat(const StringDescriptor* a, const StringDescripto
     
     if (total_len == 0) return string_new_capacity(0);
     
-    StringDescriptor* result = string_new_capacity(total_len);
-    if (!result) return NULL;
+    // Determine result encoding
+    StringEncoding result_encoding = (a->encoding == STRING_ENCODING_ASCII && b->encoding == STRING_ENCODING_ASCII) 
+                                   ? STRING_ENCODING_ASCII : STRING_ENCODING_UTF32;
     
-    // Copy both strings
-    if (a->length > 0) {
-        memcpy(result->data, a->data, a->length * sizeof(uint32_t));
-    }
-    if (b->length > 0) {
-        memcpy(result->data + a->length, b->data, b->length * sizeof(uint32_t));
+    StringDescriptor* result;
+    if (result_encoding == STRING_ENCODING_ASCII) {
+        // Both ASCII: create ASCII result
+        result = string_new_ascii_capacity(total_len);
+        if (!result) return NULL;
+        
+        // Copy ASCII data
+        uint8_t* dest = (uint8_t*)result->data;
+        if (a->length > 0) {
+            memcpy(dest, a->data, a->length * sizeof(uint8_t));
+            dest += a->length;
+        }
+        if (b->length > 0) {
+            memcpy(dest, b->data, b->length * sizeof(uint8_t));
+        }
+    } else {
+        // Mixed encodings: create UTF-32 result
+        result = string_new_capacity(total_len);
+        if (!result) return NULL;
+        
+        uint32_t* dest = (uint32_t*)result->data;
+        
+        // Copy first string
+        if (a->length > 0) {
+            if (a->encoding == STRING_ENCODING_ASCII) {
+                // Convert ASCII to UTF-32 on the fly
+                uint8_t* src = (uint8_t*)a->data;
+                for (int64_t i = 0; i < a->length; i++) {
+                    dest[i] = (uint32_t)src[i];
+                }
+            } else {
+                // Copy UTF-32 directly
+                memcpy(dest, a->data, a->length * sizeof(uint32_t));
+            }
+            dest += a->length;
+        }
+        
+        // Copy second string
+        if (b->length > 0) {
+            if (b->encoding == STRING_ENCODING_ASCII) {
+                // Convert ASCII to UTF-32 on the fly
+                uint8_t* src = (uint8_t*)b->data;
+                for (int64_t i = 0; i < b->length; i++) {
+                    dest[i] = (uint32_t)src[i];
+                }
+            } else {
+                // Copy UTF-32 directly
+                memcpy(dest, b->data, b->length * sizeof(uint32_t));
+            }
+        }
     }
     
     result->length = total_len;
@@ -491,24 +590,70 @@ StringDescriptor* string_mid(const StringDescriptor* str, int64_t start, int64_t
         length = str->length - start;
     }
     
-    return string_new_utf32(str->data + start, length);
+    if (str->encoding == STRING_ENCODING_ASCII) {
+        // ASCII encoding - data is uint8_t*
+        return string_new_ascii_len(str->data + start, length);
+    } else {
+        // UTF-32 encoding
+        return string_new_utf32(str->data + start, length);
+    }
 }
 
 // Left substring
 StringDescriptor* string_left(const StringDescriptor* str, int64_t count) {
     if (!str || count <= 0) return string_new_capacity(0);
     if (count > str->length) count = str->length;
-    return string_new_utf32(str->data, count);
+    
+    if (str->encoding == STRING_ENCODING_ASCII) {
+        return string_new_ascii_len(str->data, count);
+    } else {
+        return string_new_utf32(str->data, count);
+    }
 }
 
 // Right substring
 StringDescriptor* string_right(const StringDescriptor* str, int64_t count) {
     if (!str || count <= 0) return string_new_capacity(0);
     if (count > str->length) count = str->length;
-    return string_new_utf32(str->data + (str->length - count), count);
+    
+    if (str->encoding == STRING_ENCODING_ASCII) {
+        return string_new_ascii_len(str->data + (str->length - count), count);
+    } else {
+        return string_new_utf32(str->data + (str->length - count), count);
+    }
 }
 
-// Find substring (INSTR)
+// String slicing (start TO end, inclusive)
+StringDescriptor* string_slice(const StringDescriptor* str, int64_t start, int64_t end) {
+    if (!str || start < 1 || (end != -1 && end < start) || start > str->length) {
+        return string_new_capacity(0);
+    }
+    
+    // Handle implied end (-1 means to end of string)
+    if (end == -1) {
+        end = str->length;
+    }
+    
+    // Adjust for 1-based indexing (BASIC style)
+    start--;  // Convert to 0-based
+    end--;    // Convert to 0-based
+    
+    // Clamp end to string length
+    if (end >= str->length) {
+        end = str->length - 1;
+    }
+    
+    int64_t length = end - start + 1;
+    if (length <= 0) return string_new_capacity(0);
+    
+    if (str->encoding == STRING_ENCODING_ASCII) {
+        return string_new_ascii_len(str->data + start, length);
+    } else {
+        return string_new_utf32(str->data + start, length);
+    }
+}
+
+// Find substring starting from position (0-based, returns 0-based index or -1)
 int64_t string_instr(const StringDescriptor* haystack, const StringDescriptor* needle, int64_t start_pos) {
     if (!haystack || !needle || needle->length == 0) return -1;
     if (start_pos < 0) start_pos = 0;
@@ -965,4 +1110,90 @@ size_t string_memory_usage(const StringDescriptor* str) {
     }
     
     return total;
+}
+
+// MID$ assignment: MID$(str, pos, len) = replacement
+StringDescriptor* string_mid_assign(StringDescriptor* str, int64_t pos, int64_t len, const StringDescriptor* replacement) {
+    if (!str || pos < 1 || len < 0) return str;
+    if (!replacement) replacement = string_new_capacity(0);
+    
+    // Adjust for 1-based indexing
+    pos--;  // Convert to 0-based
+    
+    // Clamp position and length
+    if (pos < 0) pos = 0;
+    if (pos >= str->length) return str;  // Nothing to replace
+    if (len > str->length - pos) len = str->length - pos;
+    
+    // If replacement is same length, just copy
+    if (len == replacement->length) {
+        for (int64_t i = 0; i < len; i++) {
+            STR_SET_CHAR(str, pos + i, STR_CHAR(replacement, i));
+        }
+        // Clear UTF-8 cache since string changed
+        if (str->utf8_cache) {
+            free(str->utf8_cache);
+            str->utf8_cache = NULL;
+            str->dirty = 1;
+        }
+        return str;
+    }
+    
+    // Need to resize the string - create new string with correct size
+    int64_t new_length = str->length - len + replacement->length;
+    StringDescriptor* new_str = string_new_capacity(new_length);
+    if (!new_str) return str;
+    
+    // Copy prefix (before replacement)
+    for (int64_t i = 0; i < pos; i++) {
+        STR_SET_CHAR(new_str, i, STR_CHAR(str, i));
+    }
+    
+    // Copy replacement
+    for (int64_t i = 0; i < replacement->length; i++) {
+        STR_SET_CHAR(new_str, pos + i, STR_CHAR(replacement, i));
+    }
+    
+    // Copy suffix (after replacement)
+    for (int64_t i = pos + len; i < str->length; i++) {
+        STR_SET_CHAR(new_str, pos + replacement->length + (i - pos - len), STR_CHAR(str, i));
+    }
+    
+    new_str->length = new_length;
+    
+    // Free old string
+    if (str->data) {
+        free(str->data);
+    }
+    if (str->utf8_cache) {
+        free(str->utf8_cache);
+    }
+    free(str);
+    
+    return new_str;
+}
+
+// String slice assignment: str$(start TO end) = replacement
+StringDescriptor* string_slice_assign(StringDescriptor* str, int64_t start, int64_t end, const StringDescriptor* replacement) {
+    if (!str || start < 1) return str;
+    if (!replacement) replacement = string_new_capacity(0);
+    
+    // Handle implied end
+    if (end == -1) {
+        end = str->length;
+    }
+    
+    // Adjust for 1-based indexing
+    start--;  // Convert to 0-based
+    end--;    // Convert to 0-based
+    
+    // Clamp positions
+    if (start < 0) start = 0;
+    if (end >= str->length) end = str->length - 1;
+    if (start > end) return str;  // Invalid range
+    
+    int64_t len = end - start + 1;
+    
+    // Use MID assignment logic
+    return string_mid_assign(str, start + 1, len, replacement);
 }

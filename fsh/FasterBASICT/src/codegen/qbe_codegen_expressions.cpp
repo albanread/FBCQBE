@@ -171,6 +171,11 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
     
     TokenType op = expr->op;
     
+    // Special handling for string concatenation
+    if (op == TokenType::PLUS && leftType == VariableType::STRING && rightType == VariableType::STRING) {
+        return emitStringConcat(leftTemp, rightTemp);
+    }
+    
     // Bitwise and MOD operations REQUIRE integers
     bool requiresInteger = (op == TokenType::AND || op == TokenType::OR || 
                            op == TokenType::XOR || op == TokenType::MOD);
@@ -448,6 +453,138 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         return result;
     }
     
+    // Special case: String slicing s$(start TO end) - converted to __string_slice
+    if (upper == "__STRING_SLICE" && expr->arguments.size() == 3) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string startTemp = emitExpression(expr->arguments[1].get());
+        std::string endTemp = emitExpression(expr->arguments[2].get());
+        
+        // Ensure start and end are int64_t (l type)
+        VariableType startType = inferExpressionType(expr->arguments[1].get());
+        if (startType == VariableType::DOUBLE) {
+            std::string startInt = allocTemp("w");
+            emit("    " + startInt + " =w dtosi " + startTemp + "\n");
+            std::string startLong = allocTemp("l");
+            emit("    " + startLong + " =l extsw " + startInt + "\n");
+            startTemp = startLong;
+        } else if (startType == VariableType::INT) {
+            std::string startLong = allocTemp("l");
+            emit("    " + startLong + " =l extsw " + startTemp + "\n");
+            startTemp = startLong;
+        }
+        
+        VariableType endType = inferExpressionType(expr->arguments[2].get());
+        if (endType == VariableType::DOUBLE) {
+            std::string endInt = allocTemp("w");
+            emit("    " + endInt + " =w dtosi " + endTemp + "\n");
+            std::string endLong = allocTemp("l");
+            emit("    " + endLong + " =l extsw " + endInt + "\n");
+            endTemp = endLong;
+        } else if (endType == VariableType::INT) {
+            std::string endLong = allocTemp("l");
+            emit("    " + endLong + " =l extsw " + endTemp + "\n");
+            endTemp = endLong;
+        }
+        
+        std::string result = allocTemp("l");
+        emit("    " + result + " =l call $string_slice(l " + strTemp + ", l " + startTemp + ", l " + endTemp + ")\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // Special case: MID$(str, start, length) - substring extraction
+    if ((upper == "MID" || upper == "MID$") && expr->arguments.size() == 3) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string startTemp = emitExpression(expr->arguments[1].get());
+        std::string lenTemp = emitExpression(expr->arguments[2].get());
+        
+        // Ensure start and length are int64_t (l type)
+        VariableType startType = inferExpressionType(expr->arguments[1].get());
+        if (startType == VariableType::DOUBLE) {
+            // Convert double to int64_t
+            std::string startInt = allocTemp("w");
+            emit("    " + startInt + " =w dtosi " + startTemp + "\n");
+            std::string startLong = allocTemp("l");
+            emit("    " + startLong + " =l extsw " + startInt + "\n");
+            startTemp = startLong;
+        } else if (startType == VariableType::INT) {
+            std::string startLong = allocTemp("l");
+            emit("    " + startLong + " =l extsw " + startTemp + "\n");
+            startTemp = startLong;
+        }
+        
+        VariableType lenType = inferExpressionType(expr->arguments[2].get());
+        if (lenType == VariableType::DOUBLE) {
+            // Convert double to int64_t
+            std::string lenInt = allocTemp("w");
+            emit("    " + lenInt + " =w dtosi " + lenTemp + "\n");
+            std::string lenLong = allocTemp("l");
+            emit("    " + lenLong + " =l extsw " + lenInt + "\n");
+            lenTemp = lenLong;
+        } else if (lenType == VariableType::INT) {
+            std::string lenLong = allocTemp("l");
+            emit("    " + lenLong + " =l extsw " + lenTemp + "\n");
+            lenTemp = lenLong;
+        }
+        
+        std::string result = allocTemp("l");
+        emit("    " + result + " =l call $string_mid(l " + strTemp + ", l " + startTemp + ", l " + lenTemp + ")\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // Special case: LEFT$(str, count) - left substring
+    if ((upper == "LEFT" || upper == "LEFT$") && expr->arguments.size() == 2) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string countTemp = emitExpression(expr->arguments[1].get());
+        
+        // Ensure count is int64_t
+        VariableType countType = inferExpressionType(expr->arguments[1].get());
+        if (countType == VariableType::DOUBLE) {
+            // Convert double to int64_t
+            std::string countInt = allocTemp("w");
+            emit("    " + countInt + " =w dtosi " + countTemp + "\n");
+            std::string countLong = allocTemp("l");
+            emit("    " + countLong + " =l extsw " + countInt + "\n");
+            countTemp = countLong;
+        } else if (countType == VariableType::INT) {
+            std::string countLong = allocTemp("l");
+            emit("    " + countLong + " =l extsw " + countTemp + "\n");
+            countTemp = countLong;
+        }
+        
+        std::string result = allocTemp("l");
+        emit("    " + result + " =l call $string_left(l " + strTemp + ", l " + countTemp + ")\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // Special case: RIGHT$(str, count) - right substring
+    if ((upper == "RIGHT" || upper == "RIGHT$") && expr->arguments.size() == 2) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string countTemp = emitExpression(expr->arguments[1].get());
+        
+        // Ensure count is int64_t
+        VariableType countType = inferExpressionType(expr->arguments[1].get());
+        if (countType == VariableType::DOUBLE) {
+            // Convert double to int64_t
+            std::string countInt = allocTemp("w");
+            emit("    " + countInt + " =w dtosi " + countTemp + "\n");
+            std::string countLong = allocTemp("l");
+            emit("    " + countLong + " =l extsw " + countInt + "\n");
+            countTemp = countLong;
+        } else if (countType == VariableType::INT) {
+            std::string countLong = allocTemp("l");
+            emit("    " + countLong + " =l extsw " + countTemp + "\n");
+            countTemp = countLong;
+        }
+        
+        std::string result = allocTemp("l");
+        emit("    " + result + " =l call $string_right(l " + strTemp + ", l " + countTemp + ")\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
     // Evaluate arguments (get raw temporaries)
     std::vector<std::string> argTemps;
     std::vector<VariableType> argTypes;
@@ -471,6 +608,14 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
             returnType = "d";
         } else if (funcCFG->returnType == VariableType::STRING) {
             returnType = "l";
+        }
+    } else {
+        // Check for builtin string functions
+        if (upper == "CHR$" || upper == "LEFT$" || upper == "RIGHT$" || 
+            upper == "MID$" || upper == "__STRING_SLICE" ||
+            upper == "STR$" || upper == "STRING$" || upper == "SPACE$" ||
+            upper == "LTRIM$" || upper == "RTRIM$" || upper == "TRIM$") {
+            returnType = "l";  // String functions return pointers
         }
     }
     

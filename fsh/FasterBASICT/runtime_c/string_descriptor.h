@@ -102,6 +102,9 @@ StringDescriptor* string_new_utf32(const uint32_t* data, int64_t length);
 // Create empty string with reserved capacity
 StringDescriptor* string_new_capacity(int64_t capacity);
 
+// Create empty ASCII string with reserved capacity
+StringDescriptor* string_new_ascii_capacity(int64_t capacity);
+
 // Create string by repeating a character
 StringDescriptor* string_new_repeat(uint32_t codepoint, int64_t count);
 

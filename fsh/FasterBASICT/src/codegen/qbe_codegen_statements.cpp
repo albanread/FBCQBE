@@ -38,6 +38,14 @@ void QBECodeGenerator::emitStatement(const Statement* stmt) {
             emitLet(static_cast<const LetStatement*>(stmt));
             break;
             
+        case ASTNodeType::STMT_MID_ASSIGN:
+            emitMidAssign(static_cast<const MidAssignStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_SLICE_ASSIGN:
+            emitSliceAssign(static_cast<const SliceAssignStatement*>(stmt));
+            break;
+            
         case ASTNodeType::STMT_IF:
             emitIf(static_cast<const IfStatement*>(stmt));
             break;
@@ -1508,6 +1516,105 @@ void QBECodeGenerator::emitRestore(const RestoreStatement* stmt) {
     // Call runtime function to set data pointer
     emit("    call $basic_restore(l " + std::to_string(targetIndex) + ")\n");
     m_stats.instructionsGenerated++;
+}
+
+// =============================================================================
+// MID$ Assignment: MID$(var$, pos, len) = replacement$
+// =============================================================================
+
+void QBECodeGenerator::emitMidAssign(const MidAssignStatement* stmt) {
+    if (!stmt || !stmt->position || !stmt->length || !stmt->replacement) return;
+    
+    emitComment("MID$ assignment: MID$(" + stmt->variable + ", pos, len) = value");
+    
+    // Get current value of the variable
+    std::string currentStr = getVariableRef(stmt->variable);
+    
+    // Emit arguments
+    std::string posTemp = emitExpression(stmt->position.get());
+    std::string lenTemp = emitExpression(stmt->length.get());
+    std::string replTemp = emitExpression(stmt->replacement.get());
+    
+    // Ensure position and length are int64_t
+    VariableType posType = inferExpressionType(stmt->position.get());
+    if (posType == VariableType::DOUBLE) {
+        std::string posInt = allocTemp("w");
+        emit("    " + posInt + " =w dtosi " + posTemp + "\n");
+        posTemp = allocTemp("l");
+        emit("    " + posTemp + " =l extsw " + posInt + "\n");
+    } else if (posType == VariableType::INT) {
+        std::string posLong = allocTemp("l");
+        emit("    " + posLong + " =l extsw " + posTemp + "\n");
+        posTemp = posLong;
+    }
+    
+    VariableType lenType = inferExpressionType(stmt->length.get());
+    if (lenType == VariableType::DOUBLE) {
+        std::string lenInt = allocTemp("w");
+        emit("    " + lenInt + " =w dtosi " + lenTemp + "\n");
+        lenTemp = allocTemp("l");
+        emit("    " + lenTemp + " =l extsw " + lenInt + "\n");
+    } else if (lenType == VariableType::INT) {
+        std::string lenLong = allocTemp("l");
+        emit("    " + lenLong + " =l extsw " + lenTemp + "\n");
+        lenTemp = lenLong;
+    }
+    
+    // Call runtime function and assign result back
+    std::string result = allocTemp("l");
+    emit("    " + result + " =l call $string_mid_assign(l " + currentStr + ", l " + posTemp + ", l " + lenTemp + ", l " + replTemp + ")\n");
+    emit("    " + currentStr + " =l copy " + result + "\n");
+    m_stats.instructionsGenerated += 2;
+}
+
+// =============================================================================
+// String Slice Assignment: var$(start TO end) = replacement$
+// =============================================================================
+
+void QBECodeGenerator::emitSliceAssign(const SliceAssignStatement* stmt) {
+    if (!stmt || !stmt->start || !stmt->end || !stmt->replacement) return;
+    
+    emitComment("String slice assignment: " + stmt->variable + "$(start TO end) = value");
+    
+    // Get current value of the variable
+    std::string currentStr = getVariableRef(stmt->variable);
+    
+    // Emit arguments
+    std::string startTemp = emitExpression(stmt->start.get());
+    std::string endTemp = emitExpression(stmt->end.get());
+    std::string replTemp = emitExpression(stmt->replacement.get());
+    
+    // Ensure start and end are int64_t
+    VariableType startType = inferExpressionType(stmt->start.get());
+    if (startType == VariableType::DOUBLE) {
+        std::string startInt = allocTemp("w");
+        emit("    " + startInt + " =w dtosi " + startTemp + "\n");
+        startTemp = allocTemp("l");
+        emit("    " + startTemp + " =l extsw " + startInt + "\n");
+    } else if (startType == VariableType::INT) {
+        std::string startLong = allocTemp("l");
+        emit("    " + startLong + " =l extsw " + startTemp + "\n");
+        startTemp = startLong;
+    }
+    
+    VariableType endType = inferExpressionType(stmt->end.get());
+    if (endType == VariableType::DOUBLE) {
+        std::string endInt = allocTemp("w");
+        emit("    " + endInt + " =w dtosi " + endTemp + "\n");
+        endTemp = allocTemp("l");
+        emit("    " + endTemp + " =l extsw " + endInt + "\n");
+    } else if (endType == VariableType::INT) {
+        std::string endLong = allocTemp("l");
+        emit("    " + endLong + " =l extsw " + endTemp + "\n");
+        endTemp = endLong;
+    }
+    
+    // Call runtime function and assign result back
+    std::string result = allocTemp("l");
+    std::string callStr = "    " + result + " =l call $string_slice_assign(l " + currentStr + ", l " + startTemp + ", l " + endTemp + ", l " + replTemp + ")\n";
+    emit(callStr);
+    emit("    " + currentStr + " =l copy " + result + "\n");
+    m_stats.instructionsGenerated += 2;
 }
 
 } // namespace FasterBASIC

@@ -75,6 +75,9 @@ void Lexer::initializeKeywords() {
         s_keywords["DEF"] = TokenType::DEF;
         s_keywords["FN"] = TokenType::FN;
         s_keywords["IIF"] = TokenType::IIF;
+        s_keywords["MID"] = TokenType::MID;
+        s_keywords["LEFT"] = TokenType::LEFT;
+        s_keywords["RIGHT"] = TokenType::RIGHT;
         s_keywords["ON"] = TokenType::ON;
         s_keywords["ONEVENT"] = TokenType::ONEVENT;
     

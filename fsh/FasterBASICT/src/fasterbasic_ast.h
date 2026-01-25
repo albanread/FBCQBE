@@ -54,6 +54,7 @@ enum class ASTNodeType {
     STMT_CLOSE,
     STMT_LET,
     STMT_MID_ASSIGN,
+    STMT_SLICE_ASSIGN,
     STMT_GOTO,
     STMT_GOSUB,
     STMT_ON_GOTO,
@@ -803,6 +804,38 @@ public:
         if (length) {
             oss << makeIndent(indent + 1) << "Length:\n";
             oss << length->toString(indent + 2);
+        }
+        if (replacement) {
+            oss << makeIndent(indent + 1) << "Replacement:\n";
+            oss << replacement->toString(indent + 2);
+        }
+        return oss.str();
+    }
+};
+
+// String slice assignment: var$(start TO end) = value
+class SliceAssignStatement : public Statement {
+public:
+    std::string variable;      // The variable being modified
+    ExpressionPtr start;       // Starting position (1-based, defaults to 1)
+    ExpressionPtr end;         // Ending position (1-based, defaults to length)
+    ExpressionPtr replacement; // The replacement string expression
+
+    SliceAssignStatement(const std::string& var)
+        : variable(var) {}
+
+    ASTNodeType getType() const override { return ASTNodeType::STMT_SLICE_ASSIGN; }
+
+    std::string toString(int indent = 0) const override {
+        std::ostringstream oss;
+        oss << makeIndent(indent) << variable << "$(start TO end) = value\n";
+        if (start) {
+            oss << makeIndent(indent + 1) << "Start:\n";
+            oss << start->toString(indent + 2);
+        }
+        if (end) {
+            oss << makeIndent(indent + 1) << "End:\n";
+            oss << end->toString(indent + 2);
         }
         if (replacement) {
             oss << makeIndent(indent + 1) << "Replacement:\n";

@@ -92,6 +92,9 @@ enum class TokenType {
     DEF,             // DEF
     FN,              // FN
     IIF,             // IIF (Immediate IF - inline conditional expression)
+    MID,             // MID (substring function)
+    LEFT,            // LEFT (left substring)
+    RIGHT,           // RIGHT (right substring)
     ON,              // ON (for ON GOTO/GOSUB/CALL)
     ONEVENT,         // ONEVENT (for ONEVENT eventname GOTO/GOSUB/CALL)
     OFF,             // OFF (for OPTION CANCELLABLE OFF)
@@ -372,6 +375,9 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::DEF: return "DEF";
         case TokenType::FN: return "FN";
         case TokenType::IIF: return "IIF";
+        case TokenType::MID: return "MID";
+        case TokenType::LEFT: return "LEFT";
+        case TokenType::RIGHT: return "RIGHT";
         case TokenType::ON: return "ON";
         case TokenType::KEYWORD_INTEGER: return "INTEGER";
         case TokenType::KEYWORD_DOUBLE: return "DOUBLE";

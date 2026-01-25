@@ -188,6 +188,8 @@ private:
     void emitPrint(const PrintStatement* stmt);
     void emitInput(const InputStatement* stmt);
     void emitLet(const LetStatement* stmt);
+    void emitMidAssign(const MidAssignStatement* stmt);
+    void emitSliceAssign(const SliceAssignStatement* stmt);
     void emitIf(const IfStatement* stmt);
     void emitFor(const ForStatement* stmt);
     void emitNext(const NextStatement* stmt);

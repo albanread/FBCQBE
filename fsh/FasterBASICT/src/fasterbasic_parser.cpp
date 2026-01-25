@@ -1152,6 +1152,56 @@ StatementPtr Parser::parseLetStatement() {
     TokenType suffix = TokenType::UNKNOWN;
     std::string varName = parseVariableName(suffix);
 
+    // Check for string slice assignment: var$(start TO end) = value
+    if (suffix == TokenType::TYPE_STRING && match(TokenType::LPAREN)) {
+        // This might be a slice assignment
+        ExpressionPtr startExpr = nullptr;
+        ExpressionPtr endExpr = nullptr;
+        
+        // Check if we have a start expression (not immediately TO)
+        if (!check(TokenType::TO)) {
+            startExpr = parseExpression();
+        }
+        
+        // Check for TO keyword
+        if (match(TokenType::TO)) {
+            // Check if we have an end expression (not immediately RPAREN)
+            if (!check(TokenType::RPAREN)) {
+                endExpr = parseExpression();
+            }
+            
+            if (match(TokenType::RPAREN) && match(TokenType::EQUAL)) {
+                // This is indeed a slice assignment
+                auto sliceStmt = std::make_unique<SliceAssignStatement>(varName);
+                
+                // Add start expression (default to 1 if missing)
+                if (startExpr) {
+                    sliceStmt->start = std::move(startExpr);
+                } else {
+                    sliceStmt->start = std::make_unique<NumberExpression>(1);
+                }
+                
+                // Add end expression (default to -1 for "to end" if missing)
+                if (endExpr) {
+                    sliceStmt->end = std::move(endExpr);
+                } else {
+                    sliceStmt->end = std::make_unique<NumberExpression>(-1);
+                }
+                
+                // Parse replacement expression
+                sliceStmt->replacement = parseExpression();
+                
+                return sliceStmt;
+            }
+        }
+        
+        // Not a slice assignment, backtrack and treat as regular assignment
+        // This is tricky - we need to put back the tokens we consumed
+        // For now, let's error on this case since it's complex to backtrack
+        error("Invalid string slice syntax. Use var$(start TO end) = value");
+        return nullptr;
+    }
+
     auto stmt = std::make_unique<LetStatement>(varName, suffix);
 
     // Check for array indices
@@ -4344,7 +4394,54 @@ ExpressionPtr Parser::parsePrimary() {
                 return call;
             }
 
-            // PRIORITY 3: Otherwise, it's array access
+            // PRIORITY 3: Check for string slicing syntax (var$(start TO end))
+            if (suffix == TokenType::TYPE_STRING) {
+                ExpressionPtr startExpr = nullptr;
+                ExpressionPtr endExpr = nullptr;
+                
+                // Check if we have a start expression (not immediately TO)
+                if (!check(TokenType::TO)) {
+                    startExpr = parseExpression();
+                }
+                
+                // Check for TO keyword
+                if (match(TokenType::TO)) {
+                    // This is string slicing: var$(start TO end) or var$(TO end) or var$(start TO)
+                    
+                    // Check if we have an end expression (not immediately RPAREN)
+                    if (!check(TokenType::RPAREN)) {
+                        endExpr = parseExpression();
+                    }
+                    
+                    consume(TokenType::RPAREN, "Expected ')' after string slice");
+                    
+                    // Convert to internal STRING_SLICE function
+                    auto sliceCall = std::make_unique<FunctionCallExpression>("__string_slice", false);
+                    sliceCall->addArgument(std::make_unique<VariableExpression>(name, suffix));
+                    
+                    // Add start expression (default to 1 if missing)
+                    if (startExpr) {
+                        sliceCall->addArgument(std::move(startExpr));
+                    } else {
+                        sliceCall->addArgument(std::make_unique<NumberExpression>(1));
+                    }
+                    
+                    // Add end expression (default to -1 for "to end" if missing)
+                    if (endExpr) {
+                        sliceCall->addArgument(std::move(endExpr));
+                    } else {
+                        sliceCall->addArgument(std::make_unique<NumberExpression>(-1));
+                    }
+                    
+                    return sliceCall;
+                } else {
+                    // String variables don't support array access, so this is an error
+                    error("String variables do not support array-style indexing. Use slicing syntax: var$(start TO end)");
+                    return std::make_unique<NumberExpression>(0);
+                }
+            }
+
+            // PRIORITY 4: Otherwise, it's regular array access
             auto arrayAccess = std::make_unique<ArrayAccessExpression>(name, suffix);
 
             if (current().type != TokenType::RPAREN) {

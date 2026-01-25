@@ -443,6 +443,11 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             VariableType leftType = inferExpressionType(binExpr->left.get());
             VariableType rightType = inferExpressionType(binExpr->right.get());
             
+            // Special case: string concatenation
+            if (op == TokenType::PLUS && leftType == VariableType::STRING && rightType == VariableType::STRING) {
+                return VariableType::STRING;
+            }
+            
             // Type promotion rules: DOUBLE is the default numeric type
             // Only use INT if BOTH operands are explicitly INT
             if (leftType == VariableType::DOUBLE || rightType == VariableType::DOUBLE) {
@@ -513,7 +518,7 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             
             // String functions return STRING
             if (upper == "CHR$" || upper == "LEFT$" || upper == "RIGHT$" || upper == "MID$" ||
-                upper == "STR$" || upper == "SPACE$" || upper == "STRING$" || 
+                upper == "__STRING_SLICE" || upper == "STR$" || upper == "SPACE$" || upper == "STRING$" || 
                 upper == "UCASE$" || upper == "LCASE$" || upper == "TRIM$" || 
                 upper == "LTRIM$" || upper == "RTRIM$") {
                 return VariableType::STRING;
