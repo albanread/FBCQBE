@@ -368,7 +368,12 @@ void SemanticAnalyzer::collectLabels(Program& program) {
         for (const auto& stmt : line->statements) {
             if (stmt->getType() == ASTNodeType::STMT_LABEL) {
                 const auto& labelStmt = static_cast<const LabelStatement&>(*stmt);
-                declareLabel(labelStmt.labelName, i, stmt->location);
+                // For labels on lines by themselves, use the next line's number
+                int labelLineNumber = line->lineNumber;
+                if (line->statements.size() == 1 && i + 1 < program.lines.size()) {
+                    labelLineNumber = program.lines[i + 1]->lineNumber;
+                }
+                declareLabel(labelStmt.labelName, labelLineNumber, stmt->location);
             }
         }
     }
@@ -1135,6 +1140,12 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
         case ASTNodeType::STMT_GOSUB:
             validateGosubStatement(static_cast<const GosubStatement&>(stmt));
             break;
+        case ASTNodeType::STMT_ON_GOTO:
+            validateOnGotoStatement(static_cast<const OnGotoStatement&>(stmt));
+            break;
+        case ASTNodeType::STMT_ON_GOSUB:
+            validateOnGosubStatement(static_cast<const OnGosubStatement&>(stmt));
+            break;
         case ASTNodeType::STMT_IF:
             validateIfStatement(static_cast<const IfStatement&>(stmt));
             break;
@@ -1509,6 +1520,66 @@ void SemanticAnalyzer::validateGosubStatement(const GosubStatement& stmt) {
                   stmt.location);
         } else {
             lineSym->references.push_back(stmt.location);
+        }
+    }
+}
+
+void SemanticAnalyzer::validateOnGotoStatement(const OnGotoStatement& stmt) {
+    // Validate the selector expression
+    validateExpression(*stmt.selector);
+    
+    // Validate all targets
+    for (size_t i = 0; i < stmt.isLabelList.size(); ++i) {
+        if (stmt.isLabelList[i]) {
+            // Symbolic label - resolve it
+            auto* labelSym = lookupLabel(stmt.labels[i]);
+            if (!labelSym) {
+                error(SemanticErrorType::UNDEFINED_LABEL,
+                      "ON GOTO target label :" + stmt.labels[i] + " does not exist",
+                      stmt.location);
+            } else {
+                labelSym->references.push_back(stmt.location);
+            }
+        } else {
+            // Line number
+            auto* lineSym = lookupLine(stmt.lineNumbers[i]);
+            if (!lineSym) {
+                error(SemanticErrorType::UNDEFINED_LINE,
+                      "ON GOTO target line " + std::to_string(stmt.lineNumbers[i]) + " does not exist",
+                      stmt.location);
+            } else {
+                lineSym->references.push_back(stmt.location);
+            }
+        }
+    }
+}
+
+void SemanticAnalyzer::validateOnGosubStatement(const OnGosubStatement& stmt) {
+    // Validate the selector expression
+    validateExpression(*stmt.selector);
+    
+    // Validate all targets
+    for (size_t i = 0; i < stmt.isLabelList.size(); ++i) {
+        if (stmt.isLabelList[i]) {
+            // Symbolic label - resolve it
+            auto* labelSym = lookupLabel(stmt.labels[i]);
+            if (!labelSym) {
+                error(SemanticErrorType::UNDEFINED_LABEL,
+                      "ON GOSUB target label :" + stmt.labels[i] + " does not exist",
+                      stmt.location);
+            } else {
+                labelSym->references.push_back(stmt.location);
+            }
+        } else {
+            // Line number
+            auto* lineSym = lookupLine(stmt.lineNumbers[i]);
+            if (!lineSym) {
+                error(SemanticErrorType::UNDEFINED_LINE,
+                      "ON GOSUB target line " + std::to_string(stmt.lineNumbers[i]) + " does not exist",
+                      stmt.location);
+            } else {
+                lineSym->references.push_back(stmt.location);
+            }
         }
     }
 }

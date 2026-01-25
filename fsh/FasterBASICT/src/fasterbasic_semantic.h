@@ -171,7 +171,7 @@ struct LineNumberSymbol {
 struct LabelSymbol {
     std::string name;
     int labelId;                // Unique numeric ID for code generation
-    size_t programLineIndex;    // Index in Program::lines where defined
+    size_t programLineIndex;    // Line number where defined
     SourceLocation definition;
     std::vector<SourceLocation> references;  // Where referenced (GOTO, GOSUB)
 
@@ -443,6 +443,8 @@ private:
     void validateLetStatement(const LetStatement& stmt);
     void validateGotoStatement(const GotoStatement& stmt);
     void validateGosubStatement(const GosubStatement& stmt);
+    void validateOnGotoStatement(const OnGotoStatement& stmt);
+    void validateOnGosubStatement(const OnGosubStatement& stmt);
     void validateIfStatement(const IfStatement& stmt);
     void validateForStatement(const ForStatement& stmt);
     void validateForInStatement(const ForInStatement& stmt);

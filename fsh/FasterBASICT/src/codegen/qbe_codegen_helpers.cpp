@@ -100,6 +100,43 @@ std::string QBECodeGenerator::getFunctionExitLabel() {
     return "exit";
 }
 
+int QBECodeGenerator::getFallthroughBlock(const Statement* stmt) const {
+    if (!m_cfg) {
+        return -1;
+    }
+
+    int basicLine = 0;
+    if (m_currentBlock && stmt) {
+        basicLine = m_currentBlock->getLineNumber(stmt);
+    }
+    if (basicLine <= 0 && stmt) {
+        basicLine = stmt->location.line;
+    }
+    if (basicLine > 0) {
+        int candidate = m_cfg->getBlockForLineOrNext(basicLine + 1);
+        if (candidate >= 0 && (!m_currentBlock || candidate != m_currentBlock->id)) {
+            return candidate;
+        }
+    }
+
+    if (m_currentBlock) {
+        for (const auto& edge : m_cfg->edges) {
+            if (edge.sourceBlock == m_currentBlock->id && edge.type == EdgeType::FALLTHROUGH) {
+                return edge.targetBlock;
+            }
+        }
+    }
+
+    if (m_currentBlock) {
+        int nextSequential = m_currentBlock->id + 1;
+        if (nextSequential < m_cfg->getBlockCount()) {
+            return nextSequential;
+        }
+    }
+
+    return -1;
+}
+
 // =============================================================================
 // Type System - QBE Type Mapping
 // =============================================================================

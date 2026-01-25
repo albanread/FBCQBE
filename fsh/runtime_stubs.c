@@ -158,8 +158,30 @@ StringDescriptor* string_new_empty(void) {
     return desc;
 }
 
+// Create empty string with reserved capacity
+StringDescriptor* string_new_capacity(int64_t capacity) {
+    if (capacity <= 0) return string_new_empty();
+    
+    StringDescriptor* desc = (StringDescriptor*)calloc(1, sizeof(StringDescriptor));
+    if (!desc) return NULL;
+    
+    desc->data = (uint32_t*)malloc(capacity * sizeof(uint32_t));
+    if (!desc->data) {
+        free(desc);
+        return NULL;
+    }
+    
+    desc->length = 0;
+    desc->capacity = capacity;
+    desc->refcount = 1;
+    desc->dirty = 1;
+    desc->utf8_cache = NULL;
+    
+    return desc;
+}
+
 // Create a string from UTF-8 literal
-StringDescriptor* string_new_from_utf8(const char* utf8_str) {
+StringDescriptor* string_new_utf8(const char* utf8_str) {
     if (!utf8_str) return string_new_empty();
     
     StringDescriptor* desc = (StringDescriptor*)calloc(1, sizeof(StringDescriptor));
@@ -390,12 +412,12 @@ void basic_string_bounds_error(int64_t index, int64_t min, int64_t max) {
 // ============================================================================
 
 // Runtime initialization
-void basic_init(void) {
+void basic_runtime_init(void) {
     // Initialize runtime (nothing needed for simple test)
 }
 
 // Runtime cleanup
-void basic_cleanup(void) {
+void basic_runtime_cleanup(void) {
     // Cleanup runtime (nothing needed for simple test)
 }
 
@@ -497,7 +519,7 @@ StringDescriptor* basic_input_line(void) {
         if (len > 0 && buffer[len-1] == '\n') {
             buffer[len-1] = '\0';
         }
-        return string_new_from_utf8(buffer);
+        return string_new_utf8(buffer);
     }
     return string_new_empty();
 }

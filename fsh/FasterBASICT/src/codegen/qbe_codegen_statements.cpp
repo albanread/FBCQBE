@@ -74,6 +74,18 @@ void QBECodeGenerator::emitStatement(const Statement* stmt) {
             emitGosub(static_cast<const GosubStatement*>(stmt));
             break;
             
+        case ASTNodeType::STMT_ON_GOTO:
+            emitOnGoto(static_cast<const OnGotoStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_ON_GOSUB:
+            emitOnGosub(static_cast<const OnGosubStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_LABEL:
+            // Labels are just markers - no code generated
+            break;
+            
         case ASTNodeType::STMT_RETURN:
             emitReturn(static_cast<const ReturnStatement*>(stmt));
             break;
@@ -652,16 +664,12 @@ void QBECodeGenerator::emitGoto(const GotoStatement* stmt) {
 void QBECodeGenerator::emitGosub(const GosubStatement* stmt) {
     if (!stmt) return;
     
-    // GOSUB needs return address tracking
-    // For now, emit a simple jump (proper implementation needs return stack)
+    // Get target block
     int targetBlock = -1;
-    
     if (stmt->isLabel) {
-        // Symbolic label - need to find the line it's on, then map to block
         if (m_symbols) {
             auto it = m_symbols->labels.find(stmt->label);
             if (it != m_symbols->labels.end()) {
-                // Find which line this label is on and map to block
                 int labelLine = it->second.programLineIndex;
                 if (m_cfg && labelLine >= 0) {
                     targetBlock = m_cfg->getBlockForLine(labelLine);
@@ -673,13 +681,269 @@ void QBECodeGenerator::emitGosub(const GosubStatement* stmt) {
     }
     
     if (targetBlock >= 0) {
+        // Get return block (next statement after GOSUB)
+        int returnBlock = getFallthroughBlock(stmt);
+        
+        if (returnBlock >= 0) {
+            // Push return block to stack
+            std::string spTemp = allocTemp("w");
+            emit("    " + spTemp + " =w loadw $return_sp\n");
+            std::string spLong = allocTemp("l");
+            emit("    " + spLong + " =l extsw " + spTemp + "\n");
+            std::string byteOffset = allocTemp("l");
+            emit("    " + byteOffset + " =l mul " + spLong + ", 4\n");
+            std::string stackAddr = allocTemp("l");
+            emit("    " + stackAddr + " =l add $return_stack, " + byteOffset + "\n");
+            emit("    storew " + std::to_string(returnBlock) + ", " + stackAddr + "\n");
+            std::string newSp = allocTemp("w");
+            emit("    " + newSp + " =w add " + spTemp + ", 1\n");
+            emit("    storew " + newSp + ", $return_sp\n");
+            m_stats.instructionsGenerated += 7;
+        }
+        
+        // Jump to target
         std::string targetLabel = getBlockLabel(targetBlock);
-        emitComment("GOSUB (TODO: implement return stack)");
+        emitComment("GOSUB to " + targetLabel);
         emit("    jmp @" + targetLabel + "\n");
         m_stats.instructionsGenerated++;
-        m_lastStatementWasTerminator = true;  // GOSUB is a terminator
+        m_lastStatementWasTerminator = true;
     } else {
         emitComment("ERROR: GOSUB target not found");
+    }
+}
+
+// =============================================================================
+// ON GOTO Statement
+// =============================================================================
+
+void QBECodeGenerator::emitOnGoto(const OnGotoStatement* stmt) {
+    if (!stmt || stmt->isLabelList.empty()) return;
+    
+    // Evaluate the selector expression
+    std::string selectorTemp = emitExpression(stmt->selector.get());
+    
+    // Convert to integer if needed (should already be int, but be safe)
+    VariableType selectorType = inferExpressionType(stmt->selector.get());
+    if (selectorType != VariableType::INT) {
+        // Convert to int
+        std::string intTemp = allocTemp("w");
+        if (selectorType == VariableType::DOUBLE) {
+            emit("    " + intTemp + " =w dtosi " + selectorTemp + "\n");
+        } else {
+            // Default conversion
+            emit("    " + intTemp + " =w copy " + selectorTemp + "\n");
+        }
+        selectorTemp = intTemp;
+        m_stats.instructionsGenerated++;
+    }
+    
+    // Determine fallthrough block (next statement after ON GOTO)
+    int fallthroughBlock = getFallthroughBlock(stmt);
+
+    // Generate dispatch thunk with conditional jumps
+    // ON x GOTO target1, target2, target3, ... means:
+    // if x == 1 goto target1
+    // if x == 2 goto target2
+    // etc.
+    // If out of range, fall through
+    
+    std::vector<std::pair<int, int>> dispatchTargets;
+    dispatchTargets.reserve(stmt->isLabelList.size());
+
+    for (size_t i = 0; i < stmt->isLabelList.size(); ++i) {
+        int targetIndex = static_cast<int>(i) + 1;  // 1-based indexing
+
+        int targetBlock = -1;
+        if (stmt->isLabelList[i]) {
+            if (m_symbols) {
+                auto it = m_symbols->labels.find(stmt->labels[i]);
+                if (it != m_symbols->labels.end()) {
+                    int labelLine = it->second.programLineIndex;
+                    if (m_cfg && labelLine >= 0) {
+                        targetBlock = m_cfg->getBlockForLine(labelLine);
+                    }
+                }
+            }
+        } else {
+            targetBlock = m_cfg->getBlockForLine(stmt->lineNumbers[i]);
+        }
+
+        if (targetBlock >= 0) {
+            dispatchTargets.emplace_back(targetIndex, targetBlock);
+        }
+    }
+
+    bool hasFallthroughBlock = fallthroughBlock >= 0;
+    std::string fallthroughLabel = hasFallthroughBlock ? getBlockLabel(fallthroughBlock) : allocLabel();
+
+    if (dispatchTargets.empty()) {
+        if (hasFallthroughBlock) {
+            emit("    jmp @" + fallthroughLabel + "\n");
+            m_stats.instructionsGenerated++;
+            m_lastStatementWasTerminator = true;
+        } else {
+            emitComment("WARNING: ON GOTO without valid targets or fallthrough block");
+            emit("    jmp @" + getFunctionExitLabel() + "\n");
+            m_stats.instructionsGenerated++;
+            m_lastStatementWasTerminator = true;
+        }
+        return;
+    }
+
+    for (size_t i = 0; i < dispatchTargets.size(); ++i) {
+        int targetIndex = dispatchTargets[i].first;
+        int targetBlock = dispatchTargets[i].second;
+        std::string targetLabel = getBlockLabel(targetBlock);
+
+        std::string constTemp = allocTemp("w");
+        emit("    " + constTemp + " =w copy " + std::to_string(targetIndex) + "\n");
+        m_stats.instructionsGenerated++;
+
+        std::string isEqualTemp = allocTemp("w");
+        emit("    " + isEqualTemp + " =w ceqw " + selectorTemp + ", " + constTemp + "\n");
+        m_stats.instructionsGenerated++;
+
+        bool isLast = (i + 1 == dispatchTargets.size());
+        std::string nextLabel = isLast ? fallthroughLabel : allocLabel();
+        emit("    jnz " + isEqualTemp + ", @" + targetLabel + ", @" + nextLabel + "\n");
+        m_stats.instructionsGenerated++;
+
+        if (!isLast) {
+            emitLabel(nextLabel);
+        }
+    }
+
+    if (hasFallthroughBlock) {
+        m_lastStatementWasTerminator = true;
+    } else {
+        emitLabel(fallthroughLabel);
+        emitComment("WARNING: ON GOTO without valid fallthrough block");
+        emit("    jmp @" + getFunctionExitLabel() + "\n");
+        m_stats.instructionsGenerated++;
+        m_lastStatementWasTerminator = true;
+    }
+}
+
+// =============================================================================
+// ON GOSUB Statement
+// =============================================================================
+
+void QBECodeGenerator::emitOnGosub(const OnGosubStatement* stmt) {
+    if (!stmt || stmt->isLabelList.empty()) return;
+    
+    // Evaluate the selector expression
+    std::string selectorTemp = emitExpression(stmt->selector.get());
+    
+    // Convert to integer if needed (should already be int, but be safe)
+    VariableType selectorType = inferExpressionType(stmt->selector.get());
+    if (selectorType != VariableType::INT) {
+        // Convert to int
+        std::string intTemp = allocTemp("w");
+        if (selectorType == VariableType::DOUBLE) {
+            emit("    " + intTemp + " =w dtosi " + selectorTemp + "\n");
+        } else {
+            // Default conversion
+            emit("    " + intTemp + " =w copy " + selectorTemp + "\n");
+        }
+        selectorTemp = intTemp;
+        m_stats.instructionsGenerated++;
+    }
+    
+    // Get return block (next statement after ON GOSUB)
+    int returnBlock = getFallthroughBlock(stmt);
+    
+    // Push return block to stack so RETURN can resume execution
+    if (returnBlock >= 0) {
+        std::string spTemp = allocTemp("w");
+        emit("    " + spTemp + " =w loadw $return_sp\n");
+        std::string spLong = allocTemp("l");
+        emit("    " + spLong + " =l extsw " + spTemp + "\n");
+        std::string byteOffset = allocTemp("l");
+        emit("    " + byteOffset + " =l mul " + spLong + ", 4\n");
+        std::string stackAddr = allocTemp("l");
+        emit("    " + stackAddr + " =l add $return_stack, " + byteOffset + "\n");
+        emit("    storew " + std::to_string(returnBlock) + ", " + stackAddr + "\n");
+        std::string newSp = allocTemp("w");
+        emit("    " + newSp + " =w add " + spTemp + ", 1\n");
+        emit("    storew " + newSp + ", $return_sp\n");
+        m_stats.instructionsGenerated += 7;
+    } else {
+        emitComment("WARNING: ON GOSUB without valid fallthrough block");
+    }
+    
+    // Generate dispatch thunk with conditional jumps
+    // ON x GOSUB target1, target2, target3, ... means:
+    // if x == 1 GOSUB target1
+    // if x == 2 GOSUB target2
+    // etc.
+    std::vector<std::pair<int, int>> dispatchTargets;
+    dispatchTargets.reserve(stmt->isLabelList.size());
+
+    for (size_t i = 0; i < stmt->isLabelList.size(); ++i) {
+        int targetIndex = static_cast<int>(i) + 1;
+
+        int targetBlock = -1;
+        if (stmt->isLabelList[i]) {
+            if (m_symbols) {
+                auto it = m_symbols->labels.find(stmt->labels[i]);
+                if (it != m_symbols->labels.end()) {
+                    int labelLine = it->second.programLineIndex;
+                    if (m_cfg && labelLine >= 0) {
+                        targetBlock = m_cfg->getBlockForLine(labelLine);
+                    }
+                }
+            }
+        } else {
+            targetBlock = m_cfg->getBlockForLine(stmt->lineNumbers[i]);
+        }
+
+        if (targetBlock >= 0) {
+            dispatchTargets.emplace_back(targetIndex, targetBlock);
+        }
+    }
+
+    std::string fallbackLabel = allocLabel();
+
+    for (size_t i = 0; i < dispatchTargets.size(); ++i) {
+        int targetIndex = dispatchTargets[i].first;
+        int targetBlock = dispatchTargets[i].second;
+        std::string targetLabel = getBlockLabel(targetBlock);
+
+        std::string constTemp = allocTemp("w");
+        emit("    " + constTemp + " =w copy " + std::to_string(targetIndex) + "\n");
+        m_stats.instructionsGenerated++;
+
+        std::string isEqualTemp = allocTemp("w");
+        emit("    " + isEqualTemp + " =w ceqw " + selectorTemp + ", " + constTemp + "\n");
+        m_stats.instructionsGenerated++;
+
+        bool isLast = (i + 1 == dispatchTargets.size());
+        std::string falseLabel = isLast ? fallbackLabel : allocLabel();
+        emit("    jnz " + isEqualTemp + ", @" + targetLabel + ", @" + falseLabel + "\n");
+        m_stats.instructionsGenerated++;
+
+        if (!isLast) {
+            emitLabel(falseLabel);
+        }
+    }
+
+    emitLabel(fallbackLabel);
+
+    if (returnBlock >= 0) {
+        std::string spTemp = allocTemp("w");
+        emit("    " + spTemp + " =w loadw $return_sp\n");
+        std::string newSp = allocTemp("w");
+        emit("    " + newSp + " =w sub " + spTemp + ", 1\n");
+        emit("    storew " + newSp + ", $return_sp\n");
+        std::string nextBlockLabel = getBlockLabel(returnBlock);
+        emit("    jmp @" + nextBlockLabel + "\n");
+        m_stats.instructionsGenerated += 4;
+        m_lastStatementWasTerminator = true;
+    } else {
+        emitComment("ERROR: ON GOSUB without valid return block");
+        emit("    jmp @" + getFunctionExitLabel() + "\n");
+        m_stats.instructionsGenerated++;
+        m_lastStatementWasTerminator = true;
     }
 }
 
@@ -721,8 +985,46 @@ void QBECodeGenerator::emitReturn(const ReturnStatement* stmt) {
         m_lastStatementWasTerminator = true;
     } else {
         // RETURN from GOSUB
-        // TODO: Implement return stack for GOSUB
-        emitComment("RETURN from GOSUB (TODO: implement return stack)");
+        // Pop return block index from stack and dispatch
+        std::string spTemp = allocTemp("w");
+        emit("    " + spTemp + " =w loadw $return_sp\n");
+        std::string newSp = allocTemp("w");
+        emit("    " + newSp + " =w sub " + spTemp + ", 1\n");
+        emit("    storew " + newSp + ", $return_sp\n");
+        std::string newSpLong = allocTemp("l");
+        emit("    " + newSpLong + " =l extsw " + newSp + "\n");
+        std::string byteOffset = allocTemp("l");
+        emit("    " + byteOffset + " =l mul " + newSpLong + ", 4\n");
+        std::string stackAddr = allocTemp("l");
+        emit("    " + stackAddr + " =l add $return_stack, " + byteOffset + "\n");
+        std::string returnBlockIdTemp = allocTemp("w");
+        emit("    " + returnBlockIdTemp + " =w loadw " + stackAddr + "\n");
+        m_stats.instructionsGenerated += 7;
+
+        size_t blockCount = (m_cfg) ? m_cfg->blocks.size() : 0;
+        if (blockCount > 0) {
+            std::string fallbackLabel = allocLabel();
+            for (size_t i = 0; i < blockCount; ++i) {
+                std::string caseValue = allocTemp("w");
+                emit("    " + caseValue + " =w copy " + std::to_string(i) + "\n");
+                std::string isMatch = allocTemp("w");
+                emit("    " + isMatch + " =w ceqw " + returnBlockIdTemp + ", " + caseValue + "\n");
+                std::string targetLabel = getBlockLabel(static_cast<int>(i));
+                bool isLast = (i + 1 == blockCount);
+                std::string falseLabel = isLast ? fallbackLabel : allocLabel();
+                emit("    jnz " + isMatch + ", @" + targetLabel + ", @" + falseLabel + "\n");
+                m_stats.instructionsGenerated += 3;
+                if (!isLast) {
+                    emitLabel(falseLabel);
+                }
+            }
+            emitLabel(fallbackLabel);
+        }
+
+        emitComment("RETURN stack underflow or invalid target - falling back to program exit");
+        emit("    jmp @" + getFunctionExitLabel() + "\n");
+        m_stats.instructionsGenerated++;
+        m_lastStatementWasTerminator = true;
     }
 }
 

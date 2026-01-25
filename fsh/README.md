@@ -54,10 +54,10 @@ Linker + Runtime Library → Native Executable
 
 🚧 **Under Development** 🚧
 
-- [ ] QBE code generator
-- [ ] Runtime library
-- [ ] Basic data types (integers, floats, strings)
-- [ ] Control flow (IF, FOR, WHILE, GOTO, GOSUB)
+- [x] QBE code generator
+- [x] Runtime library
+- [x] Basic data types (integers, floats, strings)
+- [x] Control flow (IF, FOR, WHILE, GOTO, GOSUB, ON GOTO, ON GOSUB)
 - [ ] Arrays
 - [ ] Functions and subroutines
 - [ ] I/O operations (PRINT, INPUT, file operations)
@@ -171,8 +171,10 @@ No garbage collector, using:
 
 ### Dynamic Features
 BASIC features like `ON GOTO` and `ON GOSUB`:
-- Implemented as jump tables
-- Switch-style lowering in QBE IL
+- Implemented as chained conditional jumps in QBE IL
+- ON GOSUB uses a return stack for subroutine calls
+- CFG-aware fallthrough resolution for correct return targets
+- See `../ON_STATEMENTS_DOCUMENTATION.md` for detailed implementation
 
 ## License
 

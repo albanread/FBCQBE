@@ -49,7 +49,7 @@ This project adds a QBE (Quick Backend) code generator to FasterBASIC, enabling 
 - [ ] Basic infrastructure and class structure
 - [ ] Expression code generation
 - [ ] Statement code generation
-- [ ] Control flow (IF, FOR, WHILE, GOTO, GOSUB)
+- [x] Control flow (IF, FOR, WHILE, GOTO, GOSUB, ON GOTO)
 - [ ] Function and subroutine calls
 - [ ] Array operations
 - [ ] String operations

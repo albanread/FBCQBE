@@ -200,6 +200,8 @@ private:
     void emitWend(const WendStatement* stmt);
     void emitGoto(const GotoStatement* stmt);
     void emitGosub(const GosubStatement* stmt);
+    void emitOnGoto(const OnGotoStatement* stmt);
+    void emitOnGosub(const OnGosubStatement* stmt);
     void emitReturn(const ReturnStatement* stmt);
     void emitDim(const DimStatement* stmt);
     void emitEnd(const EndStatement* stmt);
@@ -310,6 +312,7 @@ private:
     std::string getBlockLabel(int blockId);
     std::string getLineLabel(int lineNumber);
     std::string getFunctionExitLabel();  // Returns tidy_exit for functions, exit for main
+    int getFallthroughBlock(const Statement* stmt) const;
     
     // Type mapping
     std::string getQBEType(VariableType type);

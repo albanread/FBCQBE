@@ -1,0 +1,28 @@
+10 PRINT "ON GOTO/GOSUB Test Program"
+20 PRINT "Enter a number (1-3): "
+30 INPUT X
+40 ON X GOTO 100, 200, 300
+50 PRINT "Invalid choice - continuing..."
+60 GOTO 20
+100 PRINT "You chose option 1"
+110 GOTO 400
+200 PRINT "You chose option 2"
+210 GOTO 400
+300 PRINT "You chose option 3"
+310 GOTO 400
+400 PRINT "End of test"
+410 END
+
+500 REM Test ON GOSUB
+510 PRINT "Testing ON GOSUB..."
+520 Y = 2
+530 ON Y GOSUB 600, 700, 800
+540 PRINT "Returned from GOSUB"
+550 GOTO 900
+600 PRINT "GOSUB target 1"
+610 RETURN
+700 PRINT "GOSUB target 2"
+710 RETURN
+800 PRINT "GOSUB target 3"
+810 RETURN
+900 PRINT "GOSUB test complete"

@@ -215,6 +215,12 @@ void QBECodeGenerator::emitDataSection() {
         emit("\n");
     }
     
+    // Emit GOSUB return stack
+    emitComment("GOSUB return stack");
+    emit("export data $return_stack = { w 0, w 0, w 0, w 0, w 0, w 0, w 0, w 0, w 0, w 0, w 0, w 0, w 0, w 0, w 0, w 0 }\n");
+    emit("export data $return_sp = { w 0 }\n");
+    emit("\n");
+    
     // Emit string literals as data objects
     if (!m_dataStrings.empty()) {
         emitComment("String literals");
@@ -690,6 +696,9 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
                 }
             }
             emitStatement(stmt);
+            if (m_lastStatementWasTerminator) {
+                break;
+            }
         }
     }
     

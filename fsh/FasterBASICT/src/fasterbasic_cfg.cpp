@@ -130,6 +130,35 @@ void collectJumpTargetsFromStatements(const std::vector<std::unique_ptr<Statemen
                 break;
             }
             
+            case ASTNodeType::STMT_ON_GOTO: {
+                const auto& onGotoStmt = static_cast<const OnGotoStatement&>(*stmt);
+                for (size_t i = 0; i < onGotoStmt.isLabelList.size(); ++i) {
+                    if (!onGotoStmt.isLabelList[i]) {
+                        // Line number target
+                        targets.insert(onGotoStmt.lineNumbers[i]);
+                    }
+                }
+                break;
+            }
+            
+            case ASTNodeType::STMT_ON_GOSUB: {
+                const auto& onGosubStmt = static_cast<const OnGosubStatement&>(*stmt);
+                for (size_t i = 0; i < onGosubStmt.isLabelList.size(); ++i) {
+                    if (!onGosubStmt.isLabelList[i]) {
+                        // Line number target
+                        targets.insert(onGosubStmt.lineNumbers[i]);
+                    }
+                    // For labels, we don't add to targets here since labels are collected separately
+                }
+                break;
+            }
+            
+            case ASTNodeType::STMT_LABEL: {
+                // Labels are potential jump targets - but we handle them separately
+                // since they are collected in the semantic analyzer
+                break;
+            }
+            
             case ASTNodeType::STMT_IF: {
                 const auto& ifStmt = static_cast<const IfStatement&>(*stmt);
                 if (ifStmt.hasGoto) {
@@ -231,12 +260,25 @@ void CFGBuilder::processStatement(const Statement& stmt, BasicBlock* currentBloc
     }
     
     switch (type) {
+        case ASTNodeType::STMT_LABEL:
+            processLabelStatement(static_cast<const LabelStatement&>(stmt), currentBlock);
+            break;
+            
         case ASTNodeType::STMT_GOTO:
             processGotoStatement(static_cast<const GotoStatement&>(stmt), currentBlock);
             break;
             
         case ASTNodeType::STMT_GOSUB:
             processGosubStatement(static_cast<const GosubStatement&>(stmt), currentBlock);
+            break;
+            
+        case ASTNodeType::STMT_ON_GOTO:
+            processOnGotoStatement(static_cast<const OnGotoStatement&>(stmt), currentBlock);
+            break;
+            
+        case ASTNodeType::STMT_ON_GOSUB:
+            processOnGosubStatement(static_cast<const OnGosubStatement&>(stmt), currentBlock);
+            currentBlock->isTerminator = true;
             break;
             
         case ASTNodeType::STMT_IF:
@@ -366,6 +408,30 @@ void CFGBuilder::processGotoStatement(const GotoStatement& stmt, BasicBlock* cur
 void CFGBuilder::processGosubStatement(const GosubStatement& stmt, BasicBlock* currentBlock) {
     // GOSUB is like a call - execution continues after it
     // Edge will be added in buildEdges phase
+}
+
+void CFGBuilder::processOnGotoStatement(const OnGotoStatement& stmt, BasicBlock* currentBlock) {
+    // ON GOTO creates multiple potential jump targets - like GOTO, it's a terminator
+    // If selector is out of range, execution continues to next statement
+    BasicBlock* nextBlock = createNewBlock();
+    m_currentBlock = nextBlock;
+    
+    // Edges will be added in buildEdges phase when we know target block IDs
+}
+
+void CFGBuilder::processOnGosubStatement(const OnGosubStatement& stmt, BasicBlock* currentBlock) {
+    // ON GOSUB creates multiple potential subroutine calls - like GOSUB, execution can continue
+    // If selector is out of range, execution continues to next statement
+    // Since it's a terminator, start new block for next statement
+    BasicBlock* nextBlock = createNewBlock();
+    m_currentBlock = nextBlock;
+    // Edges will be added in buildEdges phase
+}
+
+void CFGBuilder::processLabelStatement(const LabelStatement& stmt, BasicBlock* currentBlock) {
+    // Labels are jump targets - start a new block for the label
+    BasicBlock* labelBlock = createNewBlock("Label_" + stmt.labelName);
+    m_currentBlock = labelBlock;
 }
 
 void CFGBuilder::processIfStatement(const IfStatement& stmt, BasicBlock* currentBlock) {
@@ -961,6 +1027,78 @@ void CFGBuilder::buildEdges() {
                     addCallEdge(block->id, targetBlock);
                 }
                 // Also continue to next block
+                if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
+                    addFallthroughEdge(block->id, block->id + 1);
+                }
+                break;
+            }
+            
+            case ASTNodeType::STMT_ON_GOTO: {
+                // Multiple potential jump targets based on selector expression
+                const auto& onGotoStmt = static_cast<const OnGotoStatement&>(*lastStmt);
+                
+                // Add edges to all possible targets
+                for (size_t i = 0; i < onGotoStmt.isLabelList.size(); ++i) {
+                    int targetBlock = -1;
+                    if (onGotoStmt.isLabelList[i]) {
+                        // Symbolic label
+                        if (m_symbols) {
+                            auto it = m_symbols->labels.find(onGotoStmt.labels[i]);
+                            if (it != m_symbols->labels.end()) {
+                                int labelLine = it->second.programLineIndex;
+                                if (labelLine >= 0) {
+                                    targetBlock = m_currentCFG->getBlockForLine(labelLine);
+                                }
+                            }
+                        }
+                    } else {
+                        // Line number
+                        targetBlock = m_currentCFG->getBlockForLine(onGotoStmt.lineNumbers[i]);
+                    }
+                    
+                    if (targetBlock >= 0) {
+                        // Add conditional edge (selector == i+1)
+                        addConditionalEdge(block->id, targetBlock, std::to_string(i + 1));
+                    }
+                }
+                
+                // If selector is out of range, continue to next block
+                if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
+                    addConditionalEdge(block->id, block->id + 1, "default");
+                }
+                break;
+            }
+            
+            case ASTNodeType::STMT_ON_GOSUB: {
+                // Multiple potential subroutine calls based on selector expression
+                const auto& onGosubStmt = static_cast<const OnGosubStatement&>(*lastStmt);
+                
+                // Add call edges to all possible targets
+                for (size_t i = 0; i < onGosubStmt.isLabelList.size(); ++i) {
+                    int targetBlock = -1;
+                    if (onGosubStmt.isLabelList[i]) {
+                        // Symbolic label
+                        if (m_symbols) {
+                            auto it = m_symbols->labels.find(onGosubStmt.labels[i]);
+                            if (it != m_symbols->labels.end()) {
+                                int labelLine = it->second.programLineIndex;
+                                if (labelLine >= 0) {
+                                    targetBlock = m_currentCFG->getBlockForLine(labelLine);
+                                }
+                            }
+                        }
+                    } else {
+                        // Line number
+                        targetBlock = m_currentCFG->getBlockForLine(onGosubStmt.lineNumbers[i]);
+                    }
+                    
+                    if (targetBlock >= 0) {
+                        // Add call edge (selector == i+1)
+                        addCallEdge(block->id, targetBlock);
+                    }
+                }
+                
+                // If selector is out of range, continue to next block
                 if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
                     addFallthroughEdge(block->id, block->id + 1);
                 }

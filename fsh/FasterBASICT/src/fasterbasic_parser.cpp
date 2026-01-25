@@ -582,6 +582,14 @@ StatementPtr Parser::parseStatement() {
             return parseWriteStreamStatement();
         case TokenType::LET:
             return parseLetStatement();
+        case TokenType::IDENTIFIER:
+            // Check if this is an implicit LET statement (variable assignment)
+            // Look ahead to see if next token is '='
+            if (peek().type == TokenType::EQUAL) {
+                return parseLetStatement();
+            }
+            // Fall through to error for bare identifiers
+            [[fallthrough]];
         case TokenType::GOTO:
             return parseGotoStatement();
         case TokenType::GOSUB:

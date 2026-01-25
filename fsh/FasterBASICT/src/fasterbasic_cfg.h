@@ -498,6 +498,9 @@ private:
     void processDefStatement(const DefStatement& stmt, BasicBlock* currentBlock);
     void processGotoStatement(const GotoStatement& stmt, BasicBlock* currentBlock);
     void processGosubStatement(const GosubStatement& stmt, BasicBlock* currentBlock);
+    void processOnGotoStatement(const OnGotoStatement& stmt, BasicBlock* currentBlock);
+    void processOnGosubStatement(const OnGosubStatement& stmt, BasicBlock* currentBlock);
+    void processLabelStatement(const LabelStatement& stmt, BasicBlock* currentBlock);
     
     // Helper functions
     VariableType inferTypeFromName(const std::string& name);
