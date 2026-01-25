@@ -2,6 +2,9 @@
 // basic_data.c
 // FasterBASIC QBE Runtime Library - DATA/READ/RESTORE Support
 //
+// NOTE: This is part of the C runtime library (runtime_c/) that gets linked with
+//       COMPILED BASIC programs, not the C++ compiler runtime (runtime/).
+//
 // This file contains runtime support for BASIC DATA, READ, and RESTORE statements.
 //
 

@@ -121,7 +121,7 @@ void QBECodeGenerator::emitHeader() {
 // =============================================================================
 
 void QBECodeGenerator::setDataValues(const DataPreprocessorResult& dataResult) {
-    m_dataValues = dataResult.dataValues;
+    m_dataValues = dataResult.values;
     m_lineRestorePoints = dataResult.lineRestorePoints;
     m_labelRestorePoints = dataResult.labelRestorePoints;
 }

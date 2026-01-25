@@ -2,6 +2,9 @@
 // basic_runtime.c
 // FasterBASIC QBE Runtime Library - Core Implementation
 //
+// NOTE: This is part of the C runtime library (runtime_c/) that gets linked with
+//       COMPILED BASIC programs, not the C++ compiler runtime (runtime/).
+//
 // This file contains runtime initialization, cleanup, and core utilities.
 //
 
