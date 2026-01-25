@@ -17,11 +17,14 @@ Terminal-based BASIC compiler using QBE backend
 8. [Arrays](#arrays)
 9. [User-Defined Types](#user-defined-types)
 10. [Input/Output](#inputoutput)
-11. [File Operations](#file-operations)
-12. [String Functions](#string-functions)
-13. [Mathematical Functions](#mathematical-functions)
-14. [Compiler Options](#compiler-options)
-15. [Built-in Functions Reference](#built-in-functions-reference)
+11. [Graphics and Screen](#graphics-and-screen)
+12. [File Operations](#file-operations)
+13. [String Functions](#string-functions)
+14. [Mathematical Functions](#mathematical-functions)
+15. [System Functions](#system-functions)
+16. [Error Handling](#error-handling)
+17. [Compiler Options](#compiler-options)
+18. [Built-in Functions Reference](#built-in-functions-reference)
 
 ---
 
@@ -82,7 +85,23 @@ PRINT "Code" REM inline comment
 
 ```basic
 END                ' Terminate program
+SYSTEM            ' Exit to operating system
+STOP              ' Breakpoint for debugging
+```
 
+### Program Chaining
+
+```basic
+CHAIN "program.bas"    ' Load and run another program
+COMMON A, B, C         ' Share variables between chained programs
+```
+
+### Program Flow Control
+
+```basic
+RUN                 ' Restart program from beginning
+RUN 100            ' Restart from line 100
+RUN "program.bas"  ' Load and run different program
 ```
 
 ---
@@ -94,9 +113,11 @@ END                ' Terminate program
 | Type | Suffix | Size | Range | Description |
 |------|--------|------|-------|-------------|
 | `INTEGER` | `%` | 32-bit | ±2,147,483,647 | Whole numbers |
-| `FLOAT` | `!` | 32-bit | ±3.4E±38 | Single precision |
-| `DOUBLE` | `#` | 64-bit | ±1.7E±308 | Double precision |
+| `LONG` | `&` | 64-bit | ±9,223,372,036,854,775,807 | Long integers |
+| `SINGLE` | `!` | 32-bit | ±3.4E±38 | Single precision floating point |
+| `DOUBLE` | `#` | 64-bit | ±1.7E±308 | Double precision floating point |
 | `STRING` | `$` | Variable | N/A | Text data |
+| `BOOLEAN` | | 8-bit | True/False | Logical values |
 
 ### Type Suffixes
 
@@ -140,17 +161,18 @@ DIM Score AS DOUBLE
 ### Constants
 
 ```basic
-CONSTANT PI = 3.14159265
-CONSTANT MAX_PLAYERS = 4
-CONSTANT APP_NAME = "My Game"
+CONST PI = 3.14159265
+CONST MAX_PLAYERS = 4
+CONST APP_NAME = "My Game"
 ```
 
 Constants are evaluated at compile time and cannot be changed.
 
-### Variable Scope
+### Variable Scope and Lifetime
 
 - **Global**: Declared at program level, accessible everywhere
 - **Local**: Declared in SUB/FUNCTION with `DIM` or `LOCAL`
+- **Static**: Retain value between calls with `STATIC`
 - **Shared**: Global variables accessed in SUB/FUNCTION with `SHARED`
 
 ```basic
@@ -158,10 +180,25 @@ DIM GlobalVar AS INTEGER
 
 SUB MySub()
     LOCAL LocalVar AS INTEGER
+    STATIC StaticVar AS INTEGER
     SHARED GlobalVar
-    LocalVar = 10
-    GlobalVar = 20
+    
+    LocalVar = 10        ' Reset each call
+    StaticVar = StaticVar + 1  ' Retains value
+    GlobalVar = 20       ' Accesses global
 END SUB
+```
+
+### DEF Type Statements
+
+Traditional BASIC type definitions:
+
+```basic
+DEFINT A-Z     ' All variables A-Z are INTEGER
+DEFLNG L       ' L variables are LONG
+DEFSNG S       ' S variables are SINGLE
+DEFDBL D       ' D variables are DOUBLE
+DEFSTR S       ' S variables are STRING
 ```
 
 ---
@@ -697,6 +734,43 @@ INPUT "Enter age: ", Age
 INPUT "Enter X and Y: ", X, Y
 ```
 
+### LINE INPUT Statement
+
+```basic
+' Read entire line including spaces
+LINE INPUT "Enter your full name: ", FullName$
+LINE INPUT TextLine$
+
+' Read from file
+LINE INPUT #1, TextLine$
+```
+
+### READ and DATA Statements
+
+```basic
+' DATA statements store literal values
+DATA 10, 20, 30, "Alice", "Bob", "Charlie"
+DATA 3.14, 2.71, 1.41
+
+' READ values into variables
+READ A, B, C, Name1$, Name2$, Name3$
+READ PI, E, SQRT2
+
+' RESTORE - Reset DATA pointer
+RESTORE
+RESTORE 100  ' Reset to specific line
+```
+
+### INKEY$ Function
+
+```basic
+' Read single character (non-blocking)
+Key$ = INKEY$
+IF Key$ <> "" THEN
+    PRINT "You pressed: "; Key$
+END IF
+```
+
 ### Console Output
 
 ```basic
@@ -711,6 +785,76 @@ CONSOLE "Warning: Invalid value"
 ' Wait for specified milliseconds
 WAIT_MS 1000    ' Wait 1 second
 WAIT_MS Delay   ' Wait for variable milliseconds
+```
+
+---
+
+## Graphics and Screen
+
+FBCQBE is a terminal-based compiler, so graphics commands operate on the text console.
+
+### Screen Control
+
+```basic
+' Clear screen
+CLS
+
+' Locate cursor (row, column) - 1-based
+LOCATE 10, 20
+PRINT "Text at position 10,20"
+
+' Get screen dimensions
+Width = SCREENWIDTH()
+Height = SCREENHEIGHT()
+
+' Get cursor position
+Row = CSRLIN     ' Current row
+Col = POS(0)     ' Current column
+```
+
+### Text Colors
+
+```basic
+' Set text color (foreground)
+COLOR 1          ' Blue text
+COLOR 2          ' Green text
+COLOR 4          ' Red text
+COLOR 7          ' White text (default)
+COLOR 8          ' Gray text
+COLOR 15         ' Bright white text
+
+' Set background color
+COLOR , 1        ' Blue background
+COLOR 7, 1       ' White text on blue background
+
+' Reset to default colors
+COLOR 7, 0
+```
+
+### Screen Functions
+
+```basic
+' Get screen width/height
+W = WIDTH()
+H = HEIGHT()
+
+' Check if color is supported
+HasColor = COLOR_SUPPORTED()
+
+' Get current color settings
+FG = FOREGROUND_COLOR()
+BG = BACKGROUND_COLOR()
+```
+
+### Sound Commands
+
+```basic
+' Simple beep
+BEEP
+
+' Play tone (frequency in Hz, duration in milliseconds)
+SOUND 440, 500    ' A note for 0.5 seconds
+SOUND 880, 250    ' A octave higher for 0.25 seconds
 ```
 
 ---
@@ -979,6 +1123,131 @@ Interpolated = LERP(Start, End, T)
 Rads = RAD(180)     ' π
 Degs = DEG(PI)      ' 180
 ```
+
+---
+
+## System Functions
+
+### Date and Time
+
+```basic
+' Get current date as string
+Today$ = DATE$
+
+' Get current time as string
+Now$ = TIME$
+
+' Get timer value (seconds since program start)
+Seconds = TIMER
+
+' Get timer in milliseconds
+Millis = TIMEMS
+```
+
+### Environment
+
+```basic
+' Get environment variable
+Path$ = ENV$("PATH")
+Home$ = ENV$("HOME")
+
+' Set environment variable
+ENV_SET "MY_VAR", "value"
+```
+
+### Command Line
+
+```basic
+' Get command line arguments
+ArgCount = COMMAND$()
+FirstArg$ = COMMAND$(1)
+SecondArg$ = COMMAND$(2)
+```
+
+### System Information
+
+```basic
+' Get free memory
+FreeMem = FRE()
+
+' Get system information
+OS$ = OS$()        ' Operating system name
+Version$ = VERSION$()  ' FBCQBE version
+```
+
+### File System
+
+```basic
+' Check if file exists
+Exists = FILEEXISTS("data.txt")
+
+' Get file size
+Size = FILESIZE("data.txt")
+
+' Get current directory
+CurrentDir$ = CURDIR$()
+
+' Change directory
+CHDIR "subdir"
+
+' Make directory
+MKDIR "newdir"
+
+' Remove directory
+RMDIR "olddir"
+```
+
+---
+
+## Error Handling
+
+### ON ERROR Statement
+
+```basic
+' Enable error trapping
+ON ERROR GOTO ErrorHandler
+
+' Disable error trapping
+ON ERROR GOTO 0
+
+' Error handler subroutine
+ErrorHandler:
+    PRINT "Error"; ERR; "at line"; ERL
+    RESUME NEXT    ' Continue with next statement
+    RESUME         ' Retry the failed statement
+    RESUME 100     ' Resume at line 100
+```
+
+### Error Functions
+
+```basic
+' Get error number
+ErrorNum = ERR
+
+' Get error line number
+LineNum = ERL
+
+' Get error message
+Msg$ = ERROR$(ErrorNum)
+```
+
+### Error Numbers
+
+Common error codes:
+- 1: NEXT without FOR
+- 2: Syntax error
+- 5: Illegal function call
+- 6: Overflow
+- 7: Out of memory
+- 9: Subscript out of range
+- 11: Division by zero
+- 13: Type mismatch
+- 14: Out of string space
+- 19: No RESUME
+- 20: RESUME without error
+- 53: File not found
+- 61: Disk full
+- 70: Permission denied
 
 ---
 
