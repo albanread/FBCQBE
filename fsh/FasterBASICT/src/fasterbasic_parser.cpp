@@ -4904,6 +4904,7 @@ bool Parser::isBuiltinFunction(const std::string& name) const {
         "LEFT$", "RIGHT$", "MID$", "LEFT_STRING", "RIGHT_STRING", "MID_STRING",
         "INSTR", "SPACE$", "STRING$", "UCASE$", "LCASE$", "LTRIM$", "RTRIM$", "TRIM$",
         "GETTICKS", "LOF", "EOF", "PEEK", "PEEK2", "PEEK4",
+        "INKEY$", "INKEY_STRING", "CSRLIN", "POS",  // Terminal I/O functions
         // Add more as needed
     };
     

@@ -145,19 +145,42 @@ g++ -std=c++17 -O2 \
     "$BUILD_DIR/modular_commands.o" \
     "$BUILD_DIR/command_registry_core.o" \
     "$BUILD_DIR/ConstantsManager.o" \
-    -o fbc_qbe
+    -o basic
 
 echo ""
 echo "=== Build Complete ==="
-echo "QBE compiler: $SCRIPT_DIR/fbc_qbe"
+echo "Compiler: $SCRIPT_DIR/basic"
 echo ""
-echo "Modular codegen files:"
-echo "  - qbe_codegen_main.cpp        (orchestration & block emission)"
-echo "  - qbe_codegen_expressions.cpp (expression emission)"
-echo "  - qbe_codegen_statements.cpp  (statement emission)"
-echo "  - qbe_codegen_runtime.cpp     (runtime library calls)"
-echo "  - qbe_codegen_helpers.cpp     (utility functions)"
+echo "Creating package structure..."
+
+# Create clean package directory
+PKG_DIR="$SCRIPT_DIR/package"
+rm -rf "$PKG_DIR"
+mkdir -p "$PKG_DIR"
+mkdir -p "$PKG_DIR/qbe"
+mkdir -p "$PKG_DIR/runtime"
+
+# Copy compiler
+cp basic "$PKG_DIR/basic"
+chmod +x "$PKG_DIR/basic"
+
+# Copy QBE
+if [ -f "qbe/qbe" ]; then
+    cp qbe/qbe "$PKG_DIR/qbe/qbe"
+    chmod +x "$PKG_DIR/qbe/qbe"
+fi
+
+# Copy runtime sources
+cp FasterBASICT/runtime_c/*.c "$PKG_DIR/runtime/"
+cp FasterBASICT/runtime_c/*.h "$PKG_DIR/runtime/"
+
+echo "Package created in: $PKG_DIR"
 echo ""
-echo "Test with:"
-echo "  ./fbc_qbe --verbose test_hello.bas"
+echo "To distribute:"
+echo "  cd $SCRIPT_DIR && tar czf basic-compiler.tar.gz package/"
+echo "  or: cd $SCRIPT_DIR && zip -r basic-compiler.zip package/"
+echo ""
+echo "To use:"
+echo "  ./basic program.bas -o program"
+echo "  ./basic --help"
 echo ""

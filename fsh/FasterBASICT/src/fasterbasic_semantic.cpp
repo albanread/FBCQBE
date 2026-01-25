@@ -2945,6 +2945,12 @@ void SemanticAnalyzer::initializeBuiltinFunctions() {
     m_builtinFunctions["LOC"] = 1;    // (file_number) Returns INT (position)
     m_builtinFunctions["LOF"] = 1;    // (file_number) Returns INT (length)
     
+    // Terminal I/O functions
+    m_builtinFunctions["INKEY$"] = 0;    // Returns STRING (non-blocking keyboard input)
+    m_builtinFunctions["INKEY_STRING"] = 0;  // Parser converts INKEY$ to INKEY_STRING
+    m_builtinFunctions["CSRLIN"] = 0;    // Returns INT (current cursor row)
+    m_builtinFunctions["POS"] = 1;       // (dummy) Returns INT (current cursor column)
+    
     // Array bounds functions
     m_builtinFunctions["LBOUND"] = -1;  // (array) or (array, dimension) Returns INT
     m_builtinFunctions["UBOUND"] = -1;  // (array) or (array, dimension) Returns INT

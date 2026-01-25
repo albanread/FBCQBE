@@ -569,7 +569,7 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             // Integer functions return INT (LEN, ASC, INSTR return 64-bit or 32-bit ints)
             if (upper == "LEN" || upper == "ASC" || upper == "INSTR" || upper == "STRTYPE" || 
                 upper == "RAND" || upper == "FIX" || upper == "CINT" || upper == "SGN" ||
-                upper == "MIN" || upper == "MAX") {
+                upper == "MIN" || upper == "MAX" || upper == "CSRLIN" || upper == "POS") {
                 return VariableType::INT;
             }
             
