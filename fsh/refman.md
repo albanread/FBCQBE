@@ -1,8 +1,8 @@
-# FasterBASIC Language Reference Manual
+# FBCQBE Language Reference Manual
 
 Version 1.0
-Copyright © 2024-2025 FasterBASIC Project
-Some of these may be forward looking statements
+Copyright © 2024-2025 FBCQBE Project
+Terminal-based BASIC compiler using QBE backend
 ---
 
 ## Table of Contents
@@ -20,30 +20,25 @@ Some of these may be forward looking statements
 11. [File Operations](#file-operations)
 12. [String Functions](#string-functions)
 13. [Mathematical Functions](#mathematical-functions)
-14. [Timer and Events](#timer-and-events)
-15. [Graphics Commands](#graphics-commands)
-16. [Compiler Options](#compiler-options)
-17. [Plugin System](#plugin-system)
-18. [Built-in Functions Reference](#built-in-functions-reference)
-19. [Error Handling](#error-handling)
-20. [Best Practices](#best-practices)
+14. [Compiler Options](#compiler-options)
+15. [Built-in Functions Reference](#built-in-functions-reference)
 
 ---
 
 ## Introduction
 
-FasterBASIC is a modern BASIC dialect designed to be familiar to classic BASIC programmers while providing high performance through LuaJIT compilation. It supports both line-numbered and label-based programming, structured control flow, user-defined types, and extensive graphics capabilities.
+FBCQBE (FasterBASIC QBE) is a native-code ahead-of-time (AOT) compiler for a modern BASIC dialect. It compiles BASIC programs to native machine code through the QBE (Quick Backend) intermediate representation, providing high performance while maintaining familiarity for classic BASIC programmers.
 
 ### Key Features
 
+- **Native Performance**: Compiled to machine code, not interpreted
 - **Classic BASIC Compatibility**: Line numbers, GOTO, GOSUB support
 - **Modern Structured Programming**: Functions, procedures, local variables
-- **High Performance**: LuaJIT-powered execution
-- **Rich Type System**: Integers, floats, doubles, strings, user-defined types
-- **Advanced Graphics**: Sprites, primitives, text layers
-- **Event System**: Timer-based events with cancellation support
-- **Unicode Support**: Full UTF-8 string handling
-- **Plugin Architecture**: Extensible command system
+- **Rich Type System**: Integers, floats, doubles, strings with slicing, user-defined types
+- **String Arrays**: Full read/write access to string arrays
+- **String Slicing**: Powerful substring extraction with `s$(start TO end)` syntax
+- **Cross-Platform**: Works on x86-64, ARM64, and RISC-V via QBE
+- **Terminal-Based**: Console I/O with comprehensive string and numeric operations
 
 ---
 
@@ -522,12 +517,13 @@ Distance = FN Hypotenuse(3, 4)
 ### Array Declaration
 
 ```basic
-' 1D array (OPTION BASE 1 default - indices 1 to 10)
+' Numeric arrays
 DIM Numbers(10) AS INTEGER
-
-' OPTION BASE 0 - indices 0 to 9
-OPTION BASE 0
 DIM Values(10) AS DOUBLE
+
+' String arrays
+DIM Names$(10) AS STRING
+DIM Names$(10)        ' Type suffix also works
 
 ' Multi-dimensional arrays
 DIM Matrix(5, 5) AS INTEGER
@@ -540,6 +536,11 @@ DIM Grid(10, 10, 10) AS DOUBLE
 ' Individual elements
 Numbers(1) = 100
 Numbers(2) = 200
+
+' String array elements
+Names$(0) = "Alice"
+Names$(1) = "Bob"
+Names$(2) = "Charlie"
 
 ' Fill entire array with value
 Numbers() = 0
@@ -704,54 +705,12 @@ CONSOLE "Debug: X =", X
 CONSOLE "Warning: Invalid value"
 ```
 
-### Cursor Positioning
+### Timing and Delays
 
 ```basic
-' AT - Position cursor (row, column)
-AT 10, 20
-PRINT "Text at row 10, column 20"
-
-' LOCATE - QuickBASIC style
-LOCATE 5, 10
-PRINT "Row 5, Column 10"
-
-' PRINT_AT - Print at specific position
-PRINT_AT 15, 25, "Positioned text"
-
-' INPUT_AT - Input at specific position
-INPUT_AT 20, 10, "Enter name: ", Name$
-```
-
-### Text Manipulation
-
-```basic
-' Put single character
-TCHAR 10, 10, 65, 15  ' Put 'A' at (10,10) in color 15
-
-' Put text with color
-TEXTPUT 5, 5, "Colored text", 14
-
-' Set text grid size
-TGRID 80, 25
-
-' Scroll text region
-TSCROLL 0, 0, 80, 25, 0, -1  ' Scroll up one line
-
-' Clear text region
-TCLEAR 0, 0, 80, 25
-```
-
-### Screen Control
-
-```basic
-' Clear screen
-CLS
-
-' Set colors
-COLOR 15, 1  ' White on blue background
-
-' Wait for vertical sync
-VSYNC
+' Wait for specified milliseconds
+WAIT_MS 1000    ' Wait 1 second
+WAIT_MS Delay   ' Wait for variable milliseconds
 ```
 
 ---
@@ -854,6 +813,30 @@ Lower$ = LCASE$("HELLO")  ' "hello"
 Trimmed$ = LTRIM$(S$)     ' Left trim
 Trimmed$ = RTRIM$(S$)     ' Right trim
 Trimmed$ = TRIM$(S$)      ' Both ends
+```
+
+### String Slicing
+
+```basic
+' Extract substrings using slicing syntax
+S$ = "Hello World"
+
+' Basic slice with start and end positions
+Slice$ = S$(7 TO 11)    ' "World"
+
+' Slice from start to position
+Left$ = S$(TO 5)        ' "Hello"
+
+' Slice from position to end
+Right$ = S$(7 TO)       ' "World"
+
+' Single character slice
+Char$ = S$(7 TO 7)      ' "W"
+
+' Using variables in slice expressions
+StartPos = 7
+EndPos = 11
+Slice$ = S$(StartPos TO EndPos)
 ```
 
 ### String Conversion
@@ -969,7 +952,7 @@ E = EXP(X)          ' e^x
 
 ```basic
 ' Initialize random seed
-RANDOMIZE TIMER
+RANDOMIZE
 
 ' Random number 0 to <1
 R = RND(1)
@@ -995,231 +978,6 @@ Interpolated = LERP(Start, End, T)
 ' Degrees/radians conversion
 Rads = RAD(180)     ' π
 Degs = DEG(PI)      ' 180
-```
-
----
-
-## Timer and Events
-
-### Timer Functions
-
-```basic
-' Get current time in seconds
-T = TIMER
-
-' Get time in milliseconds
-Ms = TIMEMS
-
-' Get frame count
-Frame = FRAME
-```
-
-### One-Shot Timers
-
-```basic
-' Execute after delay
-AFTER 5 SECS GOTO HandleTimeout
-AFTER 1000 MS GOSUB ProcessData
-AFTER 60 FRAMES CALL UpdateScreen
-
-' Inline handler (single statement)
-AFTER 2 SECS X = X + 1 DONE
-
-' Multi-line handler
-AFTER 3 SECS
-    PRINT "Three seconds elapsed"
-    Counter = Counter + 1
-DONE
-```
-
-### Repeating Timers
-
-```basic
-' Repeat every interval
-EVERY 1 SECS GOTO GameLoop
-EVERY 500 MS GOSUB UpdateDisplay
-EVERY 1 FRAMES CALL RenderFrame
-
-' Inline repeating handler
-EVERY 2 SECS Score = Score + 10 DONE
-
-' Multi-line repeating handler
-EVERY 1 SECS
-    PRINT "Tick: "; TIMER
-    Updates = Updates + 1
-DONE
-```
-
-### Frame-Based Timers
-
-```basic
-' One-shot frame timer
-AFTERFRAMES 60 GOTO NextLevel
-
-' Repeating frame timer
-EVERYFRAME CALL GameUpdate
-```
-
-### Timer Control
-
-```basic
-' Stop a specific timer
-TIMER STOP TimerID
-
-' Stop all timers
-TIMER STOP
-
-' Cancellable operations
-OPTION CANCELLABLE
-
-WAIT_MS 5000  ' Wait 5 seconds (can be cancelled by timers/events)
-
-' Main event loop
-RUN  ' Run until program ends
-```
-
-### Event Handlers
-
-```basic
-' Register event handler
-ONEVENT "collision" GOSUB HandleCollision
-ONEVENT "keypress" GOTO ProcessKey
-ONEVENT "timeout" CALL OnTimeout
-
-' Main event loop
-RUN
-
-HandleCollision:
-    PRINT "Collision detected!"
-    RETURN
-```
-
----
-
-## Graphics Commands
-
-### Video Modes
-
-```basic
-' Set video mode
-VMODE 2         ' XRES mode (320x240)
-VMODE 6         ' High resolution mode
-```
-
-### Drawing Primitives
-
-```basic
-' Plot pixel
-PSET X, Y, Color
-
-' Draw line
-LINE X1, Y1, X2, Y2, Color
-
-' Draw rectangle
-RECT X, Y, Width, Height, Color
-
-' Draw filled rectangle
-RECTF X, Y, Width, Height, Color
-
-' Draw circle
-CIRCLE X, Y, Radius, Color
-
-' Draw filled circle
-CIRCLEF X, Y, Radius, Color
-
-' Horizontal line (fast)
-HLINE X, Y, Length, Color
-
-' Vertical line (fast)
-VLINE X, Y, Length, Color
-```
-
-### Graphics Control
-
-```basic
-' Clear graphics
-CLG
-GCLS  ' Backwards compatible
-
-' Set drawing color
-COLOR ForeColor, BackColor
-```
-
-### Sprite System
-
-```basic
-' Load sprite
-SPRLOAD 1, "player.png"
-SPRLOAD 2, "enemy.png"
-
-' Show/hide sprite
-SPRSHOW 1
-SPRHIDE 2
-
-' Position sprite
-SPRMOVE 1, X, Y
-
-' Advanced positioning with transform
-SPRPOS 1, X, Y, ScaleX, ScaleY, Rotation, AnchorX, AnchorY
-
-' Tint sprite
-SPRTINT 1, Red, Green, Blue, Alpha
-
-' Scale sprite
-SPRSCALE 1, ScaleX, ScaleY
-
-' Rotate sprite
-SPRROT 1, Angle
-
-' Animated sprite effect
-SPREXPLODE 1, Duration
-
-' Free sprite resources
-SPRFREE 1
-```
-
-### Collision Detection
-
-```basic
-' Enable collision system
-VCOLLISION_ENABLE
-
-' Enable specific detection
-VCOLLISION_ENABLE_SPRITE_DETECTION 1
-VCOLLISION_ENABLE_REGION_DETECTION 1
-
-' Add collision region
-RegionID = VCOLLISION_REGION_ADD(X, Y, Width, Height, Active, UserData)
-
-' Check sprite-sprite collision
-IF VCOLLISION_SPRITE(Sprite1, Sprite2) THEN
-    PRINT "Sprites collided!"
-END IF
-
-' Handle region events
-ONEVENT "region_enter" GOSUB OnRegionEnter
-ONEVENT "region_exit" GOSUB OnRegionExit
-```
-
-### Palette Operations
-
-```basic
-' Set palette color
-PALETTE Index, Red, Green, Blue
-
-' Global palette for XRES mode
-XRES_PALETTE_GLOBAL Index, R, G, B
-```
-
-### Procedural Patterns
-
-```basic
-' Generate procedural pattern
-XRES_GENERATE_PATTERN Layer, X, Y, Width, Height, PatternParams
-
-' Flood fill
-XRES_FLOOD_FILL Layer, X, Y, Color
-WRES_FLOOD_FILL Layer, X, Y, Color
 ```
 
 ---
@@ -1251,10 +1009,6 @@ OPTION ERROR       ' Track line numbers for error reporting
 ' File inclusion
 OPTION ONCE        ' Include file only once (for headers)
 
-' Loop cancellation
-OPTION CANCELLABLE ' Allow timer events to cancel WAIT/loops
-OPTION CANCELLABLE OFF ' Disable cancellation
-
 ' Quasi-preemptive handlers
 OPTION FORCE_YIELD ' Force yield points in tight loops
 ```
@@ -1269,73 +1023,6 @@ INCLUDE "library.bas"
 OPTION ONCE
 INCLUDE "header.bas"
 ```
-
----
-
-## Plugin System
-
-### Registry Commands
-
-FasterBASIC supports extensible commands through a plugin registry:
-
-```basic
-' Commands are registered by plugins
-' Example plugin commands:
-
-' CSV Plugin
-CSV_OPEN "data.csv"
-CSV_READ Row$
-CSV_CLOSE
-
-' DateTime Plugin
-DateStr$ = DATE$()
-TimeStr$ = TIME$()
-Timestamp = UNIXTIME()
-
-' JSON Plugin
-JSON_PARSE Text$, Object
-Value$ = JSON_GET(Object, "key")
-
-' Math Plugin (extended functions)
-Result = ATAN2(Y, X)
-Result = HYPOT(A, B)
-
-' Environment Plugin
-Path$ = ENV$("PATH")
-ENV_SET "MY_VAR", "value"
-
-' File Operations Plugin
-SIZE = FILESIZE("data.bin")
-EXISTS = FILEEXISTS("config.txt")
-FILECOPY "src.txt", "dest.txt"
-FILEMOVE "old.txt", "new.txt"
-
-' INI File Plugin
-INI_OPEN "config.ini"
-Value$ = INI_GET("Section", "Key")
-INI_SET "Section", "Key", "Value"
-INI_CLOSE
-
-' Records Plugin (structured data storage)
-Handle = RECOPEN("data.dat", "TypeName")
-RECWRITE Handle, RecordVar
-RECREAD Handle, RecordVar
-RECCLOSE Handle
-
-' Template Engine Plugin
-TPL_LOAD "template.html"
-TPL_SET "name", Value$
-Result$ = TPL_RENDER()
-```
-
-### Plugin Registration
-
-Plugins are loaded automatically from the `plugins/` directory. They can register:
-
-- Commands (statements)
-- Functions (expressions)
-- Event handlers
-- Custom data types
 
 ---
 
