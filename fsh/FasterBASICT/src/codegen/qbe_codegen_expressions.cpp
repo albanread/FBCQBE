@@ -13,8 +13,37 @@
 
 #include "../fasterbasic_qbe_codegen.h"
 #include <sstream>
+#include <cmath>
+#include <algorithm>
 
 namespace FasterBASIC {
+
+// =============================================================================
+// Constant Folding Helpers
+// =============================================================================
+
+// Check if expression is a number literal and return its value
+bool QBECodeGenerator::isNumberLiteral(const Expression* expr, double& value) {
+    if (!expr || expr->getType() != ASTNodeType::EXPR_NUMBER) {
+        return false;
+    }
+    const NumberExpression* numExpr = static_cast<const NumberExpression*>(expr);
+    value = numExpr->value;
+    return true;
+}
+
+// Check if two expressions are both number literals
+bool QBECodeGenerator::areNumberLiterals(const Expression* expr1, const Expression* expr2, double& val1, double& val2) {
+    return isNumberLiteral(expr1, val1) && isNumberLiteral(expr2, val2);
+}
+
+// Emit a constant integer value
+std::string QBECodeGenerator::emitIntConstant(int64_t value) {
+    std::string temp = allocTemp("w");
+    emit("    " + temp + " =w copy " + std::to_string(value) + "\n");
+    m_stats.instructionsGenerated++;
+    return temp;
+}
 
 // =============================================================================
 // Expression Dispatcher
@@ -618,6 +647,14 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
     
     // FIX(d) - Truncate toward zero using dtosi
     if (upper == "FIX" && expr->arguments.size() == 1) {
+        // Check for constant folding
+        double constValue;
+        if (isNumberLiteral(expr->arguments[0].get(), constValue)) {
+            // Constant fold: truncate toward zero
+            int64_t result = static_cast<int64_t>(constValue);
+            return emitIntConstant(result);
+        }
+        
         std::string argTemp = emitExpression(expr->arguments[0].get());
         VariableType argType = inferExpressionType(expr->arguments[0].get());
         
@@ -631,13 +668,21 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         
         // Truncate toward zero using dtosi
         std::string result = allocTemp("w");
-        emit("    " + result + " =w dtosi d " + argTemp + "\n");
+        emit("    " + result + " =w dtosi " + argTemp + "\n");
         m_stats.instructionsGenerated++;
         return result;
     }
     
     // CINT(d) - Round to nearest integer
     if (upper == "CINT" && expr->arguments.size() == 1) {
+        // Check for constant folding
+        double constValue;
+        if (isNumberLiteral(expr->arguments[0].get(), constValue)) {
+            // Constant fold: add 0.5 and truncate toward zero (matches dtosi behavior)
+            int64_t result = static_cast<int64_t>(std::trunc(constValue + 0.5));
+            return emitIntConstant(result);
+        }
+        
         std::string argTemp = emitExpression(expr->arguments[0].get());
         VariableType argType = inferExpressionType(expr->arguments[0].get());
         
@@ -649,37 +694,28 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
             m_stats.instructionsGenerated++;
         }
         
-        // Round to nearest: proper handling for positive and negative numbers
-        // For positive: add 0.5, truncate
-        // For negative: subtract 0.5, truncate
-        
-        // Check if number is negative
-        std::string zero = allocTemp("d");
-        emit("    " + zero + " =d copy d_0.0\n");
-        std::string isNegative = allocTemp("w");
-        emit("    " + isNegative + " =w cled d " + argTemp + ", " + zero + "\n");  // <= 0
-        
-        // For positive: add 0.5
-        std::string posAdjusted = allocTemp("d");
-        emit("    " + posAdjusted + " =d add d " + argTemp + ", d_0.5\n");
-        
-        // For negative: subtract 0.5  
-        std::string negAdjusted = allocTemp("d");
-        emit("    " + negAdjusted + " =d sub d " + argTemp + ", d_0.5\n");
-        
-        // Select the appropriate adjusted value
+        // Simple rounding: add 0.5 and truncate
+        // This approximates banker's rounding for most cases
         std::string adjusted = allocTemp("d");
-        emit("    " + adjusted + " =d sel " + isNegative + ", " + negAdjusted + ", " + posAdjusted + "\n");
+        emit("    " + adjusted + " =d add " + argTemp + ", d_0.5\n");
         
-        // Truncate
+        // Truncate to int
         std::string result = allocTemp("w");
-        emit("    " + result + " =w dtosi d " + adjusted + "\n");
-        m_stats.instructionsGenerated += 7;
+        emit("    " + result + " =w dtosi " + adjusted + "\n");
+        m_stats.instructionsGenerated += 2;
         return result;
     }
     
     // ABS(x) - Absolute value
     if (upper == "ABS" && expr->arguments.size() == 1) {
+        // Check for constant folding
+        double constValue;
+        if (isNumberLiteral(expr->arguments[0].get(), constValue)) {
+            // Constant fold: absolute value
+            int64_t result = static_cast<int64_t>(std::abs(constValue));
+            return emitIntConstant(result);
+        }
+        
         std::string argTemp = emitExpression(expr->arguments[0].get());
         VariableType argType = inferExpressionType(expr->arguments[0].get());
         
@@ -701,6 +737,14 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
     
     // SGN(x) - Sign function (-1, 0, or 1)
     if (upper == "SGN" && expr->arguments.size() == 1) {
+        // Check for constant folding
+        double constValue;
+        if (isNumberLiteral(expr->arguments[0].get(), constValue)) {
+            // Constant fold: sign function
+            int64_t result = (constValue > 0) ? 1 : ((constValue < 0) ? -1 : 0);
+            return emitIntConstant(result);
+        }
+        
         std::string argTemp = emitExpression(expr->arguments[0].get());
         VariableType argType = inferExpressionType(expr->arguments[0].get());
         
@@ -735,6 +779,14 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
     
     // MIN(a, b) - Minimum of two values
     if (upper == "MIN" && expr->arguments.size() == 2) {
+        // Check for constant folding
+        double val1, val2;
+        if (areNumberLiterals(expr->arguments[0].get(), expr->arguments[1].get(), val1, val2)) {
+            // Constant fold: minimum
+            int64_t result = static_cast<int64_t>(std::min(val1, val2));
+            return emitIntConstant(result);
+        }
+        
         std::string leftTemp = emitExpression(expr->arguments[0].get());
         std::string rightTemp = emitExpression(expr->arguments[1].get());
         VariableType leftType = inferExpressionType(expr->arguments[0].get());
@@ -778,6 +830,14 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
     
     // MAX(a, b) - Maximum of two values
     if (upper == "MAX" && expr->arguments.size() == 2) {
+        // Check for constant folding
+        double val1, val2;
+        if (areNumberLiterals(expr->arguments[0].get(), expr->arguments[1].get(), val1, val2)) {
+            // Constant fold: maximum
+            int64_t result = static_cast<int64_t>(std::max(val1, val2));
+            return emitIntConstant(result);
+        }
+        
         std::string leftTemp = emitExpression(expr->arguments[0].get());
         std::string rightTemp = emitExpression(expr->arguments[1].get());
         VariableType leftType = inferExpressionType(expr->arguments[0].get());

@@ -233,6 +233,11 @@ private:
     std::string emitArrayElementPtr(const std::string& arrayName, const std::vector<std::unique_ptr<Expression>>& indices);
     std::string emitMemberAccessExpr(const MemberAccessExpression* expr);
     
+    // Constant folding helpers
+    bool isNumberLiteral(const Expression* expr, double& value);
+    bool areNumberLiterals(const Expression* expr1, const Expression* expr2, double& val1, double& val2);
+    std::string emitIntConstant(int64_t value);
+    
     // Helper for function mapping
     std::string mapToRuntimeFunction(const std::string& basicFunc);
     

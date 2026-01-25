@@ -525,14 +525,15 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             }
             
             // Integer functions return INT (LEN, ASC, INSTR return 64-bit or 32-bit ints)
-            if (upper == "LEN" || upper == "ASC" || upper == "INSTR" || upper == "STRTYPE" || upper == "RAND") {
+            if (upper == "LEN" || upper == "ASC" || upper == "INSTR" || upper == "STRTYPE" || 
+                upper == "RAND" || upper == "FIX" || upper == "CINT" || upper == "SGN" ||
+                upper == "MIN" || upper == "MAX") {
                 return VariableType::INT;
             }
             
             // Math functions return DOUBLE
             if (upper == "VAL" || upper == "RND" || upper == "SIN" || upper == "COS" || 
-                upper == "TAN" || upper == "SQRT" || upper == "ABS" || upper == "INT" ||
-                upper == "SGN") {
+                upper == "TAN" || upper == "SQRT" || upper == "ABS" || upper == "INT") {
                 return VariableType::DOUBLE;
             }
             

@@ -2388,7 +2388,30 @@ VariableType SemanticAnalyzer::inferFunctionCallType(const FunctionCallExpressio
             return VariableType::UNKNOWN;
         }
     } else {
-        // Built-in function - most return FLOAT
+        // Built-in function - check for specific return types
+        std::string upperName = expr.name;
+        std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
+        
+        // Functions that return INT
+        if (upperName == "FIX" || upperName == "CINT" || upperName == "INT" ||
+            upperName == "SGN" || upperName == "ASC" || upperName == "INSTR" ||
+            upperName == "LEN" || upperName == "STRTYPE") {
+            return VariableType::INT;
+        }
+        
+        // ABS returns the same type as its argument
+        if (upperName == "ABS" && !expr.arguments.empty()) {
+            return inferExpressionType(*expr.arguments[0]);
+        }
+        
+        // MIN/MAX return the promoted type of their arguments
+        if ((upperName == "MIN" || upperName == "MAX") && expr.arguments.size() >= 2) {
+            VariableType leftType = inferExpressionType(*expr.arguments[0]);
+            VariableType rightType = inferExpressionType(*expr.arguments[1]);
+            return promoteTypes(leftType, rightType);
+        }
+        
+        // Most other built-in functions return FLOAT
         return VariableType::FLOAT;
     }
 }
@@ -3377,6 +3400,20 @@ FasterBASIC::ConstantValue SemanticAnalyzer::evalConstantFunction(const Function
         FasterBASIC::ConstantValue arg = evaluateConstantExpression(*expr.arguments[0]);
         double val = getConstantAsDouble(arg);
         return static_cast<int64_t>(val > 0 ? 1 : (val < 0 ? -1 : 0));
+    }
+    
+    if (funcName == "FIX" && expr.arguments.size() == 1) {
+        FasterBASIC::ConstantValue arg = evaluateConstantExpression(*expr.arguments[0]);
+        double val = getConstantAsDouble(arg);
+        // FIX truncates toward zero (unlike INT which floors)
+        return static_cast<int64_t>(val);
+    }
+    
+    if (funcName == "CINT" && expr.arguments.size() == 1) {
+        FasterBASIC::ConstantValue arg = evaluateConstantExpression(*expr.arguments[0]);
+        double val = getConstantAsDouble(arg);
+        // CINT rounds to nearest integer
+        return static_cast<int64_t>(std::round(val));
     }
     
     // String functions
