@@ -133,15 +133,17 @@ void QBECodeGenerator::emitDataSection() {
     // Emit DATA values if present
     if (!m_dataValues.empty()) {
         emitComment("DATA values");
-        emit("data $__basic_data = { ");
+        emit("export data $__basic_data = { ");
         
         for (size_t i = 0; i < m_dataValues.size(); ++i) {
             if (i > 0) emit(", ");
             
             const DataValue& val = m_dataValues[i];
             if (std::holds_alternative<int>(val)) {
-                emit("w " + std::to_string(std::get<int>(val)));
+                // Use 'l' (long/64-bit) for integers to match runtime int64_t
+                emit("l " + std::to_string(std::get<int>(val)));
             } else if (std::holds_alternative<double>(val)) {
+                // Use 'd' (double/64-bit) for doubles
                 emit("d " + std::to_string(std::get<double>(val)));
             } else {
                 // String pointer - add to string pool and reference it
@@ -154,7 +156,7 @@ void QBECodeGenerator::emitDataSection() {
         emit(" }\n");
         
         // Emit type tags (0=INT, 1=DOUBLE, 2=STRING)
-        emit("data $__basic_data_types = { ");
+        emit("export data $__basic_data_types = { ");
         for (size_t i = 0; i < m_dataValues.size(); ++i) {
             if (i > 0) emit(", ");
             
@@ -170,7 +172,7 @@ void QBECodeGenerator::emitDataSection() {
         emit(" }\n");
         
         // Emit data pointer (initialized to 0)
-        emit("data $__basic_data_ptr = { l 0 }\n");
+        emit("export data $__basic_data_ptr = { l 0 }\n");
         emit("\n");
     }
     
