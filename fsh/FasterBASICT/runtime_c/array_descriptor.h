@@ -137,9 +137,6 @@ static inline int array_descriptor_redim_preserve(
     int64_t newLowerBound,
     int64_t newUpperBound)
 {
-
-// ERASE helper: implemented in array_descriptor_runtime.c
-void array_descriptor_erase(ArrayDescriptor* desc);
     if (!desc || newUpperBound < newLowerBound) {
         return -1;
     }
@@ -177,6 +174,12 @@ void array_descriptor_erase(ArrayDescriptor* desc);
 
     return 0;
 }
+
+// ERASE helper: implemented in array_descriptor_runtime.c
+void array_descriptor_erase(ArrayDescriptor* desc);
+
+// Destroy helper: erase contents and free descriptor
+void array_descriptor_destroy(ArrayDescriptor* desc);
 
 // Bounds check - returns 1 if index is valid, 0 if out of bounds
 static inline int array_descriptor_check_bounds(

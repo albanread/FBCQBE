@@ -33,3 +33,10 @@ void array_descriptor_erase(ArrayDescriptor* desc) {
     desc->lowerBound = 0;
     desc->upperBound = -1;
 }
+
+// Fully destroy a descriptor: erase contents and free descriptor itself
+void array_descriptor_destroy(ArrayDescriptor* desc) {
+    if (!desc) return;
+    array_descriptor_erase(desc);
+    free(desc);
+}

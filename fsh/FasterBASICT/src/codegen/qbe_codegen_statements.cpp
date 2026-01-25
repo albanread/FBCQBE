@@ -1297,18 +1297,34 @@ void QBECodeGenerator::emitCall(const CallStatement* stmt) {
         
         emit(")\n");
     } else {
-        // Call runtime library function (shouldn't normally happen with CALL, but handle it)
+        // Call runtime library function (edge case for CALL)
         std::string runtimeFunc = mapToRuntimeFunction(subName);
-        std::string resultTemp = allocTemp("w");
-        
-        emit("    " + resultTemp + " =w call $" + runtimeFunc + "(");
-        
-        for (size_t i = 0; i < convertedArgTemps.size(); ++i) {
-            if (i > 0) emit(", ");
-            emit(convertedArgTypes[i] + " " + convertedArgTemps[i]);
+
+        // If this CALL returns an ArrayDescriptor* (currently SPLIT$), capture and destroy
+        std::string upperName = subName;
+        for (char& c : upperName) c = std::toupper(c);
+        bool returnsArray = (upperName == "SPLIT$");
+
+        if (returnsArray) {
+            std::string resultTemp = allocTemp("l");
+            emit("    " + resultTemp + " =l call $" + runtimeFunc + "(");
+            for (size_t i = 0; i < convertedArgTemps.size(); ++i) {
+                if (i > 0) emit(", ");
+                emit(convertedArgTypes[i] + " " + convertedArgTemps[i]);
+            }
+            emit(")\n");
+            emit("    call $array_descriptor_destroy(l " + resultTemp + ")\n");
+            m_stats.instructionsGenerated += 2;
+        } else {
+            std::string resultTemp = allocTemp("w");
+            emit("    " + resultTemp + " =w call $" + runtimeFunc + "(");
+            for (size_t i = 0; i < convertedArgTemps.size(); ++i) {
+                if (i > 0) emit(", ");
+                emit(convertedArgTypes[i] + " " + convertedArgTemps[i]);
+            }
+            emit(")\n");
+            m_stats.instructionsGenerated++;
         }
-        
-        emit(")\n");
     }
     
     m_stats.instructionsGenerated++;
