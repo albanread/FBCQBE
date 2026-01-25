@@ -54,6 +54,7 @@ cc "${OUTPUT_NAME}.s" \
    FasterBASICT/runtime_c/basic_runtime.c \
    FasterBASICT/runtime_c/conversion_ops.c \
    FasterBASICT/runtime_c/io_ops.c \
+   FasterBASICT/runtime_c/io_ops_format.c \
    FasterBASICT/runtime_c/math_ops.c \
    FasterBASICT/runtime_c/memory_mgmt.c \
    FasterBASICT/runtime_c/string_ops.c \

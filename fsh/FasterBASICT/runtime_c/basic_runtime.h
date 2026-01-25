@@ -238,6 +238,10 @@ void basic_print_newline(void);
 // Print tab
 void basic_print_tab(void);
 
+// Print using format string with stringified arguments (array-based to avoid varargs ARM64 ABI issues):
+// basic_print_using(format, count, args_array)
+void basic_print_using(StringDescriptor* format, int64_t count, StringDescriptor** args);
+
 // Print at position (row, col) - 1-based
 void basic_print_at(int32_t row, int32_t col, BasicString* str);
 
@@ -482,6 +486,16 @@ double basic_timer(void);
 
 // Sleep for milliseconds
 void basic_sleep_ms(int32_t milliseconds);
+
+// =============================================================================
+// StringDescriptor Conversion Functions
+// =============================================================================
+
+// Convert int64 to StringDescriptor
+StringDescriptor* string_from_int(int64_t value);
+
+// Convert double to StringDescriptor
+StringDescriptor* string_from_double(double value);
 
 // =============================================================================
 // Debugging Support

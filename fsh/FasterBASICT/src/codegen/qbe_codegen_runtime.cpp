@@ -200,14 +200,17 @@ void QBECodeGenerator::emitArrayStore(const std::string& arrayName,
 
 std::string QBECodeGenerator::emitIntToString(const std::string& value) {
     std::string result = allocTemp("l");
-    emit("    " + result + " =l call $int_to_str(w " + value + ")\n");
-    m_stats.instructionsGenerated++;
+    // string_from_int takes int64_t (l), so extend w to l if needed
+    std::string extended = allocTemp("l");
+    emit("    " + extended + " =l extsw " + value + "\n");
+    emit("    " + result + " =l call $string_from_int(l " + extended + ")\n");
+    m_stats.instructionsGenerated += 2;
     return result;
 }
 
 std::string QBECodeGenerator::emitDoubleToString(const std::string& value) {
     std::string result = allocTemp("l");
-    emit("    " + result + " =l call $double_to_str(d " + value + ")\n");
+    emit("    " + result + " =l call $string_from_double(d " + value + ")\n");
     m_stats.instructionsGenerated++;
     return result;
 }

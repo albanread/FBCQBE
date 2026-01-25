@@ -181,28 +181,98 @@ void QBECodeGenerator::emitStatement(const Statement* stmt) {
 void QBECodeGenerator::emitPrint(const PrintStatement* stmt) {
     if (!stmt) return;
     
-    for (const auto& item : stmt->items) {
-        if (item.expr) {
-            // Evaluate expression and print result
-            std::string resultTemp = emitExpression(item.expr.get());
-            
-            // Infer type from expression
-            VariableType exprType = inferExpressionType(item.expr.get());
-            emitPrintValue(resultTemp, exprType);
+    if (stmt->hasUsing) {
+        // PRINT USING: evaluate format string and arguments (convert non-strings to strings)
+        std::string fmtTemp = emitExpression(stmt->formatExpr.get());
+
+        std::vector<std::string> argTemps;
+        std::vector<bool> createdTemp;
+        for (const auto& valExpr : stmt->usingValues) {
+            std::string tmp = emitExpression(valExpr.get());
+            VariableType vt = inferExpressionType(valExpr.get());
+            if (vt != VariableType::STRING && vt != VariableType::UNICODE) {
+                // Convert to string descriptor
+                if (vt == VariableType::INT) tmp = emitIntToString(tmp);
+                else tmp = emitDoubleToString(tmp);
+                createdTemp.push_back(true);
+            } else {
+                createdTemp.push_back(false);
+            }
+            argTemps.push_back(tmp);
         }
-        
-        // Handle separators (only between items, not after each item)
-        if (item.comma) {
-            // Tab separator
-            emit("    call $basic_print_tab()\n");
+
+        // Build array of StringDescriptor* on stack
+        // Changed from varargs to array-based approach to avoid ARM64 ABI issues
+        if (argTemps.empty()) {
+            // No arguments - pass NULL
+            emit("    call $basic_print_using(l " + fmtTemp + ", l 0, l 0)\n");
+            m_stats.instructionsGenerated++;
+        } else {
+            // Heap-allocate array of pointers (8 bytes per pointer)
+            int64_t arraySize = argTemps.size() * 8;
+            std::string arrayPtr = allocTemp("l");
+            emit("    " + arrayPtr + " =l call $malloc(l " + std::to_string(arraySize) + ")\n");
+            m_stats.instructionsGenerated++;
+            
+            // Store each descriptor pointer into the array
+            for (size_t i = 0; i < argTemps.size(); ++i) {
+                if (i == 0) {
+                    // First element - store directly at base
+                    emit("    storel " + argTemps[i] + ", " + arrayPtr + "\n");
+                } else {
+                    // Subsequent elements - calculate offset address
+                    int64_t offset = i * 8;
+                    std::string offsetPtr = allocTemp("l");
+                    emit("    " + offsetPtr + " =l add " + arrayPtr + ", " + std::to_string(offset) + "\n");
+                    emit("    storel " + argTemps[i] + ", " + offsetPtr + "\n");
+                    m_stats.instructionsGenerated++;
+                }
+                m_stats.instructionsGenerated++;
+            }
+            
+            // Call basic_print_using(format, count, args_array)
+            emit("    call $basic_print_using(l " + fmtTemp + ", l " + std::to_string(argTemps.size()) + ", l " + arrayPtr + ")\n");
+            m_stats.instructionsGenerated++;
+            
+            // Free the heap-allocated array
+            emit("    call $free(l " + arrayPtr + ")\n");
             m_stats.instructionsGenerated++;
         }
-        // Semicolon and no separator both mean no extra spacing
-    }
-    
-    // Newline at end unless trailing semicolon
-    if (stmt->trailingNewline) {
-        emitPrintNewline();
+
+        // NOW release any temporary string descriptors created by conversions
+        // (after basic_print_using has extracted the UTF-8 strings)
+        for (size_t i = 0; i < argTemps.size(); ++i) {
+            if (createdTemp[i]) {
+                emit("    call $string_release(l " + argTemps[i] + ")\n");
+                m_stats.instructionsGenerated++;
+            }
+        }
+
+        if (stmt->trailingNewline) emitPrintNewline();
+    } else {
+        for (const auto& item : stmt->items) {
+            if (item.expr) {
+                // Evaluate expression and print result
+                std::string resultTemp = emitExpression(item.expr.get());
+                
+                // Infer type from expression
+                VariableType exprType = inferExpressionType(item.expr.get());
+                emitPrintValue(resultTemp, exprType);
+            }
+            
+            // Handle separators (only between items, not after each item)
+            if (item.comma) {
+                // Tab separator
+                emit("    call $basic_print_tab()\n");
+                m_stats.instructionsGenerated++;
+            }
+            // Semicolon and no separator both mean no extra spacing
+        }
+        
+        // Newline at end unless trailing semicolon
+        if (stmt->trailingNewline) {
+            emitPrintNewline();
+        }
     }
 }
 
