@@ -264,6 +264,34 @@ double basic_input_double(void);
 void basic_cls(void);
 
 // =============================================================================
+// Terminal Control Commands
+// =============================================================================
+
+// LOCATE row, col - Move cursor to position (1-based)
+void basic_locate(int32_t row, int32_t col);
+
+// COLOR foreground, background - Set text colors (0-15)
+void basic_color(int32_t foreground, int32_t background);
+
+// WIDTH columns - Set terminal width
+void basic_width(int32_t columns);
+
+// Get terminal width
+int32_t basic_get_width(void);
+
+// CSRLIN - Get current cursor row (1-based)
+int32_t basic_csrlin(void);
+
+// POS(0) - Get current cursor column (1-based)
+int32_t basic_pos(int32_t dummy);
+
+// INKEY$ - Non-blocking keyboard input (returns empty string if no key)
+StringDescriptor* basic_inkey(void);
+
+// LINE INPUT - Read entire line including delimiters
+StringDescriptor* basic_line_input(const char* prompt);
+
+// =============================================================================
 // I/O Operations - File
 // =============================================================================
 

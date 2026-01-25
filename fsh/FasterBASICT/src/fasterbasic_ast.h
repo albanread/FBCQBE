@@ -96,6 +96,8 @@ enum class ASTNodeType {
     STMT_OPTION,
     STMT_CLS,
     STMT_COLOR,
+    STMT_LOCATE,
+    STMT_WIDTH,
     STMT_WAIT,
     STMT_WAIT_MS,
     STMT_PSET,

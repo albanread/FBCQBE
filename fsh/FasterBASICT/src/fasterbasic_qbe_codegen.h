@@ -224,6 +224,12 @@ private:
     void emitLocal(const LocalStatement* stmt);
     void emitShared(const SharedStatement* stmt);
     
+    // Terminal I/O
+    void emitCls(const SimpleStatement* stmt);
+    void emitColor(const ExpressionStatement* stmt);
+    void emitLocate(const ExpressionStatement* stmt);
+    void emitWidth(const ExpressionStatement* stmt);
+    
     // =============================================================================
     // Expression Emission (qbe_codegen_expressions.cpp)
     // =============================================================================

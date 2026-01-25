@@ -82,6 +82,130 @@ void basic_cls(void) {
 }
 
 // =============================================================================
+// Terminal Control Commands
+// =============================================================================
+
+// LOCATE: Move cursor to specific row, column (1-based)
+void basic_locate(int32_t row, int32_t col) {
+    printf("\033[%d;%dH", row, col);
+    fflush(stdout);
+}
+
+// COLOR: Set foreground and background colors using ANSI codes
+// Colors: 0=black, 1=blue, 2=green, 3=cyan, 4=red, 5=magenta, 6=yellow, 7=white
+// 8-15 are bright versions
+void basic_color(int32_t foreground, int32_t background) {
+    // ANSI color codes: 30-37 for foreground, 40-47 for background
+    // Bright colors: 90-97 for foreground, 100-107 for background
+    
+    int fg = 30, bg = 40;
+    
+    // Map BASIC colors to ANSI
+    if (foreground >= 8) {
+        fg = 90 + (foreground - 8);  // Bright colors
+    } else if (foreground >= 0) {
+        fg = 30 + foreground;
+    }
+    
+    if (background >= 8) {
+        bg = 100 + (background - 8);  // Bright backgrounds
+    } else if (background >= 0) {
+        bg = 40 + background;
+    }
+    
+    printf("\033[%d;%dm", fg, bg);
+    fflush(stdout);
+}
+
+// WIDTH: Set terminal width (informational - actual effect depends on terminal)
+static int32_t g_terminal_width = 80;
+
+void basic_width(int32_t columns) {
+    if (columns > 0) {
+        g_terminal_width = columns;
+    }
+}
+
+int32_t basic_get_width(void) {
+    return g_terminal_width;
+}
+
+// CSRLIN: Get current cursor row (1-based)
+// Note: This requires terminal query support - for now return estimated position
+static int32_t g_cursor_row = 1;
+
+int32_t basic_csrlin(void) {
+    // In a full implementation, we'd query the terminal with \033[6n
+    // and parse the response. For now, track internally.
+    return g_cursor_row;
+}
+
+// POS: Get current cursor column (1-based)
+static int32_t g_cursor_col = 1;
+
+int32_t basic_pos(int32_t dummy) {
+    // dummy parameter for BASIC compatibility (always pass 0)
+    (void)dummy;
+    return g_cursor_col;
+}
+
+// Update cursor position tracking (called internally)
+void _basic_update_cursor_pos(int32_t row, int32_t col) {
+    g_cursor_row = row;
+    g_cursor_col = col;
+}
+
+// INKEY$: Non-blocking keyboard input
+// Returns empty string if no key pressed, otherwise returns single character
+#include <fcntl.h>
+#include <unistd.h>
+#include <termios.h>
+
+StringDescriptor* basic_inkey(void) {
+    // Set stdin to non-blocking mode
+    int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+    
+    // Try to read one character
+    char ch;
+    ssize_t n = read(STDIN_FILENO, &ch, 1);
+    
+    // Restore blocking mode
+    fcntl(STDIN_FILENO, F_SETFL, flags);
+    
+    if (n == 1) {
+        // Got a character
+        char str[2] = {ch, '\0'};
+        return string_new_utf8(str);
+    }
+    
+    // No character available
+    return string_new_utf8("");
+}
+
+// LINE INPUT: Read entire line including commas and spaces
+StringDescriptor* basic_line_input(const char* prompt) {
+    if (prompt && prompt[0]) {
+        printf("%s", prompt);
+        fflush(stdout);
+    }
+    
+    char buffer[4096];
+    
+    if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+        return string_new_utf8("");
+    }
+    
+    // Remove trailing newline
+    size_t len = strlen(buffer);
+    if (len > 0 && buffer[len - 1] == '\n') {
+        buffer[len - 1] = '\0';
+    }
+    
+    return string_new_utf8(buffer);
+}
+
+// =============================================================================
 // Console Input
 // =============================================================================
 

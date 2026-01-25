@@ -168,6 +168,26 @@ void QBECodeGenerator::emitStatement(const Statement* stmt) {
             // DATA statements are preprocessed - no runtime code needed
             break;
             
+        case ASTNodeType::STMT_CLS:
+            emitCls(static_cast<const SimpleStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_COLOR:
+            emitColor(static_cast<const ExpressionStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_LOCATE:
+            emitLocate(static_cast<const ExpressionStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_WIDTH:
+            emitWidth(static_cast<const ExpressionStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_AT:
+            emitLocate(static_cast<const ExpressionStatement*>(stmt));
+            break;
+            
         default:
             emitComment("TODO: Unhandled statement type " + std::to_string(static_cast<int>(nodeType)));
             break;
@@ -2044,6 +2064,106 @@ void QBECodeGenerator::emitSliceAssign(const SliceAssignStatement* stmt) {
     emit(callStr);
     emit("    " + currentStr + " =l copy " + result + "\n");
     m_stats.instructionsGenerated += 2;
+}
+
+// =============================================================================
+// Terminal I/O Commands
+// =============================================================================
+
+void QBECodeGenerator::emitCls(const SimpleStatement* stmt) {
+    emitComment("CLS - Clear screen");
+    emit("    call $basic_cls()\n");
+    m_stats.instructionsGenerated++;
+}
+
+void QBECodeGenerator::emitColor(const ExpressionStatement* stmt) {
+    emitComment("COLOR - Set text colors");
+    
+    // COLOR foreground [, background]
+    if (stmt->arguments.empty()) {
+        // COLOR with no arguments - reset to defaults
+        emit("    call $basic_color(w 7, w 0)\n");
+        m_stats.instructionsGenerated++;
+        return;
+    }
+    
+    std::string foreground = emitExpression(stmt->arguments[0].get());
+    std::string background = "0";  // Default black background
+    
+    if (stmt->arguments.size() > 1) {
+        background = emitExpression(stmt->arguments[1].get());
+    }
+    
+    // Ensure values are words (int32)
+    if (inferExpressionType(stmt->arguments[0].get()) == VariableType::DOUBLE) {
+        std::string fgInt = allocTemp("w");
+        emit("    " + fgInt + " =w dtosi " + foreground + "\n");
+        foreground = fgInt;
+        m_stats.instructionsGenerated++;
+    }
+    
+    if (stmt->arguments.size() > 1 && inferExpressionType(stmt->arguments[1].get()) == VariableType::DOUBLE) {
+        std::string bgInt = allocTemp("w");
+        emit("    " + bgInt + " =w dtosi " + background + "\n");
+        background = bgInt;
+        m_stats.instructionsGenerated++;
+    }
+    
+    emit("    call $basic_color(w " + foreground + ", w " + background + ")\n");
+    m_stats.instructionsGenerated++;
+}
+
+void QBECodeGenerator::emitLocate(const ExpressionStatement* stmt) {
+    emitComment("LOCATE - Move cursor to position");
+    
+    // LOCATE row, col
+    if (stmt->arguments.size() < 2) {
+        emitComment("ERROR: LOCATE requires 2 arguments");
+        return;
+    }
+    
+    std::string row = emitExpression(stmt->arguments[0].get());
+    std::string col = emitExpression(stmt->arguments[1].get());
+    
+    // Convert to int32 if needed
+    if (inferExpressionType(stmt->arguments[0].get()) == VariableType::DOUBLE) {
+        std::string rowInt = allocTemp("w");
+        emit("    " + rowInt + " =w dtosi " + row + "\n");
+        row = rowInt;
+        m_stats.instructionsGenerated++;
+    }
+    
+    if (inferExpressionType(stmt->arguments[1].get()) == VariableType::DOUBLE) {
+        std::string colInt = allocTemp("w");
+        emit("    " + colInt + " =w dtosi " + col + "\n");
+        col = colInt;
+        m_stats.instructionsGenerated++;
+    }
+    
+    emit("    call $basic_locate(w " + row + ", w " + col + ")\n");
+    m_stats.instructionsGenerated++;
+}
+
+void QBECodeGenerator::emitWidth(const ExpressionStatement* stmt) {
+    emitComment("WIDTH - Set terminal width");
+    
+    if (stmt->arguments.empty()) {
+        emitComment("ERROR: WIDTH requires 1 argument");
+        return;
+    }
+    
+    std::string columns = emitExpression(stmt->arguments[0].get());
+    
+    // Convert to int32 if needed
+    if (inferExpressionType(stmt->arguments[0].get()) == VariableType::DOUBLE) {
+        std::string colInt = allocTemp("w");
+        emit("    " + colInt + " =w dtosi " + columns + "\n");
+        columns = colInt;
+        m_stats.instructionsGenerated++;
+    }
+    
+    emit("    call $basic_width(w " + columns + ")\n");
+    m_stats.instructionsGenerated++;
 }
 
 } // namespace FasterBASIC

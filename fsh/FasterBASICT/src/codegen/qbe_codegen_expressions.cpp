@@ -490,6 +490,35 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         return result;
     }
     
+    // Special case: INKEY$ - Non-blocking keyboard input
+    if (upper == "INKEY" || upper == "INKEY$") {
+        emitComment("INKEY$ - Non-blocking keyboard input");
+        std::string result = allocTemp("l");
+        emit("    " + result + " =l call $basic_inkey()\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // Special case: CSRLIN - Get current cursor row
+    if (upper == "CSRLIN") {
+        emitComment("CSRLIN - Get cursor row");
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w call $basic_csrlin()\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // Special case: POS - Get current cursor column
+    if (upper == "POS" && expr->arguments.size() == 1) {
+        emitComment("POS - Get cursor column");
+        // The argument is always 0 (dummy parameter), evaluate it but ignore result
+        emitExpression(expr->arguments[0].get());
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w call $basic_pos(w 0)\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
     // Special case: String slicing s$(start TO end) - converted to __string_slice
     if (upper == "__STRING_SLICE" && expr->arguments.size() == 3) {
         std::string strTemp = emitExpression(expr->arguments[0].get());
