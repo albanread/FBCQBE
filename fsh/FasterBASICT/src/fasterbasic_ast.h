@@ -1510,10 +1510,13 @@ public:
 class CaseStatement : public Statement {
 public:
     struct WhenClause {
-        std::vector<ExpressionPtr> values;  // Multiple values for WHEN 1, 2, 3
+        std::vector<ExpressionPtr> values;  // Multiple values for WHEN 1, 2, 3 or single condition for CASE IS
+        bool isCaseIs;                      // true for CASE IS conditions, false for regular CASE values
+        TokenType caseIsOperator;           // Operator for CASE IS (e.g., GREATER_EQUAL)
+        ExpressionPtr caseIsRightExpr;      // Right operand for CASE IS
         std::vector<StatementPtr> statements;
 
-        WhenClause() = default;
+        WhenClause() : isCaseIs(false), caseIsOperator(TokenType::UNKNOWN) {}
     };
 
     ExpressionPtr caseExpression;  // The expression after CASE (e.g., TRUE)
@@ -1522,9 +1525,10 @@ public:
 
     CaseStatement() = default;
 
-    void addWhenClause(std::vector<ExpressionPtr> values) {
+    void addWhenClause(std::vector<ExpressionPtr> values, bool caseIs = false) {
         WhenClause clause;
         clause.values = std::move(values);
+        clause.isCaseIs = caseIs;
         whenClauses.push_back(std::move(clause));
     }
 

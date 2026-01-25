@@ -123,7 +123,11 @@ private:
     
     // SELECT CASE context (for emitting test blocks)
     std::string m_selectCaseValue;
+    std::string m_selectCaseType;
     std::vector<std::vector<std::string>> m_caseClauseValues;
+    std::vector<std::vector<const Expression*>> m_caseClauseExpressions;
+    std::vector<bool> m_caseClauseIsCaseIs;
+    std::vector<TokenType> m_caseClauseIsOperators;
     size_t m_currentCaseClauseIndex = 0;
     
     // Flag: did last statement emit a terminator (jump/return)?
@@ -335,6 +339,10 @@ private:
     // Check if expression is constant
     bool isConstantExpression(const Expression* expr);
     int evaluateConstantInt(const Expression* expr);
+    
+    // Comparison operations
+    std::string getComparisonOp(TokenType op);
+    std::string getComparisonOpDouble(TokenType op);
     double evaluateConstantDouble(const Expression* expr);
     
     // Loop management

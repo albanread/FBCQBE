@@ -58,6 +58,7 @@ void Lexer::initializeKeywords() {
         s_keywords["SELECT"] = TokenType::SELECT;
         s_keywords["OF"] = TokenType::OF;
         s_keywords["WHEN"] = TokenType::WHEN;
+        s_keywords["IS"] = TokenType::IS;
         s_keywords["OTHERWISE"] = TokenType::OTHERWISE;
         s_keywords["ENDCASE"] = TokenType::ENDCASE;
     

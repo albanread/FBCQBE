@@ -62,6 +62,7 @@ enum class TokenType {
     SELECT,          // SELECT
     OF,              // OF
     WHEN,            // WHEN
+    IS,              // IS (for CASE IS expressions)
     OTHERWISE,       // OTHERWISE
     ENDCASE,         // ENDCASE
     
@@ -353,6 +354,7 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::SELECT: return "SELECT";
         case TokenType::OF: return "OF";
         case TokenType::WHEN: return "WHEN";
+        case TokenType::IS: return "IS";
         case TokenType::OTHERWISE: return "OTHERWISE";
         case TokenType::ENDCASE: return "ENDCASE";
         case TokenType::OPTION: return "OPTION";

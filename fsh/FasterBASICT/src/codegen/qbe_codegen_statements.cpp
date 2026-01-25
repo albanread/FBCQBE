@@ -1495,19 +1495,54 @@ void QBECodeGenerator::emitCase(const CaseStatement* stmt) {
     emitComment("SELECT CASE - evaluate expression");
     
     // Evaluate the SELECT CASE expression once and store it
-    m_selectCaseValue = emitExpression(stmt->caseExpression.get());
+    std::string selectTemp = emitExpression(stmt->caseExpression.get());
+    m_selectCaseValue = selectTemp;
     
-    // Store the CASE values for test blocks to use
+    // Determine the type of the select expression
+    if (stmt->caseExpression->getType() == ASTNodeType::EXPR_VARIABLE) {
+        const VariableExpression* varExpr = static_cast<const VariableExpression*>(stmt->caseExpression.get());
+        std::string varName = varExpr->name;
+        std::transform(varName.begin(), varName.end(), varName.begin(), ::tolower);
+        auto it = m_varTypes.find(varName);
+        if (it != m_varTypes.end()) {
+            m_selectCaseType = it->second;
+        } else {
+            m_selectCaseType = "d"; // default to double
+        }
+    } else {
+        // For literals or expressions, assume double
+        m_selectCaseType = "d";
+    }
+    
+    // Store the CASE values and types for test blocks to use
     m_caseClauseValues.clear();
+    m_caseClauseExpressions.clear();
+    m_caseClauseIsCaseIs.clear();
+    m_caseClauseIsOperators.clear();
     m_currentCaseClauseIndex = 0;
     
     for (const auto& clause : stmt->whenClauses) {
-        std::vector<std::string> values;
-        for (const auto& valueExpr : clause.values) {
-            std::string valueTemp = emitExpression(valueExpr.get());
-            values.push_back(valueTemp);
+        if (clause.isCaseIs) {
+            // For CASE IS, store operator and right expression
+            m_caseClauseExpressions.push_back({});  // Empty expressions for CASE IS
+            m_caseClauseValues.push_back({});  // Empty values for CASE IS
+            m_caseClauseIsCaseIs.push_back(true);
+            m_caseClauseIsOperators.push_back(clause.caseIsOperator);
+            // Store the right expression to evaluate later
+            m_caseClauseExpressions.back().push_back(clause.caseIsRightExpr.get());
+        } else {
+            // For regular CASE, store the expressions
+            std::vector<const Expression*> exprs;
+            std::vector<std::string> values;
+            for (const auto& valueExpr : clause.values) {
+                exprs.push_back(valueExpr.get());
+                // Don't evaluate here, will evaluate in test block
+            }
+            m_caseClauseExpressions.push_back(exprs);
+            m_caseClauseValues.push_back(values);
+            m_caseClauseIsCaseIs.push_back(false);
+            m_caseClauseIsOperators.push_back(TokenType::UNKNOWN);
         }
-        m_caseClauseValues.push_back(values);
     }
     
     emitComment("SELECT CASE - test blocks will handle comparisons");

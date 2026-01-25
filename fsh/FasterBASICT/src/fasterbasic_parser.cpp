@@ -1993,14 +1993,46 @@ StatementPtr Parser::parseSelectCaseStatement() {
         if (current().type == TokenType::CASE) {
             advance(); // consume CASE
 
-            // Parse comma-separated values for CASE
-            std::vector<ExpressionPtr> values;
-            do {
-                ExpressionPtr value = parseExpression();
-                values.push_back(std::move(value));
-            } while (match(TokenType::COMMA));
+            // Check for CASE ELSE syntax
+            if (current().type == TokenType::ELSE) {
+                // This is CASE ELSE - break to handle as otherwise clause
+                m_currentIndex--; // put back CASE token
+                break;
+            }
 
-            stmt->addWhenClause(std::move(values));
+            // Check for CASE IS syntax
+            if (current().type == TokenType::IS) {
+                advance(); // consume IS
+                
+                // Parse operator for CASE IS
+                TokenType op = current().type;
+                if (op != TokenType::EQUAL && op != TokenType::NOT_EQUAL &&
+                    op != TokenType::LESS_THAN && op != TokenType::LESS_EQUAL &&
+                    op != TokenType::GREATER_THAN && op != TokenType::GREATER_EQUAL) {
+                    error("Expected comparison operator after CASE IS");
+                    return nullptr;
+                }
+                advance(); // consume operator
+                
+                // Parse right expression
+                ExpressionPtr rightExpr = parseExpression();
+                
+                // Create a new WhenClause for CASE IS
+                CaseStatement::WhenClause clause;
+                clause.isCaseIs = true;
+                clause.caseIsOperator = op;
+                clause.caseIsRightExpr = std::move(rightExpr);
+                stmt->whenClauses.push_back(std::move(clause));
+            } else {
+                // Parse comma-separated values for CASE (traditional syntax)
+                std::vector<ExpressionPtr> values;
+                do {
+                    ExpressionPtr value = parseExpression();
+                    values.push_back(std::move(value));
+                } while (match(TokenType::COMMA));
+
+                stmt->addWhenClause(std::move(values), false);  // false for regular CASE
+            }
 
             // Optional colon or newline after condition
             if (current().type == TokenType::COLON) {
@@ -2109,8 +2141,16 @@ StatementPtr Parser::parseSelectCaseStatement() {
     }
 
     // Parse optional ELSE clause (equivalent to OTHERWISE)
-    if (current().type == TokenType::ELSE) {
-        advance(); // consume ELSE
+    if ((current().type == TokenType::CASE && peek().type == TokenType::ELSE) ||
+        current().type == TokenType::ELSE) {
+        
+        if (current().type == TokenType::CASE && peek().type == TokenType::ELSE) {
+            // Handle CASE ELSE syntax
+            advance(); // consume CASE
+            advance(); // consume ELSE
+        } else {
+            advance(); // consume ELSE
+        }
 
         // Optional colon or newline after ELSE
         if (current().type == TokenType::COLON) {
@@ -2153,7 +2193,7 @@ StatementPtr Parser::parseSelectCaseStatement() {
                 break;
             }
         }
-    }
+    }  // End of ELSE clause parsing
 
     // Expect END SELECT
     consume(TokenType::END, "Expected END to close SELECT CASE statement");
