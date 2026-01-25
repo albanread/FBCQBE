@@ -21,6 +21,7 @@
 #include "fasterbasic_semantic.h"
 #include "fasterbasic_ast.h"
 #include "fasterbasic_options.h"
+#include "fasterbasic_data_preprocessor.h"
 #include <string>
 #include <sstream>
 #include <vector>
@@ -73,6 +74,9 @@ public:
     std::string generate(const ProgramCFG& programCFG, 
                         const SymbolTable& symbols,
                         const CompilerOptions& options);
+    
+    // Set DATA values from preprocessor
+    void setDataValues(const DataPreprocessorResult& dataResult);
     
     // Get generation statistics
     const QBECodeGenStats& getStats() const { return m_stats; }
@@ -139,6 +143,11 @@ private:
     // Data section strings
     std::vector<std::string> m_dataStrings;
     
+    // DATA/READ/RESTORE support
+    std::vector<DataValue> m_dataValues;
+    std::map<int, size_t> m_lineRestorePoints;
+    std::map<std::string, size_t> m_labelRestorePoints;
+    
     // User-Defined Types (UDT) support
     std::unordered_map<std::string, size_t> m_typeSizes;        // typeName -> size in bytes
     std::unordered_map<std::string, std::unordered_map<std::string, size_t>> m_fieldOffsets;  // typeName -> (fieldName -> offset)
@@ -191,6 +200,8 @@ private:
     void emitEnd(const EndStatement* stmt);
     void emitRem(const RemStatement* stmt);
     void emitCall(const CallStatement* stmt);
+    void emitRead(const ReadStatement* stmt);
+    void emitRestore(const RestoreStatement* stmt);
     void emitErase(const EraseStatement* stmt);
     void emitRedim(const RedimStatement* stmt);
     void emitExit(const ExitStatement* stmt);

@@ -9,6 +9,7 @@
 #include "fasterbasic_semantic.h"
 #include "fasterbasic_cfg.h"
 #include "fasterbasic_qbe_codegen.h"
+#include "fasterbasic_data_preprocessor.h"
 #include "modular_commands.h"
 #include "command_registry_core.h"
 #include <iostream>
@@ -134,10 +135,22 @@ int main(int argc, char** argv) {
         auto readEndTime = std::chrono::high_resolution_clock::now();
         double readMs = std::chrono::duration<double, std::milli>(readEndTime - phaseStartTime).count();
         
-        // NOTE: Data preprocessing commented out for now - will be reimplemented for QBE
-        // TODO: Implement DATA segment generation in QBE IL
-        // source = DataPreprocessor::preprocessREM(source);
-        // source = DataPreprocessor::preprocessLineNumbersToLabels(source);
+        // Data preprocessing
+        phaseStartTime = std::chrono::high_resolution_clock::now();
+        if (verbose) {
+            std::cerr << "Preprocessing DATA statements...\n";
+        }
+        
+        DataPreprocessor dataPreprocessor;
+        DataPreprocessorResult dataResult = dataPreprocessor.process(source);
+        source = dataResult.cleanedSource;
+        
+        if (verbose && !dataResult.values.empty()) {
+            std::cerr << "DATA values extracted: " << dataResult.values.size() << "\n";
+        }
+        
+        auto dataEndTime = std::chrono::high_resolution_clock::now();
+        double dataMs = std::chrono::duration<double, std::milli>(dataEndTime - phaseStartTime).count();
         
         // Lexical analysis
         phaseStartTime = std::chrono::high_resolution_clock::now();
@@ -237,6 +250,7 @@ int main(int argc, char** argv) {
         }
         
         QBECodeGenerator qbeGen;
+        qbeGen.setDataValues(dataResult);  // Pass DATA values to code generator
         std::string qbeIL = qbeGen.generate(*cfg, semantic.getSymbolTable(), compilerOptions);
         
         auto qbeGenEndTime = std::chrono::high_resolution_clock::now();
@@ -253,6 +267,7 @@ int main(int argc, char** argv) {
         if (showProfile) {
             std::cerr << "\n=== Compilation Phase Timing ===\n";
             std::cerr << "  File I/O:          " << std::fixed << std::setprecision(3) << readMs << " ms\n";
+            std::cerr << "  Data Preprocess:   " << std::fixed << std::setprecision(3) << dataMs << " ms\n";
             std::cerr << "  Lexer:             " << std::fixed << std::setprecision(3) << lexMs << " ms\n";
             std::cerr << "  Parser:            " << std::fixed << std::setprecision(3) << parseMs << " ms\n";
             std::cerr << "  Semantic:          " << std::fixed << std::setprecision(3) << semanticMs << " ms\n";

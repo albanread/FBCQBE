@@ -136,6 +136,18 @@ void QBECodeGenerator::emitStatement(const Statement* stmt) {
             // No runtime code needed - values inlined at use sites
             break;
             
+        case ASTNodeType::STMT_READ:
+            emitRead(static_cast<const ReadStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_RESTORE:
+            emitRestore(static_cast<const RestoreStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_DATA:
+            // DATA statements are preprocessed - no runtime code needed
+            break;
+            
         default:
             emitComment("TODO: Unhandled statement type " + std::to_string(static_cast<int>(nodeType)));
             break;
@@ -1422,6 +1434,80 @@ void QBECodeGenerator::emitShared(const SharedStatement* stmt) {
         m_sharedVariables.insert(var.name);
         emitComment("SHARED " + var.name);
     }
+}
+
+// =============================================================================
+// READ Statement
+// =============================================================================
+
+void QBECodeGenerator::emitRead(const ReadStatement* stmt) {
+    if (!stmt) return;
+    
+    emitComment("READ statement");
+    
+    // Read values for each variable
+    for (const auto& varName : stmt->variables) {
+        std::string varRef = getVariableRef(varName);
+        VariableType varType = getVariableType(varName);
+        
+        if (varType == VariableType::STRING) {
+            std::string strPtr = allocTemp("l");
+            emit("    " + strPtr + " =l call $basic_read_string()\n");
+            emit("    " + varRef + " =l copy " + strPtr + "\n");
+            m_stats.instructionsGenerated += 2;
+        } else if (varType == VariableType::INT) {
+            std::string intVal = allocTemp("w");
+            emit("    " + intVal + " =w call $basic_read_int()\n");
+            emit("    " + varRef + " =w copy " + intVal + "\n");
+            m_stats.instructionsGenerated += 2;
+        } else if (varType == VariableType::DOUBLE || varType == VariableType::FLOAT) {
+            std::string dblVal = allocTemp("d");
+            emit("    " + dblVal + " =d call $basic_read_double()\n");
+            emit("    " + varRef + " =d copy " + dblVal + "\n");
+            m_stats.instructionsGenerated += 2;
+        } else {
+            emitComment("WARNING: Unsupported variable type for READ: " + varName);
+        }
+    }
+}
+
+// =============================================================================
+// RESTORE Statement
+// =============================================================================
+
+void QBECodeGenerator::emitRestore(const RestoreStatement* stmt) {
+    if (!stmt) return;
+    
+    emitComment("RESTORE statement");
+    
+    size_t targetIndex = 0;
+    
+    if (stmt->isLabel) {
+        // RESTORE to label
+        auto it = m_labelRestorePoints.find(stmt->label);
+        if (it != m_labelRestorePoints.end()) {
+            targetIndex = it->second;
+        } else {
+            emitComment("WARNING: RESTORE label not found: " + stmt->label);
+            return;
+        }
+    } else if (stmt->lineNumber > 0) {
+        // RESTORE to line number
+        auto it = m_lineRestorePoints.find(stmt->lineNumber);
+        if (it != m_lineRestorePoints.end()) {
+            targetIndex = it->second;
+        } else {
+            emitComment("WARNING: RESTORE line not found: " + std::to_string(stmt->lineNumber));
+            return;
+        }
+    } else {
+        // RESTORE with no argument - reset to beginning (index 0)
+        targetIndex = 0;
+    }
+    
+    // Call runtime function to set data pointer
+    emit("    call $basic_restore(l " + std::to_string(targetIndex) + ")\n");
+    m_stats.instructionsGenerated++;
 }
 
 } // namespace FasterBASIC

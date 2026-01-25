@@ -120,18 +120,67 @@ void QBECodeGenerator::emitHeader() {
 // Data Section Emission
 // =============================================================================
 
+void QBECodeGenerator::setDataValues(const DataPreprocessorResult& dataResult) {
+    m_dataValues = dataResult.dataValues;
+    m_lineRestorePoints = dataResult.lineRestorePoints;
+    m_labelRestorePoints = dataResult.labelRestorePoints;
+}
+
 void QBECodeGenerator::emitDataSection() {
-    if (m_dataStrings.empty()) {
-        return;
-    }
-    
     emitComment("=== DATA SECTION ===");
     emit("\n");
     
+    // Emit DATA values if present
+    if (!m_dataValues.empty()) {
+        emitComment("DATA values");
+        emit("data $__basic_data = { ");
+        
+        for (size_t i = 0; i < m_dataValues.size(); ++i) {
+            if (i > 0) emit(", ");
+            
+            const DataValue& val = m_dataValues[i];
+            if (std::holds_alternative<int>(val)) {
+                emit("w " + std::to_string(std::get<int>(val)));
+            } else if (std::holds_alternative<double>(val)) {
+                emit("d " + std::to_string(std::get<double>(val)));
+            } else {
+                // String pointer - add to string pool and reference it
+                const std::string& str = std::get<std::string>(val);
+                size_t strIdx = m_dataStrings.size();
+                m_dataStrings.push_back(str);
+                emit("l $data_str." + std::to_string(strIdx));
+            }
+        }
+        emit(" }\n");
+        
+        // Emit type tags (0=INT, 1=DOUBLE, 2=STRING)
+        emit("data $__basic_data_types = { ");
+        for (size_t i = 0; i < m_dataValues.size(); ++i) {
+            if (i > 0) emit(", ");
+            
+            const DataValue& val = m_dataValues[i];
+            if (std::holds_alternative<int>(val)) {
+                emit("b 0");
+            } else if (std::holds_alternative<double>(val)) {
+                emit("b 1");
+            } else {
+                emit("b 2");
+            }
+        }
+        emit(" }\n");
+        
+        // Emit data pointer (initialized to 0)
+        emit("data $__basic_data_ptr = { l 0 }\n");
+        emit("\n");
+    }
+    
     // Emit string literals as data objects
-    for (size_t i = 0; i < m_dataStrings.size(); ++i) {
-        emit("data $str." + std::to_string(i) + " = { ");
-        emit("b \"" + escapeString(m_dataStrings[i]) + "\", b 0 }\n");
+    if (!m_dataStrings.empty()) {
+        emitComment("String literals");
+        for (size_t i = 0; i < m_dataStrings.size(); ++i) {
+            emit("data $data_str." + std::to_string(i) + " = { ");
+            emit("b \"" + escapeString(m_dataStrings[i]) + "\", b 0 }\n");
+        }
     }
     
     emit("\n");

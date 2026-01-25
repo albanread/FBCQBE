@@ -387,6 +387,21 @@ void basic_set_line(int32_t line_number);
 // Get current line number
 int32_t basic_get_line(void);
 
+// =============================================================================
+// DATA/READ/RESTORE Support
+// =============================================================================
+
+// Read values from DATA statements
+int32_t basic_read_int(void);
+double basic_read_double(void);
+const char* basic_read_string(void);
+
+// Restore DATA pointer to a specific position
+void basic_restore(int64_t index);
+
+// Restore DATA pointer to the beginning
+void basic_restore_start(void);
+
 #ifdef __cplusplus
 }
 #endif
