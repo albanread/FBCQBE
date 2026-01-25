@@ -118,6 +118,10 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printUsage(argv[0]);
             return 0;
+        } else if (strcmp(argv[i], "--version") == 0) {
+            std::cerr << "BASIC Compiler v1.0.0\n";
+            std::cerr << "QBE-based BASIC to native code compiler\n";
+            return 0;
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
             verbose = true;
         } else if (strcmp(argv[i], "-c") == 0) {

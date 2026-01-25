@@ -1,0 +1,81 @@
+name: Build BASIC Compiler
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-13        # Intel x86_64
+            arch: x86_64
+          - os: macos-14        # Apple Silicon ARM64
+            arch: arm64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup build environment
+      run: |
+        brew install qbe || true
+        
+    - name: Build compiler
+      run: |
+        cd fsh
+        ./build_fbc_qbe.sh
+        
+    - name: Test compiler
+      run: |
+        cd fsh
+        ./basic --version || true
+        ./basic --run ../test_terminal_funcs.bas
+        
+    - name: Create distribution archive
+      run: |
+        cd fsh
+        ARCH="${{ matrix.arch }}"
+        VERSION="${GITHUB_REF#refs/tags/}"
+        if [[ "$VERSION" == "refs/heads/main" ]]; then
+          VERSION="latest"
+        fi
+        tar czf basic-compiler-macos-${ARCH}-${VERSION}.tar.gz package/
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: basic-compiler-macos-${{ matrix.arch }}
+        path: fsh/basic-compiler-macos-${{ matrix.arch }}-*.tar.gz
+        retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          basic-compiler-macos-x86_64/*.tar.gz
+          basic-compiler-macos-arm64/*.tar.gz
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
