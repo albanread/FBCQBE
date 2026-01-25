@@ -350,6 +350,104 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         return temp;
     }
     
+    std::string funcName = expr->name;
+    std::string upper = funcName;
+    for (char& c : upper) c = std::toupper(c);
+    
+    // Special case: LEN() - just load the length field from StringDescriptor (offset 8)
+    if (upper == "LEN" && expr->arguments.size() == 1) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string lenPtr = allocTemp("l");
+        std::string result = allocTemp("l");
+        emit("    " + lenPtr + " =l add " + strTemp + ", 8\n");  // offset to length field
+        emit("    " + result + " =l loadl " + lenPtr + "\n");
+        m_stats.instructionsGenerated += 2;
+        return result;
+    }
+    
+    // Special case: STRTYPE() - load encoding type from StringDescriptor (offset 28)
+    // Returns: 0 = ASCII, 1 = UTF-32
+    if (upper == "STRTYPE" && expr->arguments.size() == 1) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string encPtr = allocTemp("l");
+        std::string result = allocTemp("w");
+        emit("    " + encPtr + " =l add " + strTemp + ", 28\n");  // offset to encoding field
+        emit("    " + result + " =w loadub " + encPtr + "\n");     // load encoding byte (0 or 1)
+        m_stats.instructionsGenerated += 2;
+        return result;
+    }
+    
+    // Special case: ASC() - load first code point from StringDescriptor
+    // Need to check encoding type: ASCII (offset 28) = 0 uses loadub, UTF-32 = 1 uses loaduw
+    if (upper == "ASC" && expr->arguments.size() == 1) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        
+        // Check if string is NULL or empty - need to check length first
+        std::string lenPtr = allocTemp("l");
+        std::string len = allocTemp("l");
+        emit("    " + lenPtr + " =l add " + strTemp + ", 8\n");  // offset to length field
+        emit("    " + len + " =l loadl " + lenPtr + "\n");
+        
+        // Check if length > 0
+        std::string hasChars = allocTemp("w");
+        emit("    " + hasChars + " =w csgtl " + len + ", 0\n");  // signed greater than
+        
+        std::string validLabel = allocLabel();
+        std::string emptyLabel = allocLabel();
+        std::string endLabel = allocLabel();
+        
+        emit("    jnz " + hasChars + ", @" + validLabel + ", @" + emptyLabel + "\n");
+        m_stats.instructionsGenerated += 4;
+        
+        // Valid string - check encoding type and load first character
+        emit("@" + validLabel + "\n");
+        
+        // Load encoding byte at offset 28
+        std::string encodingPtr = allocTemp("l");
+        std::string encoding = allocTemp("w");
+        emit("    " + encodingPtr + " =l add " + strTemp + ", 28\n");
+        emit("    " + encoding + " =w loadub " + encodingPtr + "\n");  // load encoding byte
+        
+        // Load data pointer at offset 0
+        std::string dataPtr = allocTemp("l");
+        emit("    " + dataPtr + " =l loadl " + strTemp + "\n");
+        
+        // Check encoding: 0=ASCII, 1=UTF-32
+        std::string isASCII = allocTemp("w");
+        emit("    " + isASCII + " =w ceqw " + encoding + ", 0\n");
+        
+        std::string asciiLabel = allocLabel();
+        std::string utf32Label = allocLabel();
+        
+        emit("    jnz " + isASCII + ", @" + asciiLabel + ", @" + utf32Label + "\n");
+        m_stats.instructionsGenerated += 6;
+        
+        // ASCII path - load 1 byte
+        emit("@" + asciiLabel + "\n");
+        std::string asciiChar = allocTemp("w");
+        emit("    " + asciiChar + " =w loadub " + dataPtr + "\n");
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w copy " + asciiChar + "\n");
+        emit("    jmp @" + endLabel + "\n");
+        m_stats.instructionsGenerated += 3;
+        
+        // UTF-32 path - load 4 bytes
+        emit("@" + utf32Label + "\n");
+        std::string utf32Char = allocTemp("w");
+        emit("    " + utf32Char + " =w loaduw " + dataPtr + "\n");
+        emit("    " + result + " =w copy " + utf32Char + "\n");
+        emit("    jmp @" + endLabel + "\n");
+        m_stats.instructionsGenerated += 3;
+        
+        // Empty string - return 0
+        emit("@" + emptyLabel + "\n");
+        emit("    " + result + " =w copy 0\n");
+        m_stats.instructionsGenerated++;
+        
+        emit("@" + endLabel + "\n");
+        return result;
+    }
+    
     // Evaluate arguments (get raw temporaries)
     std::vector<std::string> argTemps;
     std::vector<VariableType> argTypes;
@@ -357,8 +455,6 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         argTemps.push_back(emitExpression(arg.get()));
         argTypes.push_back(inferExpressionType(arg.get()));
     }
-    
-    std::string funcName = expr->name;
     
     // Check if this is a user-defined function
     bool isUserFunction = false;
@@ -431,7 +527,25 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         // Call runtime library function
         std::string runtimeFunc = mapToRuntimeFunction(funcName);
         
-        emit("    " + resultTemp + " =w call $" + runtimeFunc + "(");
+        // Determine correct return type for runtime function
+        std::string upper = funcName;
+        for (char& c : upper) c = std::toupper(c);
+        
+        std::string callReturnType = "w";  // Default to word
+        if (upper == "LEN" || upper == "ASC" || upper == "INSTR") {
+            callReturnType = "l";  // int64_t or uint32_t -> long
+        } else if (upper == "VAL" || upper == "RND" || upper == "SIN" || upper == "COS" || 
+                   upper == "TAN" || upper == "SQRT" || upper == "ABS") {
+            callReturnType = "d";  // double
+        } else if (upper == "CHR$" || upper == "LEFT$" || upper == "RIGHT$" || upper == "MID$" ||
+                   upper == "STR$" || upper == "SPACE$" || upper == "STRING$" || 
+                   upper == "UCASE$" || upper == "LCASE$" || upper == "TRIM$" || 
+                   upper == "LTRIM$" || upper == "RTRIM$") {
+            callReturnType = "l";  // StringDescriptor* -> long pointer
+        }
+        
+        resultTemp = allocTemp(callReturnType);
+        emit("    " + resultTemp + " =" + callReturnType + " call $" + runtimeFunc + "(");
         
         for (size_t i = 0; i < convertedArgTemps.size(); ++i) {
             if (i > 0) emit(", ");
@@ -807,15 +921,23 @@ std::string QBECodeGenerator::mapToRuntimeFunction(const std::string& basicFunc)
     if (upper == "RND") return "basic_rnd";
     if (upper == "SGN") return "basic_sgn";
     
-    // String functions
-    if (upper == "LEN") return "str_length";
-    if (upper == "LEFT$") return "str_left";
-    if (upper == "RIGHT$") return "str_right";
-    if (upper == "MID$") return "str_mid";
-    if (upper == "CHR$") return "str_chr";
-    if (upper == "ASC") return "str_asc";
-    if (upper == "STR$") return "int_to_str";
-    if (upper == "VAL") return "str_to_int";
+    // String functions - UTF-32 runtime
+    if (upper == "LEN") return "basic_len";          // Returns int64_t
+    if (upper == "LEFT$") return "string_left";      // Returns StringDescriptor*
+    if (upper == "RIGHT$") return "string_right";    // Returns StringDescriptor*
+    if (upper == "MID$") return "string_mid";        // Returns StringDescriptor*
+    if (upper == "CHR$") return "basic_chr";         // Returns StringDescriptor*
+    if (upper == "ASC") return "basic_asc";          // Returns uint32_t
+    if (upper == "STR$") return "basic_str_double";  // Returns StringDescriptor*
+    if (upper == "VAL") return "basic_val";          // Returns double
+    if (upper == "SPACE$") return "basic_space";     // Returns StringDescriptor*
+    if (upper == "STRING$") return "basic_string_repeat"; // Returns StringDescriptor*
+    if (upper == "UCASE$") return "string_upper";    // Returns StringDescriptor*
+    if (upper == "LCASE$") return "string_lower";    // Returns StringDescriptor*
+    if (upper == "TRIM$") return "string_trim";      // Returns StringDescriptor*
+    if (upper == "LTRIM$") return "string_ltrim";    // Returns StringDescriptor*
+    if (upper == "RTRIM$") return "string_rtrim";    // Returns StringDescriptor*
+    if (upper == "INSTR") return "string_instr";     // Returns int64_t
     
     // Default: prefix with basic_
     return "basic_" + upper;

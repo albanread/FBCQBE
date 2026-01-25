@@ -2807,6 +2807,7 @@ void SemanticAnalyzer::initializeBuiltinFunctions() {
     // String functions (register both $ and _STRING variants for parser compatibility)
     m_builtinFunctions["LEN"] = 1;    // Returns INT
     m_builtinFunctions["ASC"] = 1;    // Returns INT
+    m_builtinFunctions["STRTYPE"] = 1; // Returns INT (encoding type: 0=ASCII, 1=UTF-32)
     m_builtinFunctions["CHR$"] = 1;   // Returns STRING
     m_builtinFunctions["CHR_STRING"] = 1;   // Parser converts CHR$ to CHR_STRING
     m_builtinFunctions["STR$"] = 1;   // Returns STRING
@@ -3078,7 +3079,7 @@ VariableType SemanticAnalyzer::getBuiltinReturnType(const std::string& name) con
     }
     
     // LEN and ASC return INT
-    if (name == "LEN" || name == "ASC") {
+    if (name == "LEN" || name == "ASC" || name == "STRTYPE") {
         return VariableType::INT;
     }
     

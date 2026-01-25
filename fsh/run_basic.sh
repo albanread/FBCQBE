@@ -48,7 +48,17 @@ echo "[2/4] Compiling QBE IL to Assembly..."
 
 # Step 3: Compile Assembly with Runtime to Executable
 echo "[3/4] Linking with runtime library..."
-cc "${OUTPUT_NAME}.s" FasterBASICT/runtime_c/*.c -o "$OUTPUT_NAME"
+cc "${OUTPUT_NAME}.s" \
+   FasterBASICT/runtime_c/array_ops.c \
+   FasterBASICT/runtime_c/basic_data.c \
+   FasterBASICT/runtime_c/basic_runtime.c \
+   FasterBASICT/runtime_c/conversion_ops.c \
+   FasterBASICT/runtime_c/io_ops.c \
+   FasterBASICT/runtime_c/math_ops.c \
+   FasterBASICT/runtime_c/memory_mgmt.c \
+   FasterBASICT/runtime_c/string_ops.c \
+   FasterBASICT/runtime_c/string_utf32.c \
+   -IFasterBASICT/runtime_c -o "$OUTPUT_NAME"
 
 # Step 4: Run the executable
 echo "[4/4] Running $OUTPUT_NAME..."

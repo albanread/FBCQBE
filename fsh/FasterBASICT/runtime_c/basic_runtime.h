@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include "string_descriptor.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -228,6 +229,9 @@ void basic_print_string(BasicString* str);
 // Print C string literal (for compile-time constants)
 void basic_print_cstr(const char* str);
 
+// Print UTF-32 StringDescriptor (for new UTF-32 strings)
+void basic_print_string_desc(StringDescriptor* desc);
+
 // Print newline
 void basic_print_newline(void);
 
@@ -239,6 +243,9 @@ void basic_print_at(int32_t row, int32_t col, BasicString* str);
 
 // Input string from console
 BasicString* basic_input_string(void);
+
+// Input UTF-32 StringDescriptor from console
+StringDescriptor* basic_input_line(void);
 
 // Input with prompt
 BasicString* basic_input_prompt(BasicString* prompt);

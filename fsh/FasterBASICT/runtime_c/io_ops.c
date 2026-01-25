@@ -6,6 +6,7 @@
 //
 
 #include "basic_runtime.h"
+#include "string_descriptor.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +45,14 @@ void basic_print_string(BasicString* str) {
 void basic_print_cstr(const char* str) {
     if (!str) return;
     printf("%s", str);
+    fflush(stdout);
+}
+
+// Print UTF-32 StringDescriptor (converts to UTF-8 for output)
+void basic_print_string_desc(StringDescriptor* desc) {
+    if (!desc) return;
+    const char* utf8 = string_to_utf8(desc);
+    printf("%s", utf8);
     fflush(stdout);
 }
 
@@ -113,6 +122,23 @@ double basic_input_double(void) {
     double result = str_to_double(str);
     str_release(str);
     return result;
+}
+
+// UTF-32 StringDescriptor input (reads UTF-8 from console, converts to UTF-32)
+StringDescriptor* basic_input_line(void) {
+    char buffer[4096];
+    
+    if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+        return string_new_utf8("");
+    }
+    
+    // Remove trailing newline
+    size_t len = strlen(buffer);
+    if (len > 0 && buffer[len - 1] == '\n') {
+        buffer[len - 1] = '\0';
+    }
+    
+    return string_new_utf8(buffer);
 }
 
 // =============================================================================

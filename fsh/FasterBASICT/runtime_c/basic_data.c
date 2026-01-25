@@ -18,9 +18,15 @@
 // =============================================================================
 
 // These symbols are defined in the generated QBE IL code
+// If the program doesn't use DATA statements, provide weak default symbols
 extern int64_t __basic_data[];        // Array of data values
 extern uint8_t __basic_data_types[];  // Array of type tags (0=INT, 1=DOUBLE, 2=STRING)
 extern int64_t __basic_data_ptr;      // Current read position
+
+// Weak default symbols for programs without DATA statements
+__attribute__((weak)) int64_t __basic_data[1] = {0};
+__attribute__((weak)) uint8_t __basic_data_types[1] = {0};
+__attribute__((weak)) int64_t __basic_data_ptr = 0;
 
 // =============================================================================
 // Type Enumeration

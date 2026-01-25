@@ -507,6 +507,30 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
                 }
             }
             
+            // Check builtin functions
+            std::string upper = funcExpr->name;
+            for (char& c : upper) c = std::toupper(c);
+            
+            // String functions return STRING
+            if (upper == "CHR$" || upper == "LEFT$" || upper == "RIGHT$" || upper == "MID$" ||
+                upper == "STR$" || upper == "SPACE$" || upper == "STRING$" || 
+                upper == "UCASE$" || upper == "LCASE$" || upper == "TRIM$" || 
+                upper == "LTRIM$" || upper == "RTRIM$") {
+                return VariableType::STRING;
+            }
+            
+            // Integer functions return INT (LEN, ASC, INSTR return 64-bit or 32-bit ints)
+            if (upper == "LEN" || upper == "ASC" || upper == "INSTR" || upper == "STRTYPE") {
+                return VariableType::INT;
+            }
+            
+            // Math functions return DOUBLE
+            if (upper == "VAL" || upper == "RND" || upper == "SIN" || upper == "COS" || 
+                upper == "TAN" || upper == "SQRT" || upper == "ABS" || upper == "INT" ||
+                upper == "SGN") {
+                return VariableType::DOUBLE;
+            }
+            
             // Default for unknown functions
             return VariableType::DOUBLE;
         }
@@ -522,12 +546,23 @@ std::string QBECodeGenerator::promoteToType(const std::string& value,
     // If types match, no promotion needed
     if (fromType == toType) return value;
     
-    // Promote INT to DOUBLE
+    // Get QBE types to check for actual representation
+    std::string fromQBE = getQBEType(fromType);
+    std::string toQBE = getQBEType(toType);
+    
+    // If QBE types match, no conversion needed (e.g., INT->INT both map to 'l' or 'w')
+    // Note: We use 'l' for INT in some contexts and 'w' in others depending on the operation
+    // For runtime function returns that are 'l' being assigned to INT variables, no conversion
+    if (fromQBE == toQBE) return value;
+    
+    // Promote INT to DOUBLE (w or l -> d)
     if (fromType == VariableType::INT && toType == VariableType::DOUBLE) {
+        // Need to check if value is 'w' or 'l' type
+        // For now, assume it's coming from the expression which knows its QBE type
         return emitIntToDouble(value);
     }
     
-    // Demote DOUBLE to INT
+    // Demote DOUBLE to INT (d -> w or l)
     if (fromType == VariableType::DOUBLE && toType == VariableType::INT) {
         return emitDoubleToInt(value);
     }

@@ -20,7 +20,8 @@ namespace FasterBASIC {
 
 void QBECodeGenerator::emitPrintValue(const std::string& value, VariableType type) {
     if (type == VariableType::STRING) {
-        emit("    call $basic_print_cstr(l " + value + ")\n");
+        // String is now a StringDescriptor pointer (l type)
+        emit("    call $basic_print_string_desc(l " + value + ")\n");
     } else if (type == VariableType::INT) {
         emit("    call $basic_print_int(w " + value + ")\n");
     } else if (type == VariableType::DOUBLE) {
@@ -49,8 +50,9 @@ void QBECodeGenerator::emitPrintTab() {
 // =============================================================================
 
 std::string QBECodeGenerator::emitInputString() {
+    // Returns StringDescriptor* from UTF-8 input
     std::string temp = allocTemp("l");
-    emit("    " + temp + " =l call $basic_input_string()\n");
+    emit("    " + temp + " =l call $basic_input_line()\n");
     m_stats.instructionsGenerated++;
     return temp;
 }
@@ -77,10 +79,13 @@ std::string QBECodeGenerator::emitStringConstant(const std::string& str) {
     // Check if we already have this string
     auto it = m_stringLiterals.find(str);
     if (it != m_stringLiterals.end()) {
-        std::string temp = allocTemp("l");
-        emit("    " + temp + " =l copy $str." + std::to_string(it->second) + "\n");
-        m_stats.instructionsGenerated++;
-        return temp;
+        // Return pointer to existing UTF-8 string, then create StringDescriptor
+        std::string utf8Ptr = allocTemp("l");
+        emit("    " + utf8Ptr + " =l copy $data_str." + std::to_string(it->second) + "\n");
+        std::string desc = allocTemp("l");
+        emit("    " + desc + " =l call $string_new_utf8(l " + utf8Ptr + ")\n");
+        m_stats.instructionsGenerated += 2;
+        return desc;
     }
     
     // Add new string to data section
@@ -88,30 +93,36 @@ std::string QBECodeGenerator::emitStringConstant(const std::string& str) {
     m_dataStrings.push_back(str);
     m_stringLiterals[str] = strId;
     
-    std::string temp = allocTemp("l");
-    emit("    " + temp + " =l copy $str." + std::to_string(strId) + "\n");
-    m_stats.instructionsGenerated++;
+    // Create StringDescriptor from UTF-8 literal
+    std::string utf8Ptr = allocTemp("l");
+    emit("    " + utf8Ptr + " =l copy $data_str." + std::to_string(strId) + "\n");
+    std::string desc = allocTemp("l");
+    emit("    " + desc + " =l call $string_new_utf8(l " + utf8Ptr + ")\n");
+    m_stats.instructionsGenerated += 2;
     
-    return temp;
+    return desc;
 }
 
 std::string QBECodeGenerator::emitStringConcat(const std::string& left, const std::string& right) {
+    // Both left and right are StringDescriptor* (l type)
     std::string result = allocTemp("l");
-    emit("    " + result + " =l call $str_concat(l " + left + ", l " + right + ")\n");
+    emit("    " + result + " =l call $string_concat(l " + left + ", l " + right + ")\n");
     m_stats.instructionsGenerated++;
     return result;
 }
 
 std::string QBECodeGenerator::emitStringCompare(const std::string& left, const std::string& right) {
+    // Both are StringDescriptor*, returns int32_t
     std::string result = allocTemp("w");
-    emit("    " + result + " =w call $str_compare(l " + left + ", l " + right + ")\n");
+    emit("    " + result + " =w call $string_compare(l " + left + ", l " + right + ")\n");
     m_stats.instructionsGenerated++;
     return result;
 }
 
 std::string QBECodeGenerator::emitStringLength(const std::string& str) {
-    std::string result = allocTemp("w");
-    emit("    " + result + " =w call $str_length(l " + str + ")\n");
+    // str is StringDescriptor*, returns int64_t (length in code points)
+    std::string result = allocTemp("l");
+    emit("    " + result + " =l call $string_length(l " + str + ")\n");
     m_stats.instructionsGenerated++;
     return result;
 }
@@ -119,8 +130,10 @@ std::string QBECodeGenerator::emitStringLength(const std::string& str) {
 std::string QBECodeGenerator::emitStringSubstr(const std::string& str, 
                                                const std::string& start, 
                                                const std::string& length) {
+    // Use string_mid for UTF-32 (returns StringDescriptor*)
+    // start and length are int64_t (0-based indexing)
     std::string result = allocTemp("l");
-    emit("    " + result + " =l call $str_substr(l " + str + ", w " + start + ", w " + length + ")\n");
+    emit("    " + result + " =l call $string_mid(l " + str + ", l " + start + ", l " + length + ")\n");
     m_stats.instructionsGenerated++;
     return result;
 }

@@ -353,6 +353,7 @@ private:
     TokenType peekTypeSuffix() const;
     std::string parseVariableName(TokenType& outSuffix);
     int parseLineNumber();
+    bool isBuiltinFunction(const std::string& name) const;
     
     // Parse multiple comma-separated expressions
     std::vector<ExpressionPtr> parseExpressionList();

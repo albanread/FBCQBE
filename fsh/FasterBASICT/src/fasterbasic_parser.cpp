@@ -4310,7 +4310,26 @@ ExpressionPtr Parser::parsePrimary() {
 
         // Check for array access or function call
         if (match(TokenType::LPAREN)) {
-            // Check if this is a known user-defined function
+            // PRIORITY 1: Check if this is a builtin function (like LEN, ASC, CHR$, etc.)
+            // Convert name to uppercase for case-insensitive lookup
+            std::string upperName = name;
+            std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
+            
+            if (isBuiltinFunction(upperName)) {
+                // This is a builtin function call
+                auto call = std::make_unique<FunctionCallExpression>(name, false);
+
+                if (current().type != TokenType::RPAREN) {
+                    do {
+                        call->addArgument(parseExpression());
+                    } while (match(TokenType::COMMA));
+                }
+
+                consume(TokenType::RPAREN, "Expected ')' after function arguments");
+                return call;
+            }
+            
+            // PRIORITY 2: Check if this is a known user-defined function
             if (m_userDefinedFunctions.find(name) != m_userDefinedFunctions.end()) {
                 // This is a user-defined function call
                 auto call = std::make_unique<FunctionCallExpression>(name, false);
@@ -4325,7 +4344,7 @@ ExpressionPtr Parser::parsePrimary() {
                 return call;
             }
 
-            // Otherwise, it's array access
+            // PRIORITY 3: Otherwise, it's array access
             auto arrayAccess = std::make_unique<ArrayAccessExpression>(name, suffix);
 
             if (current().type != TokenType::RPAREN) {
@@ -4718,6 +4737,21 @@ int Parser::parseLineNumber() {
     int line = static_cast<int>(current().numberValue);
     advance();
     return line;
+}
+
+bool Parser::isBuiltinFunction(const std::string& name) const {
+    // List of builtin functions (case-insensitive)
+    // This should match the list in semantic analyzer's initializeBuiltinFunctions()
+    static const std::set<std::string> builtins = {
+        "ABS", "SIN", "COS", "TAN", "ATN", "SQR", "INT", "SGN", "LOG", "EXP", "RND",
+        "LEN", "ASC", "CHR$", "CHR_STRING", "STR$", "STR_STRING", "VAL", "STRTYPE",
+        "LEFT$", "RIGHT$", "MID$", "LEFT_STRING", "RIGHT_STRING", "MID_STRING",
+        "INSTR", "SPACE$", "STRING$", "UCASE$", "LCASE$", "LTRIM$", "RTRIM$", "TRIM$",
+        "GETTICKS", "LOF", "EOF", "PEEK", "PEEK2", "PEEK4",
+        // Add more as needed
+    };
+    
+    return builtins.find(name) != builtins.end();
 }
 
 std::vector<ExpressionPtr> Parser::parseExpressionList() {

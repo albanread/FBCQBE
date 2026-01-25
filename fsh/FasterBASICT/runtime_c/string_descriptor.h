@@ -28,27 +28,35 @@
 extern "C" {
 #endif
 
+// String encoding types
+typedef enum {
+    STRING_ENCODING_ASCII = 0,   // 7-bit ASCII, 1 byte per character
+    STRING_ENCODING_UTF32 = 1    // UTF-32, 4 bytes per character
+} StringEncoding;
+
 //
-// StringDescriptor: Tracks UTF-32 string metadata
+// StringDescriptor: Tracks string metadata with encoding type
 //
 // Memory layout:
-//   Offset 0:  uint32_t* data      - Pointer to UTF-32 code points
-//   Offset 8:  int64_t length       - Length in code points (not bytes)
-//   Offset 16: int64_t capacity     - Allocated capacity in code points
+//   Offset 0:  void* data          - Pointer to character data (uint8_t* or uint32_t*)
+//   Offset 8:  int64_t length       - Length in characters (not bytes)
+//   Offset 16: int64_t capacity     - Allocated capacity in characters
 //   Offset 24: int32_t refcount     - Reference count for sharing
-//   Offset 28: uint8_t dirty        - Needs UTF-8 re-encoding flag
-//   Offset 29: uint8_t _padding[3]  - Alignment padding
+//   Offset 28: uint8_t encoding     - STRING_ENCODING_ASCII or STRING_ENCODING_UTF32
+//   Offset 29: uint8_t dirty        - Needs UTF-8 re-encoding flag
+//   Offset 30: uint8_t _padding[2]  - Alignment padding
 //   Offset 32: char* utf8_cache     - Cached UTF-8 representation (NULL if dirty)
 //
 // Total size: 40 bytes (aligned)
 //
 typedef struct {
-    uint32_t* data;        // UTF-32 code points
-    int64_t   length;      // Length in code points
-    int64_t   capacity;    // Capacity in code points
+    void*     data;        // Character data (uint8_t* for ASCII, uint32_t* for UTF-32)
+    int64_t   length;      // Length in characters
+    int64_t   capacity;    // Capacity in characters
     int32_t   refcount;    // Reference count
+    uint8_t   encoding;    // STRING_ENCODING_ASCII or STRING_ENCODING_UTF32
     uint8_t   dirty;       // UTF-8 cache is invalid
-    uint8_t   _padding[3]; // Alignment
+    uint8_t   _padding[2]; // Alignment
     char*     utf8_cache;  // Cached UTF-8 string (for C interop)
 } StringDescriptor;
 
@@ -82,7 +90,10 @@ typedef struct {
 // Basic String Operations (Core API)
 //
 
-// Create new string from UTF-8 C string
+// Create new ASCII string (for pure 7-bit ASCII literals)
+StringDescriptor* string_new_ascii(const char* ascii_str);
+
+// Create new string from UTF-8 C string (auto-detects ASCII vs UTF-32)
 StringDescriptor* string_new_utf8(const char* utf8_str);
 
 // Create new string from UTF-32 data
@@ -93,6 +104,9 @@ StringDescriptor* string_new_capacity(int64_t capacity);
 
 // Create string by repeating a character
 StringDescriptor* string_new_repeat(uint32_t codepoint, int64_t count);
+
+// Promote ASCII string to UTF-32 (returns same pointer if already UTF-32)
+StringDescriptor* string_promote_to_utf32(StringDescriptor* str);
 
 // Clone string (deep copy)
 StringDescriptor* string_clone(const StringDescriptor* str);
@@ -106,7 +120,7 @@ void string_release(StringDescriptor* str);
 // Get UTF-8 representation (cached, valid until string modified)
 const char* string_to_utf8(StringDescriptor* str);
 
-// Get length in code points
+// Get length in characters
 static inline int64_t string_length(const StringDescriptor* str) {
     return str ? str->length : 0;
 }
@@ -116,7 +130,11 @@ static inline uint32_t string_char_at(const StringDescriptor* str, int64_t index
     if (!str || index < 0 || index >= str->length) {
         return 0;
     }
-    return str->data[index];
+    if (str->encoding == STRING_ENCODING_ASCII) {
+        return ((uint8_t*)str->data)[index];
+    } else {
+        return ((uint32_t*)str->data)[index];
+    }
 }
 
 // Set character at index (returns false if out of bounds)
@@ -124,7 +142,12 @@ static inline bool string_set_char(StringDescriptor* str, int64_t index, uint32_
     if (!str || index < 0 || index >= str->length) {
         return false;
     }
-    str->data[index] = codepoint;
+    if (str->encoding == STRING_ENCODING_ASCII) {
+        if (codepoint > 127) return false;  // Can't store non-ASCII in ASCII string
+        ((uint8_t*)str->data)[index] = (uint8_t)codepoint;
+    } else {
+        ((uint32_t*)str->data)[index] = codepoint;
+    }
     str->dirty = 1;  // Invalidate UTF-8 cache
     return true;
 }
@@ -310,6 +333,23 @@ StringDescriptor* basic_str_double(double value);
 
 // SPACE$(n) - Create string of n spaces
 StringDescriptor* basic_space(int64_t count);
+
+//
+// Character Access Functions (Intrinsic Support)
+//
+
+// Get character at index (0-based, returns 0 if out of bounds)
+// For intrinsic: code = A$(i)
+uint32_t string_get_char_at(const StringDescriptor* str, int64_t index);
+
+// Set character at index (0-based, with auto-promotion if needed)
+// For intrinsic: A$(i) = code
+// Returns: 1 on success, 0 on failure
+int string_set_char_at(StringDescriptor* str, int64_t index, uint32_t codepoint);
+
+//
+// Inline Helpers (continued)
+//
 
 // LCASE$(s$) - Convert to lowercase
 static inline StringDescriptor* basic_lcase(const StringDescriptor* str) {

@@ -174,6 +174,13 @@ void QBECodeGenerator::emitDataSection() {
         // Emit data pointer (initialized to 0)
         emit("export data $__basic_data_ptr = { l 0 }\n");
         emit("\n");
+    } else {
+        // Emit empty DATA symbols for programs without DATA statements
+        emitComment("No DATA statements - empty symbols");
+        emit("export data $__basic_data = { l 0 }\n");
+        emit("export data $__basic_data_types = { b 0 }\n");
+        emit("export data $__basic_data_ptr = { l 0 }\n");
+        emit("\n");
     }
     
     // Emit string literals as data objects
@@ -232,7 +239,8 @@ void QBECodeGenerator::emitMainFunction() {
                 m_varTypes[name] = "l";  // UDTs are pointers
                 m_varTypeNames[name] = varSym.typeName;  // Cache type name
             } else if (varSym.type == VariableType::STRING) {
-                emit("    " + varRef + " =l call $str_alloc(w 0)\n");
+                // Initialize string as empty StringDescriptor
+                emit("    " + varRef + " =l call $string_new_capacity(l 0)\n");
             } else if (varSym.type == VariableType::INT) {
                 emit("    " + varRef + " =w copy 0\n");
             } else if (varSym.type == VariableType::DOUBLE || varSym.type == VariableType::FLOAT) {
