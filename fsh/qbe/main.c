@@ -3,6 +3,10 @@
 #include <ctype.h>
 #include <getopt.h>
 
+/* FasterBASIC frontend integration */
+extern FILE* compile_basic_to_il(const char *basic_path);
+extern int is_basic_file(const char *filename);
+
 Target T;
 
 char debug['Z'+1] = {
@@ -172,7 +176,7 @@ main(int ac, char *av[])
 		case 'h':
 		default:
 			hf = c != 'h' ? stderr : stdout;
-			fprintf(hf, "%s [OPTIONS] {file.ssa, -}\n", av[0]);
+			fprintf(hf, "%s [OPTIONS] {file.ssa, file.bas, -}\n", av[0]);
 			fprintf(hf, "\t%-11s prints this help\n", "-h");
 			fprintf(hf, "\t%-11s output to file\n", "-o file");
 			fprintf(hf, "\t%-11s generate for a target among:\n", "-t <target>");
@@ -193,10 +197,19 @@ main(int ac, char *av[])
 			inf = stdin;
 			f = "-";
 		} else {
-			inf = fopen(f, "r");
-			if (!inf) {
-				fprintf(stderr, "cannot open '%s'\n", f);
-				exit(1);
+			/* Check if this is a BASIC source file */
+			if (is_basic_file(f)) {
+				inf = compile_basic_to_il(f);
+				if (!inf) {
+					fprintf(stderr, "failed to compile BASIC file '%s'\n", f);
+					exit(1);
+				}
+			} else {
+				inf = fopen(f, "r");
+				if (!inf) {
+					fprintf(stderr, "cannot open '%s'\n", f);
+					exit(1);
+				}
 			}
 		}
 		parse(inf, f, dbgfile, data, func);

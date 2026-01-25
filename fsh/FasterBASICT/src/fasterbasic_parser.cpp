@@ -4413,6 +4413,7 @@ ExpressionPtr Parser::parsePrimary() {
             }
             
             // PRIORITY 2: Check if this is a known user-defined function
+            // Note: name is already mangled by parseVariableName (e.g., Factorial% -> Factorial_INT)
             if (m_userDefinedFunctions.find(name) != m_userDefinedFunctions.end()) {
                 // This is a user-defined function call
                 auto call = std::make_unique<FunctionCallExpression>(name, false);
@@ -5987,6 +5988,34 @@ void Parser::prescanForFunctions() {
             advance(); // consume FUNCTION
             if (current().type == TokenType::IDENTIFIER) {
                 std::string funcName = current().value;
+                
+                // Mangle function name with type suffix (same as parseFunctionStatement does)
+                if (!funcName.empty()) {
+                    char lastChar = funcName.back();
+                    switch (lastChar) {
+                        case '$':
+                            funcName.pop_back();
+                            funcName += "_STRING";
+                            break;
+                        case '%':
+                            funcName.pop_back();
+                            funcName += "_INT";
+                            break;
+                        case '#':
+                            funcName.pop_back();
+                            funcName += "_DOUBLE";
+                            break;
+                        case '!':
+                            funcName.pop_back();
+                            funcName += "_FLOAT";
+                            break;
+                        case '&':
+                            funcName.pop_back();
+                            funcName += "_LONG";
+                            break;
+                    }
+                }
+                
                 m_userDefinedFunctions.insert(funcName);
                 advance();
             }

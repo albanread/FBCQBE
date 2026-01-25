@@ -604,19 +604,29 @@ void QBECodeGenerator::emitFor(const ForStatement* stmt) {
         }
         if (exitBlockId >= 0) {
             std::string exitLabel = getBlockLabel(exitBlockId);
-            pushLoop(exitLabel, "", "FOR");
+            pushLoop(exitLabel, "", "FOR", stmt->variable);
         }
     }
     
     // Initialize loop variable
     std::string startTemp = emitExpression(stmt->start.get());
     
-    // Coerce start value to INTEGER (FOR loop variables are ALWAYS integers)
+    // Coerce start value to 64-bit LONG INTEGER (FOR loop variables are ALWAYS 64-bit longs)
     VariableType startType = inferExpressionType(stmt->start.get());
-    startTemp = promoteToType(startTemp, startType, VariableType::INT);
+    if (startType == VariableType::DOUBLE || startType == VariableType::FLOAT) {
+        std::string longTemp = allocTemp("l");
+        emit("    " + longTemp + " =l dtosi " + startTemp + "\n");
+        m_stats.instructionsGenerated++;
+        startTemp = longTemp;
+    } else if (startType == VariableType::INT) {
+        std::string longTemp = allocTemp("l");
+        emit("    " + longTemp + " =l extsw " + startTemp + "\n");
+        m_stats.instructionsGenerated++;
+        startTemp = longTemp;
+    }
     
     std::string varRef = getVariableRef(stmt->variable);
-    emit("    " + varRef + " =w copy " + startTemp + "\n");
+    emit("    " + varRef + " =l copy " + startTemp + "\n");
     m_stats.instructionsGenerated++;
     
     // Emit step value (default 1)
@@ -624,29 +634,49 @@ void QBECodeGenerator::emitFor(const ForStatement* stmt) {
     if (stmt->step) {
         stepTemp = emitExpression(stmt->step.get());
         
-        // Coerce step value to INTEGER (ALWAYS)
+        // Coerce step value to 64-bit LONG INTEGER (ALWAYS)
         VariableType stepType = inferExpressionType(stmt->step.get());
-        stepTemp = promoteToType(stepTemp, stepType, VariableType::INT);
+        if (stepType == VariableType::DOUBLE || stepType == VariableType::FLOAT) {
+            std::string longTemp = allocTemp("l");
+            emit("    " + longTemp + " =l dtosi " + stepTemp + "\n");
+            m_stats.instructionsGenerated++;
+            stepTemp = longTemp;
+        } else if (stepType == VariableType::INT) {
+            std::string longTemp = allocTemp("l");
+            emit("    " + longTemp + " =l extsw " + stepTemp + "\n");
+            m_stats.instructionsGenerated++;
+            stepTemp = longTemp;
+        }
     } else {
-        stepTemp = allocTemp("w");
-        emit("    " + stepTemp + " =w copy 1\n");
+        stepTemp = allocTemp("l");
+        emit("    " + stepTemp + " =l copy 1\n");
         m_stats.instructionsGenerated++;
     }
     
     // Store step for NEXT statement
     std::string stepVar = "%step_" + stmt->variable;
-    emit("    " + stepVar + " =w copy " + stepTemp + "\n");
+    emit("    " + stepVar + " =l copy " + stepTemp + "\n");
     m_stats.instructionsGenerated++;
     
     // Emit end value (evaluate once and store)
     std::string endTemp = emitExpression(stmt->end.get());
     
-    // Coerce end value to INTEGER (ALWAYS)
+    // Coerce end value to 64-bit LONG INTEGER (ALWAYS)
     VariableType endType = inferExpressionType(stmt->end.get());
-    endTemp = promoteToType(endTemp, endType, VariableType::INT);
+    if (endType == VariableType::DOUBLE || endType == VariableType::FLOAT) {
+        std::string longTemp = allocTemp("l");
+        emit("    " + longTemp + " =l dtosi " + endTemp + "\n");
+        m_stats.instructionsGenerated++;
+        endTemp = longTemp;
+    } else if (endType == VariableType::INT) {
+        std::string longTemp = allocTemp("l");
+        emit("    " + longTemp + " =l extsw " + endTemp + "\n");
+        m_stats.instructionsGenerated++;
+        endTemp = longTemp;
+    }
     
     std::string endVar = "%end_" + stmt->variable;
-    emit("    " + endVar + " =w copy " + endTemp + "\n");
+    emit("    " + endVar + " =l copy " + endTemp + "\n");
     m_stats.instructionsGenerated++;
     
     // Note: Loop condition check happens in the FOR check block (separate block)
@@ -660,14 +690,27 @@ void QBECodeGenerator::emitFor(const ForStatement* stmt) {
 void QBECodeGenerator::emitNext(const NextStatement* stmt) {
     if (!stmt) return;
     
-    std::string varName = stmt->variable.empty() ? "I" : stmt->variable;
+    // Get variable name: use from statement, or from current loop context, or default to "I"
+    std::string varName;
+    if (!stmt->variable.empty()) {
+        varName = stmt->variable;
+    } else {
+        // NEXT without variable - use the current FOR loop's variable
+        auto* loop = getCurrentLoop();
+        if (loop && loop->type == "FOR" && !loop->forVariable.empty()) {
+            varName = loop->forVariable;
+        } else {
+            varName = "I";  // Fallback to default
+        }
+    }
+    
     std::string varRef = getVariableRef(varName);
     std::string stepVar = "%step_" + varName;
     
-    // Increment loop variable: var = var + step
-    std::string newValueTemp = allocTemp("w");
-    emit("    " + newValueTemp + " =w add " + varRef + ", " + stepVar + "\n");
-    emit("    " + varRef + " =w copy " + newValueTemp + "\n");
+    // Increment loop variable: var = var + step (64-bit long arithmetic)
+    std::string newValueTemp = allocTemp("l");
+    emit("    " + newValueTemp + " =l add " + varRef + ", " + stepVar + "\n");
+    emit("    " + varRef + " =l copy " + newValueTemp + "\n");
     m_stats.instructionsGenerated += 2;
     
     // The condition check happens at the FOR header (loop header block)

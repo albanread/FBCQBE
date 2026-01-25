@@ -241,7 +241,7 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
     
     // Get QBE type suffix
     std::string qbeType = getQBEType(opType);
-    std::string typeSuffix = (opType == VariableType::INT) ? "w" : "d";
+    std::string typeSuffix = (opType == VariableType::INT) ? "l" : "d";  // INT is now 64-bit long
     
     std::string resultTemp = allocTemp(qbeType);
     
@@ -281,17 +281,21 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
             
         case TokenType::LESS_THAN:
             resultTemp = allocTemp("w");
-            emit("    " + resultTemp + " =w cslt" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
+            // For integers use 'cslt', for floats use 'clt'
+            // INT is 64-bit long ('l'), so use csltl for integers
+            emit("    " + resultTemp + " =w c" + (typeSuffix == "l" ? "s" : "") + "lt" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
             break;
             
         case TokenType::LESS_EQUAL:
             resultTemp = allocTemp("w");
-            emit("    " + resultTemp + " =w csle" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
+            // For integers use 'csle', for floats use 'cle'
+            emit("    " + resultTemp + " =w c" + (typeSuffix == "l" ? "s" : "") + "le" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
             break;
             
         case TokenType::GREATER_THAN:
             resultTemp = allocTemp("w");
-            emit("    " + resultTemp + " =w csgt" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
+            // For integers use 'csgt', for floats use 'cgt'
+            emit("    " + resultTemp + " =w c" + (typeSuffix == "l" ? "s" : "") + "gt" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
             break;
             
         case TokenType::GREATER_EQUAL:
@@ -940,7 +944,7 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
     }
     
     // Determine return type
-    std::string returnType = "w";  // Default to word
+    std::string returnType = "l";  // Default to long (64-bit INT)
     if (isUserFunction && funcCFG) {
         if (funcCFG->returnType == VariableType::DOUBLE || funcCFG->returnType == VariableType::FLOAT) {
             returnType = "d";
@@ -1085,6 +1089,85 @@ std::string QBECodeGenerator::emitArrayAccessExpr(const ArrayAccessExpression* e
         return temp;
     }
     
+    // Check if this is actually a function call (not an array access)
+    // Function names are mangled with type suffixes (e.g., Factorial% -> Factorial_INT)
+    std::string mangledName = expr->name;
+    if (expr->typeSuffix != TokenType::UNKNOWN) {
+        // Mangle the name with its type suffix
+        switch (expr->typeSuffix) {
+            case TokenType::TYPE_STRING:
+                mangledName += "_STRING";
+                break;
+            case TokenType::TYPE_INT:
+                mangledName += "_INT";
+                break;
+            case TokenType::TYPE_DOUBLE:
+                mangledName += "_DOUBLE";
+                break;
+            case TokenType::TYPE_FLOAT:
+                mangledName += "_FLOAT";
+                break;
+            default:
+                break;
+        }
+    }
+    
+    // Check if this is a declared function
+    if (m_symbols && m_symbols->functions.find(mangledName) != m_symbols->functions.end()) {
+        // This is a function call, not array access - emit as function call
+        const auto& funcSym = m_symbols->functions.at(mangledName);
+        
+        // Emit function call
+        emitComment("Function call: " + mangledName);
+        
+        // Evaluate arguments
+        std::vector<std::string> argTemps;
+        std::vector<std::string> argTypes; // "w", "d", "l" for QBE
+        
+        for (const auto& argExpr : expr->indices) {
+            std::string argTemp = emitExpression(argExpr.get());
+            VariableType argType = inferExpressionType(argExpr.get());
+            
+            // Determine QBE type suffix
+            std::string qbeType;
+            if (argType == VariableType::STRING || argType == VariableType::UNICODE) {
+                qbeType = "l";  // strings are pointers
+            } else if (argType == VariableType::DOUBLE || argType == VariableType::FLOAT) {
+                qbeType = "d";  // floats are doubles in QBE
+            } else {
+                qbeType = "w";  // integers
+            }
+            
+            argTemps.push_back(argTemp);
+            argTypes.push_back(qbeType);
+        }
+        
+        // Build argument list
+        std::string argList;
+        for (size_t i = 0; i < argTemps.size(); ++i) {
+            if (i > 0) argList += ", ";
+            argList += argTypes[i] + " " + argTemps[i];
+        }
+        
+        // Determine return type
+        std::string retType;
+        if (funcSym.returnType == VariableType::STRING || funcSym.returnType == VariableType::UNICODE) {
+            retType = "l";
+        } else if (funcSym.returnType == VariableType::DOUBLE || funcSym.returnType == VariableType::FLOAT) {
+            retType = "d";
+        } else {
+            retType = "w";
+        }
+        
+        // Emit the call
+        std::string resultTemp = allocTemp(retType);
+        emit("    " + resultTemp + " =" + retType + " call $" + mangledName + "(" + argList + ")\n");
+        m_stats.instructionsGenerated++;
+        
+        return resultTemp;
+    }
+    
+    // Not a function - proceed with array access
     // Evaluate indices - array indices MUST be integers
     std::vector<std::string> indexTemps;
     for (const auto& indexExpr : expr->indices) {

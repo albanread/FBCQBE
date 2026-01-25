@@ -138,6 +138,7 @@ private:
         std::string exitLabel;      // Label to jump to on EXIT
         std::string continueLabel;  // Label to jump to on CONTINUE
         std::string type;           // "FOR", "WHILE", "DO", etc.
+        std::string forVariable;    // FOR loop variable name (for NEXT without variable)
     };
     std::vector<LoopContext> m_loopStack;
     
@@ -352,7 +353,7 @@ private:
     double evaluateConstantDouble(const Expression* expr);
     
     // Loop management
-    void pushLoop(const std::string& exitLabel, const std::string& continueLabel, const std::string& type);
+    void pushLoop(const std::string& exitLabel, const std::string& continueLabel, const std::string& type, const std::string& forVariable = "");
     void popLoop();
     LoopContext* getCurrentLoop();
     

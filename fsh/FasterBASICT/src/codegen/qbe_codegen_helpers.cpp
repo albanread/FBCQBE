@@ -144,7 +144,7 @@ int QBECodeGenerator::getFallthroughBlock(const Statement* stmt) const {
 std::string QBECodeGenerator::getQBEType(VariableType type) {
     switch (type) {
         case VariableType::INT:
-            return "w";  // word (32-bit)
+            return "l";  // long (64-bit) - BASIC integers are always 64-bit
         case VariableType::FLOAT:
             return "d";  // QBE doesn't support single precision, use double
         case VariableType::DOUBLE:
@@ -154,7 +154,7 @@ std::string QBECodeGenerator::getQBEType(VariableType type) {
         case VariableType::UNICODE:
             return "l";  // long (64-bit pointer)
         default:
-            return "w";  // default to word
+            return "l";  // default to long (64-bit)
     }
 }
 
@@ -395,8 +395,9 @@ double QBECodeGenerator::evaluateConstantDouble(const Expression* expr) {
 
 void QBECodeGenerator::pushLoop(const std::string& exitLabel, 
                                const std::string& continueLabel,
-                               const std::string& type) {
-    m_loopStack.push_back({exitLabel, continueLabel, type});
+                               const std::string& type,
+                               const std::string& forVariable) {
+    m_loopStack.push_back({exitLabel, continueLabel, type, forVariable});
 }
 
 void QBECodeGenerator::popLoop() {

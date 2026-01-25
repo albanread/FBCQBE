@@ -516,6 +516,7 @@ private:
     // Type suffix handling
     VariableType inferTypeFromSuffix(TokenType suffix);
     VariableType inferTypeFromName(const std::string& name);
+    std::string mangleNameWithSuffix(const std::string& name, TokenType suffix);
 
     // Built-in function support
     bool isBuiltinFunction(const std::string& name) const;

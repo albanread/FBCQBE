@@ -2309,10 +2309,13 @@ VariableType SemanticAnalyzer::inferVariableType(const VariableExpression& expr)
 }
 
 VariableType SemanticAnalyzer::inferArrayAccessType(const ArrayAccessExpression& expr) {
-    // Check if this is a function/sub call first
-    if (m_symbolTable.functions.find(expr.name) != m_symbolTable.functions.end()) {
+    // Mangle the name with its type suffix to match how functions are stored
+    std::string mangledName = mangleNameWithSuffix(expr.name, expr.typeSuffix);
+    
+    // Check if this is a function/sub call first (using mangled name)
+    if (m_symbolTable.functions.find(mangledName) != m_symbolTable.functions.end()) {
         // It's a function or sub call - validate arguments but don't treat as array
-        const auto& funcSym = m_symbolTable.functions.at(expr.name);
+        const auto& funcSym = m_symbolTable.functions.at(mangledName);
         for (const auto& arg : expr.indices) {
             validateExpression(*arg);
         }
@@ -2771,6 +2774,27 @@ VariableType SemanticAnalyzer::inferTypeFromName(const std::string& name) {
         case '!': return VariableType::FLOAT;
         case '#': return VariableType::DOUBLE;
         default:  return VariableType::DOUBLE;  // Default numeric type is DOUBLE (like Lua)
+    }
+}
+
+std::string SemanticAnalyzer::mangleNameWithSuffix(const std::string& name, TokenType suffix) {
+    // If no suffix, return name as-is
+    if (suffix == TokenType::UNKNOWN) {
+        return name;
+    }
+    
+    // Mangle the name with the suffix (same as parser does for function declarations)
+    switch (suffix) {
+        case TokenType::TYPE_STRING:
+            return name + "_STRING";
+        case TokenType::TYPE_INT:
+            return name + "_INT";
+        case TokenType::TYPE_DOUBLE:
+            return name + "_DOUBLE";
+        case TokenType::TYPE_FLOAT:
+            return name + "_FLOAT";
+        default:
+            return name;
     }
 }
 

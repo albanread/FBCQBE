@@ -443,9 +443,9 @@ void basic_print_cstr(const char* str) {
     }
 }
 
-// Print integer
-void basic_print_int(int value) {
-    printf("%d", value);
+// Print integer (64-bit)
+void basic_print_int(int64_t value) {
+    printf("%lld", value);
 }
 
 // Print float (takes double for QBE compatibility)

@@ -273,11 +273,10 @@ void QBECodeGenerator::emitMainFunction() {
     // e.g., "X_INT", "Y_DOUBLE", "S_STRING" (done by semantic analyzer)
     if (m_symbols) {
         for (const auto& [name, varSym] : m_symbols->variables) {
-            // Check if this is a FOR loop variable (always INT)
-            bool isForLoopVar = m_forLoopVariables.find(name) != m_forLoopVariables.end();
-            VariableType effectiveType = isForLoopVar ? VariableType::INT : varSym.type;
-            
+            // All INT variables are 64-bit longs
+            VariableType effectiveType = varSym.type;
             std::string qbeType = getQBEType(effectiveType);
+            
             // Create QBE SSA variable name: %var_<MANGLED_NAME>
             // Examples: %var_X_INT, %var_Y_DOUBLE, %var_S_STRING
             std::string varRef = "%var_" + name;
@@ -295,7 +294,8 @@ void QBECodeGenerator::emitMainFunction() {
                 // Initialize string as empty StringDescriptor
                 emit("    " + varRef + " =l call $string_new_capacity(l 0)\n");
             } else if (effectiveType == VariableType::INT) {
-                emit("    " + varRef + " =w copy 0\n");
+                // All integers are 64-bit longs
+                emit("    " + varRef + " =l copy 0\n");
             } else if (effectiveType == VariableType::DOUBLE || effectiveType == VariableType::FLOAT) {
                 // FLOAT and DOUBLE both map to QBE 'd' (64-bit double)
                 emit("    " + varRef + " =d copy d_0.0\n");
@@ -460,7 +460,7 @@ void QBECodeGenerator::emitFunction(const std::string& functionName) {
     emit("\n");
     
     // Determine return type
-    std::string qbeReturnType = "w";  // Default to word (int)
+    std::string qbeReturnType = "l";  // Default to long (64-bit INT)
     if (m_cfg->returnType == VariableType::DOUBLE || m_cfg->returnType == VariableType::FLOAT) {
         qbeReturnType = "d";  // Double
     } else if (m_cfg->returnType == VariableType::STRING) {
@@ -474,7 +474,7 @@ void QBECodeGenerator::emitFunction(const std::string& functionName) {
     for (size_t i = 0; i < m_cfg->parameters.size(); ++i) {
         if (i > 0) paramList += ", ";
         
-        std::string paramType = "w";  // Default to word
+        std::string paramType = "l";  // Default to long (64-bit INT)
         if (i < m_cfg->parameterTypes.size()) {
             VariableType vt = m_cfg->parameterTypes[i];
             if (vt == VariableType::DOUBLE || vt == VariableType::FLOAT) {
@@ -520,7 +520,8 @@ void QBECodeGenerator::emitFunction(const std::string& functionName) {
             // Initialize to empty string via runtime
             emit("    " + returnVar + " =l call $basic_empty_string()\n");
         } else {
-            emit("    " + returnVar + " =w copy " + initValue + "\n");
+            // INT type - now 64-bit long
+            emit("    " + returnVar + " =l copy " + initValue + "\n");
         }
         m_stats.instructionsGenerated++;
     }
@@ -572,7 +573,8 @@ void QBECodeGenerator::emitFunction(const std::string& functionName) {
             emit("    %retval =l copy " + returnVar + "\n");
             emit("    ret %retval\n");
         } else {
-            emit("    %retval =w copy " + returnVar + "\n");
+            // INT type - now 64-bit long
+            emit("    %retval =l copy " + returnVar + "\n");
             emit("    ret %retval\n");
         }
     } else {
@@ -592,24 +594,27 @@ void QBECodeGenerator::emitFunction(const std::string& functionName) {
 // =============================================================================
 
 std::string QBECodeGenerator::getComparisonOp(TokenType op) {
+    // Integer comparisons use 64-bit long comparisons (cs*l)
     switch (op) {
-        case TokenType::EQUAL: return "ceqw";
-        case TokenType::NOT_EQUAL: return "cnew";
-        case TokenType::LESS_THAN: return "csltw";
-        case TokenType::LESS_EQUAL: return "cslew";
-        case TokenType::GREATER_THAN: return "csgtw";
-        case TokenType::GREATER_EQUAL: return "csgew";
-        default: return "ceqw"; // Default to equal
+        case TokenType::EQUAL: return "ceql";
+        case TokenType::NOT_EQUAL: return "cnel";
+        case TokenType::LESS_THAN: return "csltl";
+        case TokenType::LESS_EQUAL: return "cslel";
+        case TokenType::GREATER_THAN: return "csgtl";
+        case TokenType::GREATER_EQUAL: return "csgel";
+        default: return "ceql"; // Default to equal
     }
 }
 
 std::string QBECodeGenerator::getComparisonOpDouble(TokenType op) {
+    // QBE floating point comparisons use c*d (no 's' prefix)
+    // Integer comparisons use cs*w (with 's' for signed)
     switch (op) {
         case TokenType::EQUAL: return "ceqd";
         case TokenType::NOT_EQUAL: return "cned";
-        case TokenType::LESS_THAN: return "csltd";
-        case TokenType::LESS_EQUAL: return "csled";
-        case TokenType::GREATER_THAN: return "csgtd";
+        case TokenType::LESS_THAN: return "cltd";
+        case TokenType::LESS_EQUAL: return "cled";
+        case TokenType::GREATER_THAN: return "cgtd";
         case TokenType::GREATER_EQUAL: return "cged";
         default: return "ceqd"; // Default to equal
     }
@@ -656,11 +661,11 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
                 const auto& forBlocks = pair.second;
                 std::string varName = forBlocks.variable;
                 
-                // Emit loop condition check: var <= end
+                // Emit loop condition check: var <= end (64-bit long comparison)
                 std::string varRef = getVariableRef(varName);
                 std::string endVar = "%end_" + varName;
                 std::string condTemp = allocTemp("w");
-                emit("    " + condTemp + " =w cslew " + varRef + ", " + endVar + "\n");
+                emit("    " + condTemp + " =w cslel " + varRef + ", " + endVar + "\n");
                 m_stats.instructionsGenerated++;
                 
                 // Store condition for CFG to emit conditional branch

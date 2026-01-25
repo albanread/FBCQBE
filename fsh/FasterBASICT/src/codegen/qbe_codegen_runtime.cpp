@@ -23,14 +23,14 @@ void QBECodeGenerator::emitPrintValue(const std::string& value, VariableType typ
         // String is now a StringDescriptor pointer (l type)
         emit("    call $basic_print_string_desc(l " + value + ")\n");
     } else if (type == VariableType::INT) {
-        emit("    call $basic_print_int(w " + value + ")\n");
+        emit("    call $basic_print_int(l " + value + ")\n");  // INT is now 64-bit long
     } else if (type == VariableType::DOUBLE) {
         emit("    call $basic_print_double(d " + value + ")\n");
     } else if (type == VariableType::FLOAT) {
         emit("    call $basic_print_float(d " + value + ")\n");
     } else {
         // Default to int
-        emit("    call $basic_print_int(w " + value + ")\n");
+        emit("    call $basic_print_int(l " + value + ")\n");  // INT is now 64-bit long
     }
     m_stats.instructionsGenerated++;
 }
@@ -231,14 +231,14 @@ std::string QBECodeGenerator::emitStringToDouble(const std::string& value) {
 
 std::string QBECodeGenerator::emitIntToDouble(const std::string& value) {
     std::string result = allocTemp("d");
-    emit("    " + result + " =d swtof " + value + "\n");
+    emit("    " + result + " =d sltof " + value + "\n");  // INT is now 64-bit long
     m_stats.instructionsGenerated++;
     return result;
 }
 
 std::string QBECodeGenerator::emitDoubleToInt(const std::string& value) {
-    std::string result = allocTemp("w");
-    emit("    " + result + " =w dtosi " + value + "\n");
+    std::string result = allocTemp("l");  // INT is now 64-bit long
+    emit("    " + result + " =l dtosi " + value + "\n");
     m_stats.instructionsGenerated++;
     return result;
 }
