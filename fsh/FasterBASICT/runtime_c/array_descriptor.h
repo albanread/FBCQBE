@@ -137,6 +137,9 @@ static inline int array_descriptor_redim_preserve(
     int64_t newLowerBound,
     int64_t newUpperBound)
 {
+
+// ERASE helper: implemented in array_descriptor_runtime.c
+void array_descriptor_erase(ArrayDescriptor* desc);
     if (!desc || newUpperBound < newLowerBound) {
         return -1;
     }

@@ -1328,25 +1328,9 @@ void QBECodeGenerator::emitErase(const EraseStatement* stmt) {
         
         emitComment("ERASE array " + arrayName);
         
-        // Load data pointer from descriptor (offset 0)
-        std::string dataPtr = allocTemp("l");
-        emit("    " + dataPtr + " =l loadl " + descPtr + "\n");
+        // Delegate erase to runtime helper (releases string elements when needed)
+        emit("    call $array_descriptor_erase(l " + descPtr + ")\n");
         m_stats.instructionsGenerated++;
-        
-        // Free the data
-        emit("    call $free(l " + dataPtr + ")\n");
-        m_stats.instructionsGenerated++;
-        
-        // Set data pointer to NULL (offset 0)
-        emit("    storel 0, " + descPtr + "\n");
-        m_stats.instructionsGenerated++;
-        
-        // Set upperBound to -1 to indicate empty array (offset 16)
-        std::string upperBoundAddr = allocTemp("l");
-        emit("    " + upperBoundAddr + " =l add " + descPtr + ", 16\n");
-        emit("    storel -1, " + upperBoundAddr + "\n");
-        m_stats.instructionsGenerated += 2;
-        
         emitComment("Array " + arrayName + " erased");
     }
 }
