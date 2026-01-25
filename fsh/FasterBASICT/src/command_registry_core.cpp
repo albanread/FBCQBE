@@ -808,6 +808,22 @@ void CoreCommandRegistry::registerSystemFunctions(CommandRegistry& registry) {
     CommandDefinition getticks("GETTICKS", "Get elapsed time in milliseconds since program start", "system_getticks", "system");
     getticks.setReturnType(ReturnType::FLOAT);
     registry.registerFunction(std::move(getticks));
+    
+    // TIMER - Get elapsed time in seconds since program start (traditional BASIC)
+    CommandDefinition timer("TIMER", "Get elapsed time in seconds since program start", "system_timer", "system");
+    timer.setReturnType(ReturnType::FLOAT);
+    registry.registerFunction(std::move(timer));
+    
+    // RND - Random number between 0 and 1.0 (traditional BASIC)
+    CommandDefinition rnd("RND", "Return random number between 0 and 1.0", "system_rnd", "system");
+    rnd.setReturnType(ReturnType::FLOAT);
+    registry.registerFunction(std::move(rnd));
+    
+    // RAND - Random integer from 0 to n-1 (traditional BASIC)
+    CommandDefinition rand("RAND", "Return random integer from 0 to n-1", "system_rand", "system");
+    rand.addParameter("n", ParameterType::INT, "Upper bound (exclusive)")
+        .setReturnType(ReturnType::INT);
+    registry.registerFunction(std::move(rand));
 }
 
 // =============================================================================

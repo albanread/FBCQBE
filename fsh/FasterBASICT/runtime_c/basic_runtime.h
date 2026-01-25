@@ -327,6 +327,9 @@ double basic_exp(double x);
 // Random number (0.0 to 1.0)
 double basic_rnd(void);
 
+// Random integer from 0 to n-1 (BASIC RAND function)
+int32_t basic_rand(int32_t n);
+
 // Random integer (min to max inclusive)
 int32_t basic_rnd_int(int32_t min, int32_t max);
 
@@ -380,6 +383,9 @@ void basic_restore_data(void);
 
 // Get current time in milliseconds
 int64_t basic_timer_ms(void);
+
+// Get seconds since program start (BASIC TIMER function)
+double basic_timer(void);
 
 // Sleep for milliseconds
 void basic_sleep_ms(int32_t milliseconds);

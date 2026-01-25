@@ -1098,12 +1098,16 @@ E = EXP(X)          ' e^x
 ' Initialize random seed
 RANDOMIZE
 
-' Random number 0 to <1
-R = RND(1)
+' Random number 0 to <1.0
+R = RND()           ' Returns float between 0.0 and 1.0
 
-' Random integer in range [Min, Max]
-Dice = INT(RND(1) * 6) + 1          ' 1-6
-Number = INT(RND(1) * 100) + 1      ' 1-100
+' Random integer from 0 to n-1
+Dice = RAND(6)      ' Returns 0, 1, 2, 3, 4, or 5
+Card = RAND(52)     ' Returns 0-51
+
+' Legacy random number usage (still supported)
+R = RND(1)          ' Same as RND()
+Dice = INT(RND(1) * 6) + 1    ' 1-6 (old style)
 ```
 
 ### Special Math
@@ -1138,7 +1142,7 @@ Today$ = DATE$
 Now$ = TIME$
 
 ' Get timer value (seconds since program start)
-Seconds = TIMER
+Seconds = TIMER      ' Returns float (e.g., 1.234)
 
 ' Get timer in milliseconds
 Millis = TIMEMS

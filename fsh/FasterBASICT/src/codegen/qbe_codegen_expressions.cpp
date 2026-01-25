@@ -585,6 +585,33 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         return result;
     }
     
+    // Special case: RAND(n) - convert argument to int32_t
+    if (upper == "RAND" && expr->arguments.size() == 1) {
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        VariableType argType = inferExpressionType(expr->arguments[0].get());
+        
+        // Convert argument to int if it's not already
+        if (argType == VariableType::DOUBLE || argType == VariableType::FLOAT) {
+            std::string intArg = allocTemp("w");
+            emit("    " + intArg + " =w dtosi " + argTemp + "\n");
+            argTemp = intArg;
+            m_stats.instructionsGenerated++;
+        } else if (argType == VariableType::INT) {
+            // Already int, use as-is
+        } else {
+            // For other types, convert to int
+            std::string intArg = allocTemp("w");
+            emit("    " + intArg + " =w copy " + argTemp + "\n");
+            argTemp = intArg;
+            m_stats.instructionsGenerated++;
+        }
+        
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w call $basic_rand(w " + argTemp + ")\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
     // Evaluate arguments (get raw temporaries)
     std::vector<std::string> argTemps;
     std::vector<VariableType> argTypes;
@@ -680,7 +707,7 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         if (upper == "LEN" || upper == "ASC" || upper == "INSTR") {
             callReturnType = "l";  // int64_t or uint32_t -> long
         } else if (upper == "VAL" || upper == "RND" || upper == "SIN" || upper == "COS" || 
-                   upper == "TAN" || upper == "SQRT" || upper == "ABS") {
+                   upper == "TAN" || upper == "SQRT" || upper == "ABS" || upper == "TIMER") {
             callReturnType = "d";  // double
         } else if (upper == "CHR$" || upper == "LEFT$" || upper == "RIGHT$" || upper == "MID$" ||
                    upper == "STR$" || upper == "SPACE$" || upper == "STRING$" || 
@@ -1055,6 +1082,11 @@ std::string QBECodeGenerator::mapToRuntimeFunction(const std::string& basicFunc)
     for (char& c : upper) {
         c = std::toupper(c);
     }
+    
+    // Special cases that don't follow uppercase pattern
+    if (upper == "TIMER") return "basic_timer";
+    if (upper == "RND") return "basic_rnd";
+    if (upper == "RAND") return "basic_rand";
     
     // Common math functions
     if (upper == "ABS") return "basic_abs";

@@ -525,7 +525,7 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             }
             
             // Integer functions return INT (LEN, ASC, INSTR return 64-bit or 32-bit ints)
-            if (upper == "LEN" || upper == "ASC" || upper == "INSTR" || upper == "STRTYPE") {
+            if (upper == "LEN" || upper == "ASC" || upper == "INSTR" || upper == "STRTYPE" || upper == "RAND") {
                 return VariableType::INT;
             }
             

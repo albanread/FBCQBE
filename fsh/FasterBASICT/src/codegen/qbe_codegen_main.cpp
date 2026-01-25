@@ -86,6 +86,9 @@ std::string QBECodeGenerator::generate(const ProgramCFG& programCFG,
     // Generate QBE IL sections
     emitHeader();
     
+    // Pre-pass: collect FOR loop variables to determine correct types
+    collectForLoopVariables();
+    
     // Emit main function
     m_cfg = m_programCFG->mainCFG.get();
     emitMainFunction();
@@ -103,7 +106,36 @@ std::string QBECodeGenerator::generate(const ProgramCFG& programCFG,
     
     return m_output.str();
 }
+// =============================================================================
+// Pre-pass: Collect FOR Loop Variables
+// =============================================================================
 
+void QBECodeGenerator::collectForLoopVariables() {
+    m_forLoopVariables.clear();
+    
+    // Traverse all CFGs (main + functions) to find FOR statements
+    std::vector<const ControlFlowGraph*> cfgs = {m_programCFG->mainCFG.get()};
+    for (const auto& funcName : m_programCFG->getFunctionNames()) {
+        cfgs.push_back(m_programCFG->getFunctionCFG(funcName));
+    }
+    
+    for (const ControlFlowGraph* cfg : cfgs) {
+        if (!cfg) continue;
+        
+        for (int i = 0; i < cfg->getBlockCount(); ++i) {
+            const BasicBlock* block = cfg->getBlock(i);
+            if (!block) continue;
+            
+            // Check each statement in the block
+            for (const Statement* stmt : block->statements) {
+                if (stmt->getType() == ASTNodeType::STMT_FOR) {
+                    const ForStatement* forStmt = static_cast<const ForStatement*>(stmt);
+                    m_forLoopVariables.insert(forStmt->variable);
+                }
+            }
+        }
+    }
+}
 // =============================================================================
 // Header Emission
 // =============================================================================
@@ -224,7 +256,11 @@ void QBECodeGenerator::emitMainFunction() {
     // e.g., "X_INT", "Y_DOUBLE", "S_STRING" (done by semantic analyzer)
     if (m_symbols) {
         for (const auto& [name, varSym] : m_symbols->variables) {
-            std::string qbeType = getQBEType(varSym.type);
+            // Check if this is a FOR loop variable (always INT)
+            bool isForLoopVar = m_forLoopVariables.find(name) != m_forLoopVariables.end();
+            VariableType effectiveType = isForLoopVar ? VariableType::INT : varSym.type;
+            
+            std::string qbeType = getQBEType(effectiveType);
             // Create QBE SSA variable name: %var_<MANGLED_NAME>
             // Examples: %var_X_INT, %var_Y_DOUBLE, %var_S_STRING
             std::string varRef = "%var_" + name;
@@ -232,18 +268,18 @@ void QBECodeGenerator::emitMainFunction() {
             m_varTypes[name] = qbeType;
             
             // Initialize to zero
-            if (varSym.type == VariableType::USER_DEFINED) {
+            if (effectiveType == VariableType::USER_DEFINED) {
                 // User-defined type - allocate memory on stack
                 size_t typeSize = calculateTypeSize(varSym.typeName);
                 emit("    " + varRef + " =l alloc8 " + std::to_string(typeSize) + "\n");
                 m_varTypes[name] = "l";  // UDTs are pointers
                 m_varTypeNames[name] = varSym.typeName;  // Cache type name
-            } else if (varSym.type == VariableType::STRING) {
+            } else if (effectiveType == VariableType::STRING) {
                 // Initialize string as empty StringDescriptor
                 emit("    " + varRef + " =l call $string_new_capacity(l 0)\n");
-            } else if (varSym.type == VariableType::INT) {
+            } else if (effectiveType == VariableType::INT) {
                 emit("    " + varRef + " =w copy 0\n");
-            } else if (varSym.type == VariableType::DOUBLE || varSym.type == VariableType::FLOAT) {
+            } else if (effectiveType == VariableType::DOUBLE || effectiveType == VariableType::FLOAT) {
                 // FLOAT and DOUBLE both map to QBE 'd' (64-bit double)
                 emit("    " + varRef + " =d copy d_0.0\n");
             }

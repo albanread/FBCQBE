@@ -176,6 +176,9 @@ private:
     void emitFunction(const std::string& functionName);
     void emitBlock(const BasicBlock* block);
     
+    // Pre-pass to collect FOR loop variables for type inference
+    void collectForLoopVariables();
+    
     // Helper for entering/exiting function context
     void enterFunctionContext(const std::string& functionName);
     void exitFunctionContext();

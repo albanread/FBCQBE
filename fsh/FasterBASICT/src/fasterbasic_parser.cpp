@@ -841,60 +841,11 @@ StatementPtr Parser::parseStatement() {
         case TokenType::TIMER:
             return parseTimerStatement();
 
-        case TokenType::IDENTIFIER:
-            // Check for MID$ assignment: MID$(var$, pos, len) = value
-            if (current().value == "MID$") {
-                return parseLetStatement();
-            }
-            // Check if this is a known user-defined SUB (implicit CALL)
-            if (m_userDefinedSubs.find(current().value) != m_userDefinedSubs.end()) {
-                // Implicit CALL to user-defined SUB
-                std::string subName = current().value;
-                advance();
-
-                auto stmt = std::make_unique<CallStatement>(subName);
-
-                // Parse arguments if present
-                if (match(TokenType::LPAREN)) {
-                    if (current().type != TokenType::RPAREN) {
-                        do {
-                            stmt->addArgument(parseExpression());
-                        } while (match(TokenType::COMMA));
-                    }
-                    consume(TokenType::RPAREN, "Expected ')' after subroutine arguments");
-                }
-
-                return stmt;
-            }
-            // Could be implicit LET (assignment without LET keyword)
-            if (m_allowImplicitLet && isAssignment()) {
-                return parseLetStatement();
-            }
-            // Check if this looks like a builtin function call as a statement
-            // (IDENTIFIER followed by '(' - will be validated by semantic analyzer)
-            // Only treat as function call if NOT an assignment (checked above)
-            if (peek().type == TokenType::LPAREN) {
-                std::string funcName = current().value;
-                advance(); // consume identifier
-                advance(); // consume LPAREN
-
-                auto stmt = std::make_unique<CallStatement>(funcName);
-
-                // Parse arguments (may be empty for 0-argument functions)
-                if (current().type != TokenType::RPAREN) {
-                    do {
-                        stmt->addArgument(parseExpression());
-                    } while (match(TokenType::COMMA));
-                }
-
-                consume(TokenType::RPAREN, "Expected ')' after function arguments");
-
-                return stmt;
-            }
-            // Fall through to error
-            [[fallthrough]];
-
         case TokenType::REGISTRY_FUNCTION:
+            // Check if this is TIMER used as a statement (TIMER STOP, etc.)
+            if (current().value == "TIMER") {
+                return parseTimerStatement();
+            }
             // Check for MID$ assignment: MID$(var$, pos, len) = value
             if (current().value == "MID$") {
                 return parseLetStatement();
@@ -4273,6 +4224,40 @@ ExpressionPtr Parser::parsePrimary() {
         
         // Not a constant, proceed with function call parsing
         return parseRegistryFunctionExpression();
+    }
+
+    // Special case: TIMER keyword used as function call
+    if (current().type == TokenType::TIMER) {
+        // TIMER can be used as a function call in expressions
+        std::string functionName = current().value;
+        advance();
+        
+        // Get the function definition from the registry
+        auto& registry = FasterBASIC::ModularCommands::getGlobalCommandRegistry();
+        const auto* functionDef = registry.getFunction(functionName);
+
+        if (!functionDef) {
+            error("Unknown function: " + functionName);
+            return std::make_unique<NumberExpression>(0);
+        }
+
+        // Create a registry function expression
+        auto funcExpr = std::make_unique<RegistryFunctionExpression>(functionName, functionDef->returnType);
+
+        // For TIMER, no parameters are expected
+        // But check if parentheses are present (should not be for TIMER)
+        if (match(TokenType::LPAREN)) {
+            error("TIMER function does not take parameters");
+            // Skip to matching RPAREN
+            int parenDepth = 1;
+            while (!isAtEnd() && parenDepth > 0) {
+                if (current().type == TokenType::LPAREN) parenDepth++;
+                else if (current().type == TokenType::RPAREN) parenDepth--;
+                advance();
+            }
+        }
+
+        return funcExpr;
     }
 
     // Parenthesized expression

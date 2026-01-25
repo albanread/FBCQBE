@@ -127,6 +127,12 @@ void basic_randomize(int32_t seed) {
     rng_initialized = true;
 }
 
+// Get random integer from 0 to n-1 (BASIC RAND function)
+int32_t basic_rand(int32_t n) {
+    if (n <= 0) return 0;
+    return rand() % n;
+}
+
 // =============================================================================
 // Integer and Sign Functions
 // =============================================================================

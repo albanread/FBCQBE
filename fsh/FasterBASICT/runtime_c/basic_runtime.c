@@ -38,6 +38,9 @@ static int32_t g_data_index = 0;
 #define MAX_FILES 256
 static BasicFile* g_files[MAX_FILES] = {NULL};
 
+// Program start time (for TIMER function)
+static int64_t g_program_start_ms = 0;
+
 // =============================================================================
 // Runtime Initialization and Cleanup
 // =============================================================================
@@ -56,6 +59,9 @@ void basic_runtime_init(void) {
         srand((unsigned int)time(NULL));
         g_rnd_initialized = true;
     }
+    
+    // Initialize program start time
+    g_program_start_ms = basic_timer_ms();
     
     // Initialize file table
     for (int i = 0; i < MAX_FILES; i++) {
@@ -191,6 +197,12 @@ int64_t basic_timer_ms(void) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (int64_t)tv.tv_sec * 1000 + (int64_t)tv.tv_usec / 1000;
+}
+
+// Get seconds since program start (BASIC TIMER function)
+double basic_timer(void) {
+    int64_t current_ms = basic_timer_ms();
+    return (double)(current_ms - g_program_start_ms) / 1000.0;
 }
 
 void basic_sleep_ms(int32_t milliseconds) {
