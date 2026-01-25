@@ -1,0 +1,1 @@
+PRINT FIX(3.7), CINT(3.7)

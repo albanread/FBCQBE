@@ -612,6 +612,72 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         return result;
     }
     
+    // =========================================================================
+    // INTRINSIC FUNCTIONS - Generate inline code instead of function calls
+    // =========================================================================
+    
+    // FIX(d) - Truncate toward zero using dtosi
+    if (upper == "FIX" && expr->arguments.size() == 1) {
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        VariableType argType = inferExpressionType(expr->arguments[0].get());
+        
+        // Convert to double if needed
+        if (argType == VariableType::INT) {
+            std::string doubleArg = allocTemp("d");
+            emit("    " + doubleArg + " =d swtof " + argTemp + "\n");
+            argTemp = doubleArg;
+            m_stats.instructionsGenerated++;
+        }
+        
+        // Truncate toward zero using dtosi
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w dtosi d " + argTemp + "\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // CINT(d) - Round to nearest integer
+    if (upper == "CINT" && expr->arguments.size() == 1) {
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        VariableType argType = inferExpressionType(expr->arguments[0].get());
+        
+        // Convert to double if needed
+        if (argType == VariableType::INT) {
+            std::string doubleArg = allocTemp("d");
+            emit("    " + doubleArg + " =d swtof " + argTemp + "\n");
+            argTemp = doubleArg;
+            m_stats.instructionsGenerated++;
+        }
+        
+        // Round to nearest: proper handling for positive and negative numbers
+        // For positive: add 0.5, truncate
+        // For negative: subtract 0.5, truncate
+        
+        // Check if number is negative
+        std::string zero = allocTemp("d");
+        emit("    " + zero + " =d copy d_0.0\n");
+        std::string isNegative = allocTemp("w");
+        emit("    " + isNegative + " =w cled d " + argTemp + ", " + zero + "\n");  // <= 0
+        
+        // For positive: add 0.5
+        std::string posAdjusted = allocTemp("d");
+        emit("    " + posAdjusted + " =d add d " + argTemp + ", d_0.5\n");
+        
+        // For negative: subtract 0.5  
+        std::string negAdjusted = allocTemp("d");
+        emit("    " + negAdjusted + " =d sub d " + argTemp + ", d_0.5\n");
+        
+        // Select the appropriate adjusted value
+        std::string adjusted = allocTemp("d");
+        emit("    " + adjusted + " =d sel " + isNegative + ", " + negAdjusted + ", " + posAdjusted + "\n");
+        
+        // Truncate
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w dtosi d " + adjusted + "\n");
+        m_stats.instructionsGenerated += 7;
+        return result;
+    }
+    
     // Evaluate arguments (get raw temporaries)
     std::vector<std::string> argTemps;
     std::vector<VariableType> argTypes;
@@ -1095,6 +1161,8 @@ std::string QBECodeGenerator::mapToRuntimeFunction(const std::string& basicFunc)
     if (upper == "TAN") return "basic_tan";
     if (upper == "SQRT") return "basic_sqrt";
     if (upper == "INT") return "basic_int";
+    if (upper == "FIX") return "basic_fix";
+    if (upper == "CINT") return "math_cint";
     if (upper == "RND") return "basic_rnd";
     if (upper == "SGN") return "basic_sgn";
     

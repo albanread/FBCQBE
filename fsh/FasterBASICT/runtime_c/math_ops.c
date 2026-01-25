@@ -147,3 +147,13 @@ int32_t basic_sgn(double x) {
     if (x > 0.0) return 1;
     return 0;
 }
+
+int32_t basic_fix(double x) {
+    // FIX() in BASIC truncates towards zero
+    return (int32_t)x;
+}
+
+int32_t math_cint(double x) {
+    // CINT() in BASIC rounds to nearest integer
+    return (int32_t)round(x);
+}

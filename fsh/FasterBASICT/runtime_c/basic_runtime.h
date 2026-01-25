@@ -342,6 +342,12 @@ int32_t basic_int(double x);
 // Sign (-1, 0, or 1)
 int32_t basic_sgn(double x);
 
+// Truncate towards zero
+int32_t basic_fix(double x);
+
+// Round to nearest integer
+int32_t math_cint(double x);
+
 // =============================================================================
 // Error Handling
 // =============================================================================
