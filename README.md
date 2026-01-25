@@ -13,6 +13,8 @@ FBCQBE compiles FasterBASIC programs to native machine code through the QBE (Qui
 
 ## Project Status
 
+**Latest Update (January 2025)**: Complete string array support with read/write access and string slicing functionality. Parser now correctly distinguishes between array access (`names$(0)`) and string slicing (`s$(1 TO 5)`) using lookahead detection of the TO keyword.
+
 ### ✅ Working Features
 
 **Control Flow:**
@@ -41,8 +43,24 @@ FBCQBE compiles FasterBASIC programs to native machine code through the QBE (Qui
 **Data Types:**
 - ✅ INTEGER (w/%) - 32-bit signed
 - ✅ FLOAT/DOUBLE (d/!) - 64-bit floating point
-- ✅ STRING (l/$) - String pointers
+- ✅ STRING (l/$) - String pointers with UTF-32 descriptors
 - ✅ Type suffix inference (%, #, !, $)
+
+**Arrays:**
+- ✅ STRING arrays with full read/write access
+- ✅ Array declaration: `DIM names$(5)`
+- ✅ Array assignment: `names$(0) = "Alice"`
+- ✅ Array access in expressions: `PRINT names$(0)`
+- ✅ Bounds checking with runtime error handling
+
+**String Operations:**
+- ✅ String slicing: `s$(start TO end)` with all variants
+  - `s$(1 TO 5)` - normal slice
+  - `s$(TO 5)` - from start to position
+  - `s$(7 TO)` - from position to end
+  - `s$(7 TO 7)` - single character
+- ✅ String concatenation with `+`
+- ✅ String literals and variables
 
 **Statements:**
 - ✅ PRINT with formatting
@@ -63,8 +81,8 @@ FBCQBE compiles FasterBASIC programs to native machine code through the QBE (Qui
 
 - **Type system**: Full type inference and conversion throughout expressions
 - **DEF FN**: Complete implementation with proper typing
-- **Arrays**: Full runtime integration for multi-dimensional arrays
-- **String operations**: Comprehensive string handling
+- **Arrays**: Full runtime integration for multi-dimensional arrays and numeric types
+- **String operations**: Advanced string functions (LEN, MID, INSTR, etc.)
 
 ### 📋 Planned
 
@@ -199,6 +217,38 @@ PRINT FN Hypotenuse(3, 4)
 END
 ```
 
+### String Arrays
+```basic
+DIM names$(5)
+
+names$(0) = "Alice"
+names$(1) = "Bob"
+names$(2) = "Charlie"
+
+PRINT "First name: "; names$(0)
+PRINT "Second name: "; names$(1)
+PRINT "Third name: "; names$(2)
+END
+```
+
+### String Slicing
+```basic
+DIM s$, m$
+
+s$ = "Hello World"
+PRINT "Original: "; s$
+
+m$ = s$(7 TO 11)
+PRINT "s$(7 TO 11): "; m$
+
+m$ = s$(TO 5)
+PRINT "s$(TO 5): "; m$
+
+m$ = s$(7 TO)
+PRINT "s$(7 TO): "; m$
+END
+```
+
 ## Control Flow Graph (CFG)
 
 The compiler builds an explicit CFG for all code, ensuring correctness:
@@ -301,8 +351,11 @@ NEXT statements are mapped to their loop headers during CFG construction, and th
 ### 3. Loop Index Mutability
 Unlike some protected implementations, loop indices are fully mutable variables. This matches classic BASIC behavior where `i = limit` forces loop exit - a common idiom in old BASIC code.
 
-### 4. Function Return Values
-Functions use a special variable named after the function (e.g., `Factorial%` in a function named `Factorial%`) to store the return value, matching BASIC semantics.
+### 4. String Array Type Inference
+Array access expressions require proper type inference to distinguish between numeric and string arrays. The `inferExpressionType()` function now handles `EXPR_ARRAY_ACCESS` nodes by looking up array types in the symbol table.
+
+### 5. Slice vs Array Syntax Disambiguation
+String slicing (`var$(start TO end)`) and array access (`var$(index)`) share similar syntax. The parser uses lookahead scanning within parentheses to detect the TO keyword, cleanly separating the two constructs without backtracking.
 
 ## Runtime
 

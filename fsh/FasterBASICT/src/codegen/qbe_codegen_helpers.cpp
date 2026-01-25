@@ -540,6 +540,18 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             return VariableType::DOUBLE;
         }
         
+        case ASTNodeType::EXPR_ARRAY_ACCESS: {
+            const ArrayAccessExpression* arrayExpr = static_cast<const ArrayAccessExpression*>(expr);
+            
+            // Look up array type from symbol table
+            if (m_symbols && m_symbols->arrays.find(arrayExpr->name) != m_symbols->arrays.end()) {
+                return m_symbols->arrays.at(arrayExpr->name).type;
+            }
+            
+            // Default to DOUBLE if not found
+            return VariableType::DOUBLE;
+        }
+        
         default:
             return VariableType::DOUBLE;  // Default to DOUBLE
     }

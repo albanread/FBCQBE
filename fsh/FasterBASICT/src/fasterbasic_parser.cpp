@@ -1153,53 +1153,53 @@ StatementPtr Parser::parseLetStatement() {
     std::string varName = parseVariableName(suffix);
 
     // Check for string slice assignment: var$(start TO end) = value
-    if (suffix == TokenType::TYPE_STRING && match(TokenType::LPAREN)) {
-        // This might be a slice assignment
-        ExpressionPtr startExpr = nullptr;
-        ExpressionPtr endExpr = nullptr;
+    if (suffix == TokenType::TYPE_STRING && check(TokenType::LPAREN)) {
+        // Look ahead to see if this is a slice assignment (contains TO after LPAREN)
+        // We need to be careful not to consume tokens until we're sure
         
-        // Check if we have a start expression (not immediately TO)
-        if (!check(TokenType::TO)) {
-            startExpr = parseExpression();
-        }
+        // Save current position for backtracking
+        size_t savedPosition = m_currentIndex;
         
-        // Check for TO keyword
-        if (match(TokenType::TO)) {
+        advance(); // consume the LPAREN
+        
+        // Parse the first expression
+        ExpressionPtr startExpr = parseExpression();
+        
+        // Check if next token is TO
+        if (check(TokenType::TO)) {
+            // This is a slice assignment: var$(start TO end) = value
+            advance(); // consume TO
+            
+            ExpressionPtr endExpr = nullptr;
+            
             // Check if we have an end expression (not immediately RPAREN)
             if (!check(TokenType::RPAREN)) {
                 endExpr = parseExpression();
             }
             
-            if (match(TokenType::RPAREN) && match(TokenType::EQUAL)) {
-                // This is indeed a slice assignment
-                auto sliceStmt = std::make_unique<SliceAssignStatement>(varName);
-                
-                // Add start expression (default to 1 if missing)
-                if (startExpr) {
-                    sliceStmt->start = std::move(startExpr);
-                } else {
-                    sliceStmt->start = std::make_unique<NumberExpression>(1);
-                }
-                
-                // Add end expression (default to -1 for "to end" if missing)
-                if (endExpr) {
-                    sliceStmt->end = std::move(endExpr);
-                } else {
-                    sliceStmt->end = std::make_unique<NumberExpression>(-1);
-                }
-                
-                // Parse replacement expression
-                sliceStmt->replacement = parseExpression();
-                
-                return sliceStmt;
+            consume(TokenType::RPAREN, "Expected ')' after slice range");
+            consume(TokenType::EQUAL, "Expected '=' in slice assignment");
+            
+            auto sliceStmt = std::make_unique<SliceAssignStatement>(varName);
+            
+            // Add start expression
+            sliceStmt->start = std::move(startExpr);
+            
+            // Add end expression (default to -1 for "to end" if missing)
+            if (endExpr) {
+                sliceStmt->end = std::move(endExpr);
+            } else {
+                sliceStmt->end = std::make_unique<NumberExpression>(-1);
             }
+            
+            // Parse replacement expression
+            sliceStmt->replacement = parseExpression();
+            
+            return sliceStmt;
+        } else {
+            // Not a slice assignment - backtrack and let regular assignment handle it
+            m_currentIndex = savedPosition;
         }
-        
-        // Not a slice assignment, backtrack and treat as regular assignment
-        // This is tricky - we need to put back the tokens we consumed
-        // For now, let's error on this case since it's complex to backtrack
-        error("Invalid string slice syntax. Use var$(start TO end) = value");
-        return nullptr;
     }
 
     auto stmt = std::make_unique<LetStatement>(varName, suffix);
@@ -4396,17 +4396,46 @@ ExpressionPtr Parser::parsePrimary() {
 
             // PRIORITY 3: Check for string slicing syntax (var$(start TO end))
             if (suffix == TokenType::TYPE_STRING) {
-                ExpressionPtr startExpr = nullptr;
-                ExpressionPtr endExpr = nullptr;
+                // Look ahead to distinguish between slice and array access
+                // Save current position
+                size_t savedPosition = m_currentIndex;
                 
-                // Check if we have a start expression (not immediately TO)
-                if (!check(TokenType::TO)) {
-                    startExpr = parseExpression();
+                // Check if this looks like a slice (has TO keyword)
+                bool isSlice = false;
+                int parenDepth = 1;
+                size_t lookaheadIndex = m_currentIndex;
+                
+                while (parenDepth > 0 && lookaheadIndex < m_tokens->size()) {
+                    TokenType token = (*m_tokens)[lookaheadIndex].type;
+                    if (token == TokenType::LPAREN) {
+                        parenDepth++;
+                    } else if (token == TokenType::RPAREN) {
+                        parenDepth--;
+                        if (parenDepth == 0) break; // Found matching RPAREN
+                    } else if (token == TokenType::TO && parenDepth == 1) {
+                        isSlice = true;
+                        break;
+                    }
+                    lookaheadIndex++;
                 }
                 
-                // Check for TO keyword
-                if (match(TokenType::TO)) {
-                    // This is string slicing: var$(start TO end) or var$(TO end) or var$(start TO)
+                // Restore position
+                m_currentIndex = savedPosition;
+                
+                if (isSlice) {
+                    // This is definitely a slice - parse it
+                    
+                    ExpressionPtr startExpr = nullptr;
+                    
+                    // Check if we have a start expression (not immediately TO)
+                    if (!check(TokenType::TO)) {
+                        startExpr = parseExpression();
+                    }
+                    
+                    // Must have TO keyword for slice
+                    consume(TokenType::TO, "Expected TO in string slice");
+                    
+                    ExpressionPtr endExpr = nullptr;
                     
                     // Check if we have an end expression (not immediately RPAREN)
                     if (!check(TokenType::RPAREN)) {
@@ -4434,11 +4463,8 @@ ExpressionPtr Parser::parsePrimary() {
                     }
                     
                     return sliceCall;
-                } else {
-                    // String variables don't support array access, so this is an error
-                    error("String variables do not support array-style indexing. Use slicing syntax: var$(start TO end)");
-                    return std::make_unique<NumberExpression>(0);
                 }
+                // If not a slice, fall through to array access
             }
 
             // PRIORITY 4: Otherwise, it's regular array access
