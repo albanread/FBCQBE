@@ -24,6 +24,8 @@
 #include <string.h>
 #include <stdbool.h>
 
+#include "array_descriptor.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -208,6 +210,36 @@ StringDescriptor* string_reverse(const StringDescriptor* str);
 StringDescriptor* string_replace(const StringDescriptor* str, 
                                   const StringDescriptor* old_substr,
                                   const StringDescriptor* new_substr);
+// Count occurrences of a pattern (non-overlapping)
+int64_t string_tally(const StringDescriptor* str, const StringDescriptor* pattern);
+
+// Reverse search for substring (0-based index or -1)
+int64_t string_instrrev(const StringDescriptor* haystack, const StringDescriptor* needle, int64_t start_pos);
+
+// Insert substring at 1-based position
+StringDescriptor* string_insert(const StringDescriptor* str, int64_t pos, const StringDescriptor* insert_str);
+
+// Delete substring starting at 1-based position for length
+StringDescriptor* string_delete(const StringDescriptor* str, int64_t pos, int64_t len);
+
+// Remove all occurrences of pattern
+StringDescriptor* string_remove(const StringDescriptor* str, const StringDescriptor* pattern);
+
+// Extract substring by inclusive 1-based start/end
+StringDescriptor* string_extract(const StringDescriptor* str, int64_t start_pos, int64_t end_pos);
+
+// Padding helpers
+StringDescriptor* string_lpad(const StringDescriptor* str, int64_t width, const StringDescriptor* padStr);
+StringDescriptor* string_rpad(const StringDescriptor* str, int64_t width, const StringDescriptor* padStr);
+StringDescriptor* string_center(const StringDescriptor* str, int64_t width, const StringDescriptor* padStr);
+
+// Generators
+StringDescriptor* string_space(int64_t count);
+StringDescriptor* string_repeat(const StringDescriptor* pattern, int64_t count);
+
+// Join/Split (array-aware variants)
+StringDescriptor* string_join(const ArrayDescriptor* arrayDesc, const StringDescriptor* separator);
+ArrayDescriptor* string_split(const StringDescriptor* str, const StringDescriptor* delimiter);
 
 //
 // Conversion Functions
@@ -224,6 +256,11 @@ StringDescriptor* string_from_int(int64_t value);
 
 // Convert double to string
 StringDescriptor* string_from_double(double value);
+
+// Numeric formatting helpers (HEX$/BIN$/OCT$)
+StringDescriptor* HEX_STRING(int64_t value, int64_t digits);
+StringDescriptor* BIN_STRING(int64_t value, int64_t digits);
+StringDescriptor* OCT_STRING(int64_t value, int64_t digits);
 
 //
 // Character Classification (Unicode-aware)

@@ -2462,6 +2462,11 @@ VariableType SemanticAnalyzer::inferFunctionCallType(const FunctionCallExpressio
         // Built-in function - check for specific return types
         std::string upperName = expr.name;
         std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
+
+        // Any built-in ending with $ returns a string/Unicode
+        if (!upperName.empty() && upperName.back() == '$') {
+            return m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
+        }
         
         // Functions that return INT
         if (upperName == "FIX" || upperName == "CINT" || upperName == "INT" ||
@@ -2885,12 +2890,16 @@ void SemanticAnalyzer::initializeBuiltinFunctions() {
     m_builtinFunctions["SIN"] = 1;
     m_builtinFunctions["COS"] = 1;
     m_builtinFunctions["TAN"] = 1;
-    m_builtinFunctions["ATN"] = 1;
-    m_builtinFunctions["SQR"] = 1;
+    m_builtinFunctions["ATAN"] = 1;
+    m_builtinFunctions["ATN"] = 1;    // Alias for ATAN
+    m_builtinFunctions["SQRT"] = 1;
+    m_builtinFunctions["SQR"] = 1;    // Alias for SQRT
     m_builtinFunctions["INT"] = 1;
     m_builtinFunctions["SGN"] = 1;
     m_builtinFunctions["LOG"] = 1;
     m_builtinFunctions["EXP"] = 1;
+    m_builtinFunctions["POW"] = 2;    // Takes 2 arguments: base, exponent
+    m_builtinFunctions["ATAN2"] = 2;  // Takes 2 arguments: y, x
     
     // RND takes 0 or 1 argument
     m_builtinFunctions["RND"] = -1;  // -1 = variable arg count
@@ -3158,7 +3167,9 @@ void SemanticAnalyzer::initializeBuiltinFunctions() {
 }
 
 bool SemanticAnalyzer::isBuiltinFunction(const std::string& name) const {
-    return m_builtinFunctions.find(name) != m_builtinFunctions.end();
+    std::string upper = name;
+    std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+    return m_builtinFunctions.find(upper) != m_builtinFunctions.end();
 }
 
 VariableType SemanticAnalyzer::getBuiltinReturnType(const std::string& name) const {
@@ -3245,7 +3256,9 @@ VariableType SemanticAnalyzer::getBuiltinReturnType(const std::string& name) con
 }
 
 int SemanticAnalyzer::getBuiltinArgCount(const std::string& name) const {
-    auto it = m_builtinFunctions.find(name);
+    std::string upper = name;
+    std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+    auto it = m_builtinFunctions.find(upper);
     if (it != m_builtinFunctions.end()) {
         return it->second;
     }
@@ -3420,11 +3433,11 @@ FasterBASIC::ConstantValue SemanticAnalyzer::evalConstantFunction(const Function
     
     // Math functions (single argument)
     if (funcName == "ABS" && expr.arguments.size() == 1) {
+        // ABS is treated as a floating-point builtin in codegen; keep the folded
+        // result as double to avoid mixed int/double codegen paths (which caused
+        // mismatched operand types in QBE for literals like ABS(5)).
         FasterBASIC::ConstantValue arg = evaluateConstantExpression(*expr.arguments[0]);
-        if (std::holds_alternative<int64_t>(arg)) {
-            return std::abs(std::get<int64_t>(arg));
-        }
-        return std::abs(std::get<double>(arg));
+        return std::fabs(getConstantAsDouble(arg));
     }
     
     if (funcName == "SIN" && expr.arguments.size() == 1) {

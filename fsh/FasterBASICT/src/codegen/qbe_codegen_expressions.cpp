@@ -15,6 +15,7 @@
 #include <sstream>
 #include <cmath>
 #include <algorithm>
+#include <unordered_set>
 
 namespace FasterBASIC {
 
@@ -174,7 +175,14 @@ std::string QBECodeGenerator::emitVariableRef(const VariableExpression* expr) {
         }
     }
     
-    // Not a constant - return the variable reference (QBE uses SSA)
+    // Not a constant - choose variable or array reference
+    if (m_symbols) {
+        auto arrIt = m_symbols->arrays.find(expr->name);
+        if (arrIt != m_symbols->arrays.end()) {
+            return getArrayRef(expr->name);
+        }
+    }
+
     return getVariableRef(expr->name);
 }
 
@@ -711,9 +719,16 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         // Check for constant folding
         double constValue;
         if (isNumberLiteral(expr->arguments[0].get(), constValue)) {
-            // Constant fold: absolute value
-            int64_t result = static_cast<int64_t>(std::abs(constValue));
-            return emitIntConstant(result);
+            // Constant fold: absolute value, but keep as double to match the
+            // runtime signature (avoids emitting w-typed temps fed into
+            // basic_print_double).
+            double absVal = std::abs(constValue);
+            std::string temp = allocTemp("d");
+            std::ostringstream oss;
+            oss << std::fixed << absVal;
+            emit("    " + temp + " =d copy d_" + oss.str() + "\n");
+            m_stats.instructionsGenerated++;
+            return temp;
         }
         
         std::string argTemp = emitExpression(expr->arguments[0].get());
@@ -904,11 +919,20 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
             returnType = "l";
         }
     } else {
+        // Builtins ending with $ return pointers
+        if (!upper.empty() && upper.back() == '$') {
+            returnType = "l";
+        }
         // Check for builtin string functions
         if (upper == "CHR$" || upper == "LEFT$" || upper == "RIGHT$" || 
             upper == "MID$" || upper == "__STRING_SLICE" ||
             upper == "STR$" || upper == "STRING$" || upper == "SPACE$" ||
-            upper == "LTRIM$" || upper == "RTRIM$" || upper == "TRIM$") {
+            upper == "LTRIM$" || upper == "RTRIM$" || upper == "TRIM$" ||
+            upper == "REPLACE$" || upper == "REVERSE$" || upper == "INSERT$" ||
+            upper == "DELETE$" || upper == "REMOVE$" || upper == "EXTRACT$" ||
+            upper == "LPAD$" || upper == "RPAD$" || upper == "CENTER$" ||
+            upper == "STRREV$" || upper == "HEX$" || upper == "BIN$" ||
+            upper == "OCT$" || upper == "JOIN$" || upper == "SPLIT$") {
             returnType = "l";  // String functions return pointers
         }
     }
@@ -970,17 +994,39 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         std::string upper = funcName;
         for (char& c : upper) c = std::toupper(c);
         
+        static const std::unordered_set<std::string> longReturn = {
+            "LEN", "ASC", "INSTR", "INSTRREV", "TALLY"
+        };
+
+        static const std::unordered_set<std::string> stringReturn = {
+            "CHR$", "LEFT$", "RIGHT$", "MID$", "STR$", "SPACE$", "STRING$",
+            "UCASE$", "LCASE$", "TRIM$", "LTRIM$", "RTRIM$", "REPLACE$",
+            "REVERSE$", "INSERT$", "DELETE$", "REMOVE$", "EXTRACT$", "LPAD$",
+            "RPAD$", "CENTER$", "STRREV$", "HEX$", "BIN$", "OCT$", "JOIN$",
+            "SPLIT$"
+        };
+
+        static const std::unordered_set<std::string> doubleReturn = {
+            "VAL", "RND", "SIN", "COS", "TAN", "ATAN", "ATAN2", "LOG", "EXP", "SQRT",
+            "ABS", "POW", "TIMER", "SQR", "LN", "ATN", "ASIN", "ACOS",
+            "SINH", "COSH", "TANH", "ASINH", "ACOSH", "ATANH",
+            "LOG10", "LOG1P", "EXP2", "EXPM1", "CBRT", "HYPOT", "FMOD", "REMAINDER",
+            "FLOOR", "CEIL", "TRUNC", "ROUND", "COPYSIGN",
+            "ERF", "ERFC", "TGAMMA", "LGAMMA", "NEXTAFTER", "FMAX", "FMIN", "FMA",
+            "DEG", "RAD", "SIGMOID", "LOGIT", "NORMPDF", "NORMCDF", "FACT", "FACTORIAL",
+            "COMB", "PERM", "CLAMP", "LERP", "PMT", "PV", "FV"
+        };
+
         std::string callReturnType = "w";  // Default to word
-        if (upper == "LEN" || upper == "ASC" || upper == "INSTR") {
+        if (!upper.empty() && upper.back() == '$') {
+            callReturnType = "l";
+        }
+        if (longReturn.count(upper)) {
             callReturnType = "l";  // int64_t or uint32_t -> long
-        } else if (upper == "VAL" || upper == "RND" || upper == "SIN" || upper == "COS" || 
-                   upper == "TAN" || upper == "SQRT" || upper == "ABS" || upper == "TIMER") {
-            callReturnType = "d";  // double
-        } else if (upper == "CHR$" || upper == "LEFT$" || upper == "RIGHT$" || upper == "MID$" ||
-                   upper == "STR$" || upper == "SPACE$" || upper == "STRING$" || 
-                   upper == "UCASE$" || upper == "LCASE$" || upper == "TRIM$" || 
-                   upper == "LTRIM$" || upper == "RTRIM$") {
+        } else if (stringReturn.count(upper)) {
             callReturnType = "l";  // StringDescriptor* -> long pointer
+        } else if (doubleReturn.count(upper)) {
+            callReturnType = "d";  // double
         }
         
         resultTemp = allocTemp(callReturnType);
@@ -1356,11 +1402,59 @@ std::string QBECodeGenerator::mapToRuntimeFunction(const std::string& basicFunc)
     if (upper == "RAND") return "basic_rand";
     
     // Common math functions
-    if (upper == "ABS") return "basic_abs";
+    if (upper == "ABS") return "basic_abs_double";  // runtime provides typed variants
     if (upper == "SIN") return "basic_sin";
     if (upper == "COS") return "basic_cos";
     if (upper == "TAN") return "basic_tan";
-    if (upper == "SQRT") return "basic_sqrt";
+    if (upper == "ATAN" || upper == "ATN") return "basic_atan";
+    if (upper == "SQRT" || upper == "SQR") return "basic_sqrt";
+    if (upper == "LOG" || upper == "LN") return "basic_log";
+    if (upper == "LOG10") return "basic_log10";
+    if (upper == "LOG1P") return "basic_log1p";
+    if (upper == "EXP") return "basic_exp";
+    if (upper == "EXP2") return "basic_exp2";
+    if (upper == "EXPM1") return "basic_expm1";
+    if (upper == "POW") return "basic_pow";
+    if (upper == "ATAN2") return "basic_atan2";
+    if (upper == "ASIN" || upper == "ASN") return "basic_asin";
+    if (upper == "ACOS" || upper == "ACS") return "basic_acos";
+    if (upper == "SINH") return "basic_sinh";
+    if (upper == "COSH") return "basic_cosh";
+    if (upper == "TANH") return "basic_tanh";
+    if (upper == "ASINH") return "basic_asinh";
+    if (upper == "ACOSH") return "basic_acosh";
+    if (upper == "ATANH") return "basic_atanh";
+    if (upper == "CBRT") return "basic_cbrt";
+    if (upper == "HYPOT") return "basic_hypot";
+    if (upper == "FMOD") return "basic_fmod";
+    if (upper == "REMAINDER") return "basic_remainder";
+    if (upper == "FLOOR") return "basic_floor";
+    if (upper == "CEIL") return "basic_ceil";
+    if (upper == "TRUNC") return "basic_trunc";
+    if (upper == "ROUND") return "basic_round";
+    if (upper == "COPYSIGN") return "basic_copysign";
+    if (upper == "ERF") return "basic_erf";
+    if (upper == "ERFC") return "basic_erfc";
+    if (upper == "TGAMMA") return "basic_tgamma";
+    if (upper == "LGAMMA") return "basic_lgamma";
+    if (upper == "NEXTAFTER") return "basic_nextafter";
+    if (upper == "FMAX") return "basic_fmax";
+    if (upper == "FMIN") return "basic_fmin";
+    if (upper == "FMA") return "basic_fma";
+    if (upper == "DEG") return "basic_deg";
+    if (upper == "RAD") return "basic_rad";
+    if (upper == "SIGMOID") return "basic_sigmoid";
+    if (upper == "LOGIT") return "basic_logit";
+    if (upper == "NORMPDF") return "basic_normpdf";
+    if (upper == "NORMCDF") return "basic_normcdf";
+    if (upper == "FACT" || upper == "FACTORIAL") return "basic_fact";
+    if (upper == "COMB") return "basic_comb";
+    if (upper == "PERM") return "basic_perm";
+    if (upper == "CLAMP") return "basic_clamp";
+    if (upper == "LERP") return "basic_lerp";
+    if (upper == "PMT") return "basic_pmt";
+    if (upper == "PV") return "basic_pv";
+    if (upper == "FV") return "basic_fv";
     if (upper == "INT") return "basic_int";
     if (upper == "FIX") return "basic_fix";
     if (upper == "CINT") return "math_cint";
@@ -1384,6 +1478,23 @@ std::string QBECodeGenerator::mapToRuntimeFunction(const std::string& basicFunc)
     if (upper == "LTRIM$") return "string_ltrim";    // Returns StringDescriptor*
     if (upper == "RTRIM$") return "string_rtrim";    // Returns StringDescriptor*
     if (upper == "INSTR") return "string_instr";     // Returns int64_t
+    if (upper == "INSTRREV") return "string_instrrev"; // Returns int64_t
+    if (upper == "REPLACE$") return "string_replace";
+    if (upper == "REVERSE$") return "string_reverse";
+    if (upper == "TALLY") return "string_tally";      // Returns int64_t
+    if (upper == "INSERT$") return "string_insert";
+    if (upper == "DELETE$") return "string_delete";
+    if (upper == "REMOVE$") return "string_remove";
+    if (upper == "EXTRACT$") return "string_extract";
+    if (upper == "LPAD$") return "string_lpad";
+    if (upper == "RPAD$") return "string_rpad";
+    if (upper == "CENTER$") return "string_center";
+    if (upper == "STRREV$") return "string_reverse";
+    if (upper == "HEX$") return "HEX_STRING";
+    if (upper == "BIN$") return "BIN_STRING";
+    if (upper == "OCT$") return "OCT_STRING";
+    if (upper == "JOIN$") return "string_join";
+    if (upper == "SPLIT$") return "string_split";
     
     // Default: prefix with basic_
     return "basic_" + upper;

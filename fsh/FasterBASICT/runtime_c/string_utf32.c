@@ -7,6 +7,8 @@
 //
 
 #include "string_descriptor.h"
+#include "array_descriptor.h"
+#include "basic_runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -862,6 +864,365 @@ StringDescriptor* string_reverse(const StringDescriptor* str) {
     return result;
 }
 
+    // Count occurrences of a substring (non-overlapping)
+    int64_t string_tally(const StringDescriptor* str, const StringDescriptor* pattern) {
+        if (!str || !pattern || pattern->length == 0 || str->length == 0) {
+            return 0;
+        }
+
+        int64_t count = 0;
+        int64_t pos = 0;
+        while (pos <= str->length - pattern->length) {
+            int64_t found = string_instr(str, pattern, pos);
+            if (found < 0) break;
+            count++;
+            pos = found + pattern->length;
+        }
+        return count;
+    }
+
+    // Find substring from the right; returns 0-based index or -1 if not found
+    int64_t string_instrrev(const StringDescriptor* haystack, const StringDescriptor* needle, int64_t start_pos) {
+        if (!haystack || !needle || needle->length == 0) return -1;
+        if (haystack->length == 0 || needle->length > haystack->length) return -1;
+
+        // Default start position is end of haystack
+        int64_t start = start_pos;
+        if (start < 0 || start > haystack->length - needle->length) {
+            start = haystack->length - needle->length;
+        }
+
+        for (int64_t pos = start; pos >= 0; pos--) {
+            bool match = true;
+            for (int64_t i = 0; i < needle->length; i++) {
+                if (STR_CHAR(haystack, pos + i) != STR_CHAR(needle, i)) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                return pos;
+            }
+        }
+        return -1;
+    }
+
+    // Insert substring at 1-based position
+    StringDescriptor* string_insert(const StringDescriptor* str, int64_t pos, const StringDescriptor* insert_str) {
+        if (!str) return string_clone(insert_str);
+        if (!insert_str || insert_str->length == 0) return string_clone(str);
+
+        // Clamp position to [1, len+1]
+        if (pos < 1) pos = 1;
+        if (pos > str->length + 1) pos = str->length + 1;
+
+        int64_t prefix_len = pos - 1; // 0-based prefix length
+        int64_t new_len = str->length + insert_str->length;
+
+        StringDescriptor* result = string_new_capacity(new_len);
+        if (!result) return NULL;
+
+        // Copy prefix
+        for (int64_t i = 0; i < prefix_len; i++) {
+            STR_SET_CHAR(result, i, STR_CHAR(str, i));
+        }
+
+        // Copy inserted string
+        for (int64_t i = 0; i < insert_str->length; i++) {
+            STR_SET_CHAR(result, prefix_len + i, STR_CHAR(insert_str, i));
+        }
+
+        // Copy suffix
+        for (int64_t i = prefix_len; i < str->length; i++) {
+            STR_SET_CHAR(result, insert_str->length + i, STR_CHAR(str, i));
+        }
+
+        result->length = new_len;
+        return result;
+    }
+
+    // Delete substring starting at 1-based position for given length
+    StringDescriptor* string_delete(const StringDescriptor* str, int64_t pos, int64_t len) {
+        if (!str || str->length == 0 || len <= 0) return string_clone(str);
+        if (pos < 1) pos = 1;
+        int64_t start = pos - 1; // 0-based
+        if (start >= str->length) return string_clone(str);
+        if (start + len > str->length) len = str->length - start;
+
+        int64_t new_len = str->length - len;
+        StringDescriptor* result = string_new_capacity(new_len);
+        if (!result) return NULL;
+
+        // Copy prefix
+        for (int64_t i = 0; i < start; i++) {
+            STR_SET_CHAR(result, i, STR_CHAR(str, i));
+        }
+
+        // Copy suffix
+        for (int64_t i = start + len; i < str->length; i++) {
+            STR_SET_CHAR(result, i - len, STR_CHAR(str, i));
+        }
+
+        result->length = new_len;
+        return result;
+    }
+
+    // Remove all occurrences of pattern
+    StringDescriptor* string_remove(const StringDescriptor* str, const StringDescriptor* pattern) {
+        if (!str || str->length == 0) return string_new_capacity(0);
+        if (!pattern || pattern->length == 0) return string_clone(str);
+
+        StringDescriptor* empty = string_new_capacity(0);
+        StringDescriptor* replaced = string_replace(str, pattern, empty);
+        string_release(empty);
+        return replaced;
+    }
+
+    // Extract substring by inclusive 1-based start/end
+    StringDescriptor* string_extract(const StringDescriptor* str, int64_t start_pos, int64_t end_pos) {
+        if (!str || str->length == 0) return string_new_capacity(0);
+        if (start_pos < 1) start_pos = 1;
+        if (end_pos < start_pos) return string_new_capacity(0);
+        if (end_pos > str->length) end_pos = str->length;
+
+        return string_slice(str, start_pos, end_pos);
+    }
+
+    // Left pad to width with padChar (first codepoint of pad string, default space)
+    StringDescriptor* string_lpad(const StringDescriptor* str, int64_t width, const StringDescriptor* padStr) {
+        if (!str) return string_new_capacity(0);
+        if (width <= str->length) return string_clone(str);
+
+        uint32_t pad = 0x20; // space
+        if (padStr && padStr->length > 0) {
+            pad = STR_CHAR(padStr, 0);
+        }
+
+        int64_t pad_len = width - str->length;
+        StringDescriptor* pad_segment = string_new_repeat(pad, pad_len);
+        if (!pad_segment) return NULL;
+
+        StringDescriptor* result = string_concat(pad_segment, str);
+        string_release(pad_segment);
+        return result;
+    }
+
+    // Right pad to width with padChar
+    StringDescriptor* string_rpad(const StringDescriptor* str, int64_t width, const StringDescriptor* padStr) {
+        if (!str) return string_new_capacity(0);
+        if (width <= str->length) return string_clone(str);
+
+        uint32_t pad = 0x20;
+        if (padStr && padStr->length > 0) {
+            pad = STR_CHAR(padStr, 0);
+        }
+
+        int64_t pad_len = width - str->length;
+        StringDescriptor* pad_segment = string_new_repeat(pad, pad_len);
+        if (!pad_segment) return NULL;
+
+        StringDescriptor* result = string_concat(str, pad_segment);
+        string_release(pad_segment);
+        return result;
+    }
+
+    // Center string within width using padChar
+    StringDescriptor* string_center(const StringDescriptor* str, int64_t width, const StringDescriptor* padStr) {
+        if (!str) return string_new_capacity(0);
+        if (width <= str->length) return string_clone(str);
+
+        uint32_t pad = 0x20;
+        if (padStr && padStr->length > 0) {
+            pad = STR_CHAR(padStr, 0);
+        }
+
+        int64_t total_pad = width - str->length;
+        int64_t left_pad = total_pad / 2;
+        int64_t right_pad = total_pad - left_pad;
+
+        StringDescriptor* left = string_new_repeat(pad, left_pad);
+        StringDescriptor* right = string_new_repeat(pad, right_pad);
+        if (!left || !right) {
+            if (left) string_release(left);
+            if (right) string_release(right);
+            return NULL;
+        }
+
+        StringDescriptor* tmp = string_concat(left, str);
+        StringDescriptor* result = string_concat(tmp, right);
+
+        string_release(left);
+        string_release(right);
+        string_release(tmp);
+        return result;
+    }
+
+    // Create string of spaces (wrapper for clarity)
+    StringDescriptor* string_space(int64_t count) {
+        return string_new_repeat(0x20, count);
+    }
+
+    // Repeat a whole string pattern 'count' times
+    StringDescriptor* string_repeat(const StringDescriptor* pattern, int64_t count) {
+        if (count <= 0) return string_new_capacity(0);
+        if (!pattern || pattern->length == 0) return string_new_capacity(0);
+
+        int64_t new_len = pattern->length * count;
+        StringDescriptor* result = string_new_capacity(new_len);
+        if (!result) return NULL;
+
+        for (int64_t i = 0; i < count; i++) {
+            for (int64_t j = 0; j < pattern->length; j++) {
+                STR_SET_CHAR(result, i * pattern->length + j, STR_CHAR(pattern, j));
+            }
+        }
+        result->length = new_len;
+        return result;
+    }
+
+    // Join array of strings with a separator
+    StringDescriptor* string_join(const ArrayDescriptor* arrayDesc, const StringDescriptor* separator) {
+        if (!arrayDesc) {
+            return string_new_capacity(0);
+        }
+
+        const StringDescriptor* sep = separator ? separator : string_new_capacity(0);
+        int64_t sep_len = sep ? sep->length : 0;
+
+        // Compute element count
+        int64_t count = (arrayDesc->upperBound >= arrayDesc->lowerBound)
+            ? (arrayDesc->upperBound - arrayDesc->lowerBound + 1)
+            : 0;
+
+        if (count <= 0 || !arrayDesc->data) {
+            if (!separator && sep) string_release((StringDescriptor*)sep);
+            return string_new_capacity(0);
+        }
+
+        StringDescriptor** data = (StringDescriptor**)arrayDesc->data;
+
+        // Total length in codepoints
+        int64_t total_len = 0;
+        for (int64_t i = 0; i < count; i++) {
+            const StringDescriptor* s = data[i];
+            total_len += s ? s->length : 0;
+            if (i + 1 < count) total_len += sep_len;
+        }
+
+        StringDescriptor* result = string_new_capacity(total_len);
+        if (!result) {
+            if (!separator && sep) string_release((StringDescriptor*)sep);
+            return NULL;
+        }
+
+        int64_t pos = 0;
+        for (int64_t i = 0; i < count; i++) {
+            const StringDescriptor* s = data[i];
+            if (s && s->length > 0 && s->data) {
+                if (s->encoding == STRING_ENCODING_ASCII) {
+                    const uint8_t* src = (const uint8_t*)s->data;
+                    for (int64_t k = 0; k < s->length; k++) {
+                        ((uint32_t*)result->data)[pos++] = (uint32_t)src[k];
+                    }
+                } else {
+                    const uint32_t* src = (const uint32_t*)s->data;
+                    memcpy(((uint32_t*)result->data) + pos, src, s->length * sizeof(uint32_t));
+                    pos += s->length;
+                }
+            }
+
+            if (i + 1 < count && sep_len > 0 && sep && sep->data) {
+                if (sep->encoding == STRING_ENCODING_ASCII) {
+                    const uint8_t* src = (const uint8_t*)sep->data;
+                    for (int64_t k = 0; k < sep_len; k++) {
+                        ((uint32_t*)result->data)[pos++] = (uint32_t)src[k];
+                    }
+                } else {
+                    const uint32_t* src = (const uint32_t*)sep->data;
+                    memcpy(((uint32_t*)result->data) + pos, src, sep_len * sizeof(uint32_t));
+                    pos += sep_len;
+                }
+            }
+        }
+
+        result->length = total_len;
+        result->capacity = total_len;
+        result->encoding = STRING_ENCODING_UTF32; // Ensure UTF-32 backing
+        result->dirty = 1;
+
+        if (!separator && sep) string_release((StringDescriptor*)sep);
+        return result;
+    }
+
+    // Helper to allocate descriptor + data for split results
+    static ArrayDescriptor* alloc_split_desc(int64_t upperBound, size_t elemSize) {
+        ArrayDescriptor* desc = (ArrayDescriptor*)malloc(sizeof(ArrayDescriptor));
+        if (!desc) return NULL;
+        if (array_descriptor_init(desc, 0, upperBound, (int64_t)elemSize, 1, 0, '$') != 0) {
+            free(desc);
+            return NULL;
+        }
+        return desc;
+    }
+
+    // Split string into array of StringDescriptor* (1D array, lower bound 0)
+    ArrayDescriptor* string_split(const StringDescriptor* str, const StringDescriptor* delimiter) {
+        const size_t elemSize = sizeof(StringDescriptor*);
+
+        if (!str) {
+            ArrayDescriptor* desc = alloc_split_desc(0, elemSize);
+            if (!desc) return NULL;
+            StringDescriptor* empty = string_new_capacity(0);
+            StringDescriptor** data = (StringDescriptor**)desc->data;
+            data[0] = string_retain(empty);
+            string_release(empty);
+            return desc;
+        }
+
+        if (!delimiter || delimiter->length == 0) {
+            ArrayDescriptor* desc = alloc_split_desc(0, elemSize);
+            if (!desc) return NULL;
+            StringDescriptor** data = (StringDescriptor**)desc->data;
+            data[0] = string_retain((StringDescriptor*)str);
+            return desc;
+        }
+
+        int64_t pos = 0;
+        int64_t parts = 0;
+        int64_t hay_len = str->length;
+        int64_t delim_len = delimiter->length;
+
+        // First pass: count parts (occurrences + 1)
+        while (true) {
+            int64_t found = string_instr(str, delimiter, pos);
+            parts++;
+            if (found < 0) break;
+            pos = found + delim_len;
+            if (pos > hay_len) break;
+        }
+
+        ArrayDescriptor* desc = alloc_split_desc(parts - 1, elemSize);
+        if (!desc) return NULL;
+        StringDescriptor** data = (StringDescriptor**)desc->data;
+
+        // Second pass: extract parts
+        pos = 0;
+        int64_t slot = 0;
+        while (slot < parts) {
+            int64_t found = string_instr(str, delimiter, pos);
+            int64_t seg_len = (found < 0) ? (hay_len - pos) : (found - pos);
+            if (seg_len < 0) seg_len = 0;
+            StringDescriptor* segment = string_mid(str, pos, seg_len);
+            data[slot] = string_retain(segment);
+            string_release(segment);
+            slot++;
+            if (found < 0) break;
+            pos = found + delim_len;
+        }
+
+        return desc;
+    }
+
 // Replace all occurrences
 StringDescriptor* string_replace(const StringDescriptor* str, 
                                   const StringDescriptor* old_substr,
@@ -956,6 +1317,63 @@ StringDescriptor* string_from_double(double value) {
     char buffer[64];
     snprintf(buffer, sizeof(buffer), "%.15g", value);
     return string_new_utf8(buffer);
+}
+
+// Internal helper to format integer in arbitrary base
+static StringDescriptor* format_int_base(int64_t value, int base, int64_t min_digits, const char* alphabet) {
+    if (base < 2 || base > 36) return string_new_capacity(0);
+    if (min_digits < 0) min_digits = 0;
+
+    char buffer[80];
+    int idx = 0;
+
+    bool negative = value < 0;
+    uint64_t u = negative ? (uint64_t)(-value) : (uint64_t)value;
+
+    if (u == 0) {
+        buffer[idx++] = '0';
+    }
+    while (u > 0 && idx < (int)sizeof(buffer) - 1) {
+        buffer[idx++] = alphabet[u % base];
+        u /= base;
+    }
+
+    while (idx < min_digits && idx < (int)sizeof(buffer) - 1) {
+        buffer[idx++] = '0';
+    }
+
+    if (negative && idx < (int)sizeof(buffer) - 1) {
+        buffer[idx++] = '-';
+    }
+
+    buffer[idx] = '\0';
+
+    // Reverse in-place
+    for (int i = 0, j = idx - 1; i < j; i++, j--) {
+        char tmp = buffer[i];
+        buffer[i] = buffer[j];
+        buffer[j] = tmp;
+    }
+
+    return string_new_utf8(buffer);
+}
+
+// HEX$ helper
+StringDescriptor* HEX_STRING(int64_t value, int64_t digits) {
+    static const char* alphabet = "0123456789ABCDEF";
+    return format_int_base(value, 16, digits, alphabet);
+}
+
+// BIN$ helper
+StringDescriptor* BIN_STRING(int64_t value, int64_t digits) {
+    static const char* alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    return format_int_base(value, 2, digits, alphabet);
+}
+
+// OCT$ helper
+StringDescriptor* OCT_STRING(int64_t value, int64_t digits) {
+    static const char* alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    return format_int_base(value, 8, digits, alphabet);
 }
 
 // =============================================================================

@@ -4899,7 +4899,7 @@ bool Parser::isBuiltinFunction(const std::string& name) const {
     // List of builtin functions (case-insensitive)
     // This should match the list in semantic analyzer's initializeBuiltinFunctions()
     static const std::set<std::string> builtins = {
-        "ABS", "SIN", "COS", "TAN", "ATN", "SQR", "INT", "SGN", "LOG", "EXP", "RND",
+        "ABS", "SIN", "COS", "TAN", "ATAN", "ATN", "SQRT", "SQR", "INT", "SGN", "LOG", "EXP", "POW", "ATAN2", "RND",
         "LEN", "ASC", "CHR$", "CHR_STRING", "STR$", "STR_STRING", "VAL", "STRTYPE",
         "LEFT$", "RIGHT$", "MID$", "LEFT_STRING", "RIGHT_STRING", "MID_STRING",
         "INSTR", "SPACE$", "STRING$", "UCASE$", "LCASE$", "LTRIM$", "RTRIM$", "TRIM$",

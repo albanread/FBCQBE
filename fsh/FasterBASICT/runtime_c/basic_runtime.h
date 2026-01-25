@@ -192,11 +192,11 @@ double array_get_double(BasicArray* array, int32_t* indices);
 // Set double element
 void array_set_double(BasicArray* array, int32_t* indices, double value);
 
-// Get string element
-BasicString* array_get_string(BasicArray* array, int32_t* indices);
+// Get string element (StringDescriptor*)
+StringDescriptor* array_get_string(BasicArray* array, int32_t* indices);
 
-// Set string element
-void array_set_string(BasicArray* array, int32_t* indices, BasicString* value);
+// Set string element (StringDescriptor*)
+void array_set_string(BasicArray* array, int32_t* indices, StringDescriptor* value);
 
 // Get lower bound for dimension (1-based)
 int32_t array_lbound(BasicArray* array, int32_t dimension);
@@ -303,6 +303,10 @@ double basic_sqrt(double x);
 // Power
 double basic_pow(double base, double exponent);
 
+// Exponential helpers
+double basic_exp2(double x);
+double basic_expm1(double x);
+
 // Sine
 double basic_sin(double x);
 
@@ -312,17 +316,100 @@ double basic_cos(double x);
 // Tangent
 double basic_tan(double x);
 
+// Inverse trig
+double basic_asin(double x);
+double basic_acos(double x);
+
 // Arc tangent
 double basic_atan(double x);
 
 // Arc tangent 2
 double basic_atan2(double y, double x);
 
+// Hyperbolic trig
+double basic_sinh(double x);
+double basic_cosh(double x);
+double basic_tanh(double x);
+double basic_asinh(double x);
+double basic_acosh(double x);
+double basic_atanh(double x);
+
 // Natural logarithm
 double basic_log(double x);
 
+// Logarithm base 10
+double basic_log10(double x);
+
+// Logarithm of 1 + x
+double basic_log1p(double x);
+
 // Exponential
 double basic_exp(double x);
+
+// Cube root
+double basic_cbrt(double x);
+
+// Hypotenuse
+double basic_hypot(double x, double y);
+
+// Floating-point remainder helpers
+double basic_fmod(double x, double y);
+double basic_remainder(double x, double y);
+
+// Rounding helpers
+double basic_floor(double x);
+double basic_ceil(double x);
+double basic_trunc(double x);
+double basic_round(double x);
+
+// Copy sign
+double basic_copysign(double x, double y);
+
+// Error functions
+double basic_erf(double x);
+double basic_erfc(double x);
+
+// Gamma functions
+double basic_tgamma(double x);
+double basic_lgamma(double x);
+
+// Next representable value
+double basic_nextafter(double x, double y);
+
+// Min/Max
+double basic_fmax(double x, double y);
+double basic_fmin(double x, double y);
+
+// Fused multiply-add
+double basic_fma(double x, double y, double z);
+
+// Angle conversions
+double basic_deg(double radians);
+double basic_rad(double degrees);
+
+// Logistic helpers
+double basic_sigmoid(double x);
+double basic_logit(double x);
+
+// Normal distribution
+double basic_normpdf(double x);
+double basic_normcdf(double x);
+
+// Factorial / combinatorics
+double basic_fact(double n);
+double basic_comb(double n, double k);
+double basic_perm(double n, double k);
+
+// Clamp
+double basic_clamp(double x, double minv, double maxv);
+
+// Linear interpolation
+double basic_lerp(double a, double b, double t);
+
+// Finance helpers
+double basic_pmt(double rate, double nper, double pv);
+double basic_pv(double rate, double nper, double pmt);
+double basic_fv(double rate, double nper, double pmt);
 
 // Random number (0.0 to 1.0)
 double basic_rnd(void);

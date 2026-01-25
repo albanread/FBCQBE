@@ -228,11 +228,11 @@ void CoreCommandRegistry::registerArrayCommands(CommandRegistry& registry) {
 // =============================================================================
 
 void CoreCommandRegistry::registerMathFunctions(CommandRegistry& registry) {
-    // ABS - Absolute value
-    CommandDefinition abs("ABS", "Return absolute value of number", "math.abs", "math");
-    abs.addParameter("x", ParameterType::FLOAT, "Input number")
-       .setReturnType(ReturnType::FLOAT);
-    registry.registerFunction(std::move(abs));
+    // ABS - Absolute value (handled as builtin)
+    // CommandDefinition abs("ABS", "Return absolute value of number", "math.abs", "math");
+    // abs.addParameter("x", ParameterType::FLOAT, "Input number")
+    //    .setReturnType(ReturnType::FLOAT);
+    // registry.registerFunction(std::move(abs));
     
     // INT - Integer part
     CommandDefinition int_fn("INT", "Return integer part of number", "math.floor", "math");
@@ -286,17 +286,27 @@ void CoreCommandRegistry::registerMathFunctions(CommandRegistry& registry) {
           .setReturnType(ReturnType::FLOAT);
     registry.registerFunction(std::move(log_fn));
     
-    // ACS - Arc-cosine (inverse cosine)
-    CommandDefinition acs("ACS", "Return arc-cosine in radians", "math.acos", "math");
-    acs.addParameter("x", ParameterType::FLOAT, "Input value (-1 to 1)")
-       .setReturnType(ReturnType::FLOAT);
-    registry.registerFunction(std::move(acs));
-    
-    // ASN - Arc-sine (inverse sine)
-    CommandDefinition asn("ASN", "Return arc-sine in radians", "math.asin", "math");
-    asn.addParameter("x", ParameterType::FLOAT, "Input value (-1 to 1)")
-       .setReturnType(ReturnType::FLOAT);
-    registry.registerFunction(std::move(asn));
+     // ACS / ACOS - Arc-cosine (inverse cosine)
+     CommandDefinition acs("ACS", "Return arc-cosine in radians", "math.acos", "math");
+     acs.addParameter("x", ParameterType::FLOAT, "Input value (-1 to 1)")
+         .setReturnType(ReturnType::FLOAT);
+     registry.registerFunction(std::move(acs));
+
+     CommandDefinition acos_fn("ACOS", "Return arc-cosine in radians", "math.acos", "math");
+     acos_fn.addParameter("x", ParameterType::FLOAT, "Input value (-1 to 1)")
+              .setReturnType(ReturnType::FLOAT);
+     registry.registerFunction(std::move(acos_fn));
+
+     // ASN / ASIN - Arc-sine (inverse sine)
+     CommandDefinition asn("ASN", "Return arc-sine in radians", "math.asin", "math");
+     asn.addParameter("x", ParameterType::FLOAT, "Input value (-1 to 1)")
+         .setReturnType(ReturnType::FLOAT);
+     registry.registerFunction(std::move(asn));
+
+     CommandDefinition asin_fn("ASIN", "Return arc-sine in radians", "math.asin", "math");
+     asin_fn.addParameter("x", ParameterType::FLOAT, "Input value (-1 to 1)")
+              .setReturnType(ReturnType::FLOAT);
+     registry.registerFunction(std::move(asin_fn));
     
     // DEG - Convert radians to degrees
     CommandDefinition deg("DEG", "Convert radians to degrees", "math.deg", "math");
@@ -356,26 +366,26 @@ void CoreCommandRegistry::registerMathFunctions(CommandRegistry& registry) {
     ceil.addParameter("x", ParameterType::FLOAT, "Input number")
         .setReturnType(ReturnType::FLOAT);
     registry.registerFunction(std::move(ceil));
-    
+
     // FLOOR - Floor (round down)
     CommandDefinition floor_fn("FLOOR", "Round down to nearest integer", "math.floor", "math");
     floor_fn.addParameter("x", ParameterType::FLOAT, "Input number")
             .setReturnType(ReturnType::FLOAT);
     registry.registerFunction(std::move(floor_fn));
-    
+
+    // TRUNC - Truncate (alias for FIX)
+    CommandDefinition trunc("TRUNC", "Truncate towards zero", "basic_fix", "math");
+    trunc.addParameter("x", ParameterType::FLOAT, "Input number")
+         .setReturnType(ReturnType::INT);
+    registry.registerFunction(std::move(trunc));
+
     // ROUND - Round to n decimal places
     CommandDefinition round_fn("ROUND", "Round to n decimal places", "math_round", "math");
     round_fn.addParameter("x", ParameterType::FLOAT, "Input number")
             .addParameter("places", ParameterType::INT, "Decimal places", true, "0")
             .setReturnType(ReturnType::FLOAT);
     registry.registerFunction(std::move(round_fn));
-    
-    // TRUNC - Truncate (alias for FIX)
-    CommandDefinition trunc("TRUNC", "Truncate towards zero", "basic_fix", "math");
-    trunc.addParameter("x", ParameterType::FLOAT, "Input number")
-         .setReturnType(ReturnType::INT);
-    registry.registerFunction(std::move(trunc));
-    
+
     // FRAC - Fractional part
     CommandDefinition frac("FRAC", "Return fractional part of number", "math_frac", "math");
     frac.addParameter("x", ParameterType::FLOAT, "Input number")
@@ -435,11 +445,201 @@ void CoreCommandRegistry::registerMathFunctions(CommandRegistry& registry) {
             .setReturnType(ReturnType::FLOAT);
     registry.registerFunction(std::move(atan2_fn));
     
-    // LOG10 - Base-10 logarithm
-    CommandDefinition log10_fn("LOG10", "Return base-10 logarithm", "math_log10", "math");
-    log10_fn.addParameter("x", ParameterType::FLOAT, "Input value (must be > 0)")
+        // LOG10 - Base-10 logarithm
+        CommandDefinition log10_fn("LOG10", "Return base-10 logarithm", "math_log10", "math");
+        log10_fn.addParameter("x", ParameterType::FLOAT, "Input value (must be > 0)")
             .setReturnType(ReturnType::FLOAT);
-    registry.registerFunction(std::move(log10_fn));
+        registry.registerFunction(std::move(log10_fn));
+
+        // LOG1P - Natural log of 1 + x
+        CommandDefinition log1p_fn("LOG1P", "Return ln(1+x)", "math_log1p", "math");
+        log1p_fn.addParameter("x", ParameterType::FLOAT, "Input value (>-1)")
+             .setReturnType(ReturnType::FLOAT);
+        registry.registerFunction(std::move(log1p_fn));
+
+        // EXP2 - 2^x
+        CommandDefinition exp2_fn("EXP2", "Return 2^x", "math_exp2", "math");
+        exp2_fn.addParameter("x", ParameterType::FLOAT, "Exponent")
+           .setReturnType(ReturnType::FLOAT);
+        registry.registerFunction(std::move(exp2_fn));
+
+        // EXPM1 - e^x - 1
+        CommandDefinition expm1_fn("EXPM1", "Return e^x - 1", "math_expm1", "math");
+        expm1_fn.addParameter("x", ParameterType::FLOAT, "Exponent")
+            .setReturnType(ReturnType::FLOAT);
+        registry.registerFunction(std::move(expm1_fn));
+
+        // CBRT - Cube root
+        CommandDefinition cbrt_fn("CBRT", "Cube root", "math_cbrt", "math");
+        cbrt_fn.addParameter("x", ParameterType::FLOAT, "Input value")
+            .setReturnType(ReturnType::FLOAT);
+        registry.registerFunction(std::move(cbrt_fn));
+
+        // HYPOT - Hypotenuse
+        CommandDefinition hypot_fn("HYPOT", "Hypotenuse sqrt(x^2+y^2)", "math_hypot", "math");
+        hypot_fn.addParameter("x", ParameterType::FLOAT, "X component")
+            .addParameter("y", ParameterType::FLOAT, "Y component")
+            .setReturnType(ReturnType::FLOAT);
+        registry.registerFunction(std::move(hypot_fn));
+
+        // FMOD - Floating modulus
+        CommandDefinition fmod_fn("FMOD", "Floating modulus", "math_fmod", "math");
+        fmod_fn.addParameter("x", ParameterType::FLOAT, "Dividend")
+           .addParameter("y", ParameterType::FLOAT, "Divisor")
+           .setReturnType(ReturnType::FLOAT);
+        registry.registerFunction(std::move(fmod_fn));
+
+        // REMAINDER - IEEE remainder
+        CommandDefinition remainder_fn("REMAINDER", "IEEE remainder", "math_remainder", "math");
+        remainder_fn.addParameter("x", ParameterType::FLOAT, "Dividend")
+            .addParameter("y", ParameterType::FLOAT, "Divisor")
+            .setReturnType(ReturnType::FLOAT);
+        registry.registerFunction(std::move(remainder_fn));
+
+        // COPYSIGN - Copy sign from y to x
+        CommandDefinition copysign_fn("COPYSIGN", "Copy sign of second operand", "math_copysign", "math");
+        copysign_fn.addParameter("x", ParameterType::FLOAT, "Magnitude source")
+            .addParameter("y", ParameterType::FLOAT, "Sign source")
+            .setReturnType(ReturnType::FLOAT);
+        registry.registerFunction(std::move(copysign_fn));
+
+            // ERF / ERFC
+            CommandDefinition erf_fn("ERF", "Error function", "math_erf", "math");
+            erf_fn.addParameter("x", ParameterType::FLOAT, "Input value")
+               .setReturnType(ReturnType::FLOAT);
+            registry.registerFunction(std::move(erf_fn));
+
+            CommandDefinition erfc_fn("ERFC", "Complementary error function", "math_erfc", "math");
+            erfc_fn.addParameter("x", ParameterType::FLOAT, "Input value")
+                .setReturnType(ReturnType::FLOAT);
+            registry.registerFunction(std::move(erfc_fn));
+
+            // Gamma / Log-gamma
+            CommandDefinition tgamma_fn("TGAMMA", "Gamma function", "math_tgamma", "math");
+            tgamma_fn.addParameter("x", ParameterType::FLOAT, "Input value")
+                  .setReturnType(ReturnType::FLOAT);
+            registry.registerFunction(std::move(tgamma_fn));
+
+            CommandDefinition lgamma_fn("LGAMMA", "Log gamma function", "math_lgamma", "math");
+            lgamma_fn.addParameter("x", ParameterType::FLOAT, "Input value")
+                  .setReturnType(ReturnType::FLOAT);
+            registry.registerFunction(std::move(lgamma_fn));
+
+            // Nextafter
+            CommandDefinition nextafter_fn("NEXTAFTER", "Next representable value", "math_nextafter", "math");
+            nextafter_fn.addParameter("x", ParameterType::FLOAT, "Start value")
+                  .addParameter("y", ParameterType::FLOAT, "Direction value")
+                  .setReturnType(ReturnType::FLOAT);
+            registry.registerFunction(std::move(nextafter_fn));
+
+            // FMAX / FMIN
+            CommandDefinition fmax_fn("FMAX", "Maximum of two numbers", "math_fmax", "math");
+            fmax_fn.addParameter("a", ParameterType::FLOAT, "First number")
+                .addParameter("b", ParameterType::FLOAT, "Second number")
+                .setReturnType(ReturnType::FLOAT);
+            registry.registerFunction(std::move(fmax_fn));
+
+            CommandDefinition fmin_fn("FMIN", "Minimum of two numbers", "math_fmin", "math");
+            fmin_fn.addParameter("a", ParameterType::FLOAT, "First number")
+                .addParameter("b", ParameterType::FLOAT, "Second number")
+                .setReturnType(ReturnType::FLOAT);
+            registry.registerFunction(std::move(fmin_fn));
+
+            // FMA
+            CommandDefinition fma_fn("FMA", "Fused multiply-add", "math_fma", "math");
+            fma_fn.addParameter("x", ParameterType::FLOAT, "First operand")
+               .addParameter("y", ParameterType::FLOAT, "Second operand")
+               .addParameter("z", ParameterType::FLOAT, "Addend")
+               .setReturnType(ReturnType::FLOAT);
+            registry.registerFunction(std::move(fma_fn));
+
+                // DEG/RAD conversions
+                CommandDefinition deg_fn("DEG", "Convert radians to degrees", "math_deg", "math");
+                deg_fn.addParameter("x", ParameterType::FLOAT, "Radians")
+                    .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(deg_fn));
+
+                CommandDefinition rad_fn("RAD", "Convert degrees to radians", "math_rad", "math");
+                rad_fn.addParameter("x", ParameterType::FLOAT, "Degrees")
+                    .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(rad_fn));
+
+                // Logistic and normal distribution helpers
+                CommandDefinition sigmoid_fn("SIGMOID", "Logistic sigmoid", "math_sigmoid", "math");
+                sigmoid_fn.addParameter("x", ParameterType::FLOAT, "Input value")
+                      .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(sigmoid_fn));
+
+                CommandDefinition logit_fn("LOGIT", "Logit transform", "math_logit", "math");
+                logit_fn.addParameter("x", ParameterType::FLOAT, "Probability (0-1)")
+                    .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(logit_fn));
+
+                CommandDefinition normpdf_fn("NORMPDF", "Standard normal PDF", "math_normpdf", "math");
+                normpdf_fn.addParameter("x", ParameterType::FLOAT, "Z-score")
+                      .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(normpdf_fn));
+
+                CommandDefinition normcdf_fn("NORMCDF", "Standard normal CDF", "math_normcdf", "math");
+                normcdf_fn.addParameter("x", ParameterType::FLOAT, "Z-score")
+                      .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(normcdf_fn));
+
+                // Factorial and combinatorics
+                CommandDefinition fact_fn("FACT", "Factorial", "math_fact", "math");
+                fact_fn.addParameter("n", ParameterType::FLOAT, "Value >= 0")
+                     .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(fact_fn));
+
+                CommandDefinition comb_fn("COMB", "Combinations nCk", "math_comb", "math");
+                comb_fn.addParameter("n", ParameterType::FLOAT, "Total items")
+                     .addParameter("k", ParameterType::FLOAT, "Choose count")
+                     .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(comb_fn));
+
+                CommandDefinition perm_fn("PERM", "Permutations nPk", "math_perm", "math");
+                perm_fn.addParameter("n", ParameterType::FLOAT, "Total items")
+                     .addParameter("k", ParameterType::FLOAT, "Choose count")
+                     .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(perm_fn));
+
+                // Clamp
+                CommandDefinition clamp_fn("CLAMP", "Clamp value to [min,max]", "math_clamp", "math");
+                clamp_fn.addParameter("x", ParameterType::FLOAT, "Value")
+                    .addParameter("minv", ParameterType::FLOAT, "Minimum")
+                    .addParameter("maxv", ParameterType::FLOAT, "Maximum")
+                    .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(clamp_fn));
+
+                    // LERP
+                    CommandDefinition lerp_fn("LERP", "Linear interpolation", "math_lerp", "math");
+                    lerp_fn.addParameter("a", ParameterType::FLOAT, "Start")
+                        .addParameter("b", ParameterType::FLOAT, "End")
+                        .addParameter("t", ParameterType::FLOAT, "Blend (0-1)")
+                        .setReturnType(ReturnType::FLOAT);
+                    registry.registerFunction(std::move(lerp_fn));
+
+                // Finance helpers
+                CommandDefinition pmt_fn("PMT", "Payment for a loan", "math_pmt", "finance");
+                pmt_fn.addParameter("rate", ParameterType::FLOAT, "Interest rate per period")
+                    .addParameter("nper", ParameterType::FLOAT, "Number of periods")
+                    .addParameter("pv", ParameterType::FLOAT, "Present value")
+                    .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(pmt_fn));
+
+                CommandDefinition pv_fn("PV", "Present value of an annuity", "math_pv", "finance");
+                pv_fn.addParameter("rate", ParameterType::FLOAT, "Interest rate per period")
+                   .addParameter("nper", ParameterType::FLOAT, "Number of periods")
+                   .addParameter("pmt", ParameterType::FLOAT, "Payment per period")
+                   .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(pv_fn));
+
+                CommandDefinition fv_fn("FV", "Future value of an annuity", "math_fv", "finance");
+                fv_fn.addParameter("rate", ParameterType::FLOAT, "Interest rate per period")
+                   .addParameter("nper", ParameterType::FLOAT, "Number of periods")
+                   .addParameter("pmt", ParameterType::FLOAT, "Payment per period")
+                   .setReturnType(ReturnType::FLOAT);
+                registry.registerFunction(std::move(fv_fn));
     
     // Number Conversion Functions
     CommandDefinition bin2dec("BIN2DEC", "Convert binary string to decimal", "math_bin2dec", "math");

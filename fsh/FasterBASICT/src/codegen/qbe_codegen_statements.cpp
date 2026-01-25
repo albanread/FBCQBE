@@ -1077,14 +1077,22 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
             continue;
         }
         
-        // Determine element size
+        // Determine element size and type suffix
         size_t elementSize;
+        char typeSuffixChar = 0; // 0 for UDT/opaque
         if (isUDTArray) {
             elementSize = calculateTypeSize(udtTypeName);
             m_arrayElementTypes[arrayName] = udtTypeName;
         } else {
             // Regular BASIC types: INT=4, DOUBLE=8, STRING=8 (pointer)
             elementSize = 8; // Default to 8 for now (handles most types)
+            switch (arrayDecl.typeSuffix) {
+                case TokenType::TYPE_INT:    typeSuffixChar = '%'; break;
+                case TokenType::TYPE_FLOAT:  typeSuffixChar = '!'; break;
+                case TokenType::TYPE_DOUBLE: typeSuffixChar = '#'; break;
+                case TokenType::TYPE_STRING: typeSuffixChar = '$'; break;
+                default: typeSuffixChar = 0; break;
+            }
         }
         
         std::string dimTemp = dimTemps[0];
@@ -1137,6 +1145,8 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
         //   offset 16: upperBound (8 bytes)
         //   offset 24: elementSize (8 bytes)
         //   offset 32: dimensions (4 bytes)
+        //   offset 36: base (4 bytes)
+        //   offset 40: typeSuffix (1 byte)
         
         // Store data pointer at offset 0
         emit("    storel " + dataPtr + ", " + descPtr + "\n");
@@ -1166,6 +1176,18 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
         std::string dimCountAddr = allocTemp("l");
         emit("    " + dimCountAddr + " =l add " + descPtr + ", 32\n");
         emit("    storew 1, " + dimCountAddr + "\n"); // 1 dimension
+        m_stats.instructionsGenerated += 2;
+
+        // Store base at offset 36 (currently always 0 until OPTION BASE is threaded through)
+        std::string baseAddr = allocTemp("l");
+        emit("    " + baseAddr + " =l add " + descPtr + ", 36\n");
+        emit("    storew 0, " + baseAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+
+        // Store type suffix at offset 40
+        std::string typeAddr = allocTemp("l");
+        emit("    " + typeAddr + " =l add " + descPtr + ", 40\n");
+        emit("    storeb " + std::to_string(static_cast<int>(typeSuffixChar)) + ", " + typeAddr + "\n");
         m_stats.instructionsGenerated += 2;
         
         emitComment("Array " + arrayName + " descriptor initialized (element size: " + std::to_string(elementSize) + " bytes)");

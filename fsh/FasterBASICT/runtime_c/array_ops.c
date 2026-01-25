@@ -69,8 +69,8 @@ BasicArray* array_new(char type_suffix, int32_t dimensions, int32_t* bounds, int
         case '#': // DOUBLE
             array->element_size = sizeof(double);
             break;
-        case '$': // STRING
-            array->element_size = sizeof(BasicString*);
+        case '$': // STRING (StringDescriptor*)
+            array->element_size = sizeof(StringDescriptor*);
             break;
         default:
             // Default to DOUBLE for untyped arrays
@@ -132,10 +132,10 @@ void array_free(BasicArray* array) {
             total_elements *= (upper - lower + 1);
         }
         
-        BasicString** strings = (BasicString**)array->data;
+        StringDescriptor** strings = (StringDescriptor**)array->data;
         for (size_t i = 0; i < total_elements; i++) {
             if (strings[i]) {
-                str_release(strings[i]);
+                string_release(strings[i]);
             }
         }
     }
@@ -293,35 +293,32 @@ void array_set_double(BasicArray* array, int32_t* indices, double value) {
 // String Array Operations
 // =============================================================================
 
-BasicString* array_get_string(BasicArray* array, int32_t* indices) {
+StringDescriptor* array_get_string(BasicArray* array, int32_t* indices) {
     if (!array || array->type_suffix != '$') {
         basic_error_msg("Type mismatch in array access");
-        return str_new("");
+        return string_new_capacity(0);
     }
     
     size_t offset = calculate_offset(array, indices);
-    BasicString** data = (BasicString**)array->data;
+    StringDescriptor** data = (StringDescriptor**)array->data;
     
-    // Retain the string (caller must release)
-    return str_retain(data[offset]);
+    return string_retain(data[offset]);
 }
 
-void array_set_string(BasicArray* array, int32_t* indices, BasicString* value) {
+void array_set_string(BasicArray* array, int32_t* indices, StringDescriptor* value) {
     if (!array || array->type_suffix != '$') {
         basic_error_msg("Type mismatch in array assignment");
         return;
     }
     
     size_t offset = calculate_offset(array, indices);
-    BasicString** data = (BasicString**)array->data;
+    StringDescriptor** data = (StringDescriptor**)array->data;
     
-    // Release old string
     if (data[offset]) {
-        str_release(data[offset]);
+        string_release(data[offset]);
     }
     
-    // Retain new string
-    data[offset] = str_retain(value);
+    data[offset] = string_retain(value);
 }
 
 // =============================================================================
@@ -375,10 +372,10 @@ void array_redim(BasicArray* array, int32_t* new_bounds, bool preserve) {
                 total_elements *= (upper - lower + 1);
             }
             
-            BasicString** strings = (BasicString**)array->data;
+            StringDescriptor** strings = (StringDescriptor**)array->data;
             for (size_t i = 0; i < total_elements; i++) {
                 if (strings[i]) {
-                    str_release(strings[i]);
+                    string_release(strings[i]);
                 }
             }
         }

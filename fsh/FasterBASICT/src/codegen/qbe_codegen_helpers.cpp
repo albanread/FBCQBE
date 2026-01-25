@@ -552,12 +552,17 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             // Check builtin functions
             std::string upper = funcExpr->name;
             for (char& c : upper) c = std::toupper(c);
+
+            // Any builtin with trailing $ returns a pointer
+            if (!upper.empty() && upper.back() == '$') {
+                return VariableType::STRING;
+            }
             
             // String functions return STRING
             if (upper == "CHR$" || upper == "LEFT$" || upper == "RIGHT$" || upper == "MID$" ||
                 upper == "__STRING_SLICE" || upper == "STR$" || upper == "SPACE$" || upper == "STRING$" || 
                 upper == "UCASE$" || upper == "LCASE$" || upper == "TRIM$" || 
-                upper == "LTRIM$" || upper == "RTRIM$") {
+                upper == "LTRIM$" || upper == "RTRIM$" || upper == "JOIN$" || upper == "SPLIT$") {
                 return VariableType::STRING;
             }
             

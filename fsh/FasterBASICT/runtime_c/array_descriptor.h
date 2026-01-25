@@ -20,15 +20,17 @@ extern "C" {
 //
 // ArrayDescriptor: Tracks array metadata for bounds checking and reallocation
 //
-// Memory layout:
-//   Offset 0:  void* data           - Pointer to array data
+// Memory layout (kept in sync with QBE codegen):
+//   Offset 0:  void*   data         - Pointer to array data
 //   Offset 8:  int64_t lowerBound   - Lower index bound (typically 0 or 1)
 //   Offset 16: int64_t upperBound   - Upper index bound
 //   Offset 24: int64_t elementSize  - Size of each element in bytes
 //   Offset 32: int32_t dimensions   - Number of dimensions (1 for 1D arrays)
-//   Offset 36: int32_t _padding     - Alignment padding
+//   Offset 36: int32_t base         - OPTION BASE (0 or 1)
+//   Offset 40: char    typeSuffix   - BASIC suffix ('%', '!', '#', '$', '&' or 0 for UDT)
+//   Offset 41: char[7] _padding     - Padding / future use
 //
-// Total size: 40 bytes (aligned)
+// Total size: 48 bytes (aligned)
 //
 typedef struct {
     void*    data;          // Pointer to the array data
@@ -36,7 +38,9 @@ typedef struct {
     int64_t  upperBound;    // Upper index bound
     int64_t  elementSize;   // Size per element in bytes
     int32_t  dimensions;    // Number of dimensions
-    int32_t  _padding;      // Padding for alignment
+    int32_t  base;          // OPTION BASE (0 or 1)
+    char     typeSuffix;    // BASIC type suffix; 0 for UDT/opaque
+    char     _padding[7];   // Padding for alignment / future use
 } ArrayDescriptor;
 
 //
@@ -50,7 +54,9 @@ static inline int array_descriptor_init(
     int64_t lowerBound,
     int64_t upperBound,
     int64_t elementSize,
-    int32_t dimensions)
+    int32_t dimensions,
+    int32_t base,
+    char typeSuffix)
 {
     if (!desc || upperBound < lowerBound || elementSize <= 0) {
         return -1;
@@ -71,7 +77,9 @@ static inline int array_descriptor_init(
     desc->upperBound = upperBound;
     desc->elementSize = elementSize;
     desc->dimensions = dimensions;
-    desc->_padding = 0;
+    desc->base = base;
+    desc->typeSuffix = typeSuffix;
+    memset(desc->_padding, 0, sizeof(desc->_padding));
 
     return 0;
 }
