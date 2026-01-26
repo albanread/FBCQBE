@@ -139,8 +139,17 @@ private:
         std::string continueLabel;  // Label to jump to on CONTINUE
         std::string type;           // "FOR", "WHILE", "DO", etc.
         std::string forVariable;    // FOR loop variable name (for NEXT without variable)
+        bool isForEach;             // true for FOR EACH...IN, false for traditional FOR
+        
+        // FOR EACH specific context (when isForEach = true)
+        std::string forEachArrayDesc;  // Array descriptor variable
+        std::string forEachIndex;      // Index variable
+        VariableType forEachElemType;  // Element type
     };
     std::vector<LoopContext> m_loopStack;
+    
+    // Track variables declared in FOR EACH loops (to skip in initial declarations)
+    std::set<std::string> m_forEachDeclaredVars;
     
     // GOSUB return stack (for RETURN statements)
     std::vector<std::string> m_gosubReturnLabels;
@@ -200,6 +209,7 @@ private:
     void emitSliceAssign(const SliceAssignStatement* stmt);
     void emitIf(const IfStatement* stmt);
     void emitFor(const ForStatement* stmt);
+    void emitForIn(const ForInStatement* stmt);
     void emitNext(const NextStatement* stmt);
     void emitWhile(const WhileStatement* stmt);
     void emitWend(const WendStatement* stmt);
@@ -333,11 +343,13 @@ private:
     
     // TypeDescriptor-based type system (new)
     std::string getQBETypeD(const TypeDescriptor& typeDesc);
-    std::string getQBEMemOpD(const TypeDescriptor& typeDesc);
+    std::string getQBEMemOpD(const TypeDescriptor& typeDesc);  // For store operations
+    std::string getQBELoadOpD(const TypeDescriptor& typeDesc); // For load operations
     TypeDescriptor getVariableTypeD(const std::string& varName);
     TokenType getTokenTypeFromSuffix(char suffix);
     
     // Variable management
+    std::string sanitizeQBEVariableName(const std::string& varName);
     std::string getVariableRef(const std::string& varName);
     std::string getArrayRef(const std::string& arrayName);
     void declareVariable(const std::string& varName, VariableType type);
@@ -360,7 +372,7 @@ private:
     double evaluateConstantDouble(const Expression* expr);
     
     // Loop management
-    void pushLoop(const std::string& exitLabel, const std::string& continueLabel, const std::string& type, const std::string& forVariable = "");
+    LoopContext* pushLoop(const std::string& exitLabel, const std::string& continueLabel, const std::string& type, const std::string& forVariable = "", bool isForEach = false);
     void popLoop();
     LoopContext* getCurrentLoop();
     

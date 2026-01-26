@@ -146,13 +146,15 @@ std::string QBECodeGenerator::getQBEType(VariableType type) {
         case VariableType::INT:
             return "l";  // long (64-bit) - BASIC integers are always 64-bit
         case VariableType::FLOAT:
-            return "d";  // QBE doesn't support single precision, use double
+            return "s";  // single precision float (32-bit)
         case VariableType::DOUBLE:
-            return "d";  // double precision float
+            return "d";  // double precision float (64-bit)
         case VariableType::STRING:
             return "l";  // long (64-bit pointer)
         case VariableType::UNICODE:
             return "l";  // long (64-bit pointer)
+        case VariableType::ADAPTIVE:
+            return "l";  // ADAPTIVE should be resolved before reaching here, default to long
         default:
             return "l";  // default to long (64-bit)
     }
@@ -168,8 +170,13 @@ std::string QBECodeGenerator::getQBETypeD(const TypeDescriptor& typeDesc) {
 }
 
 std::string QBECodeGenerator::getQBEMemOpD(const TypeDescriptor& typeDesc) {
-    // Use the TypeDescriptor's built-in QBE memory operation suffix
+    // Use the TypeDescriptor's built-in QBE memory operation suffix (for stores)
     return typeDesc.toQBEMemOp();
+}
+
+std::string QBECodeGenerator::getQBELoadOpD(const TypeDescriptor& typeDesc) {
+    // Use the TypeDescriptor's built-in QBE load operation suffix (with sign extension)
+    return typeDesc.toQBELoadOp();
 }
 
 TypeDescriptor QBECodeGenerator::getVariableTypeD(const std::string& varName) {
@@ -305,9 +312,57 @@ VariableType QBECodeGenerator::getVariableType(const std::string& varName) {
 // Variable and Array References
 // =============================================================================
 
+// Sanitize variable name for QBE - replace BASIC suffixes with underscores
+std::string QBECodeGenerator::sanitizeQBEVariableName(const std::string& varName) {
+    std::string result = varName;
+    // Replace BASIC type suffix characters with safe equivalents
+    for (size_t i = 0; i < result.length(); ++i) {
+        char c = result[i];
+        if (c == '%' || c == '$' || c == '#' || c == '!' || c == '&' || c == '@' || c == '^') {
+            result[i] = '_';
+        }
+    }
+    return result;
+}
+
 std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
+    // Check if this is a FOR EACH loop variable
+    LoopContext* loop = getCurrentLoop();
+    if (loop && loop->isForEach && varName == loop->forVariable) {
+        // This is a FOR EACH variable - generate array element access
+        std::string elemAddr = allocTemp("l");
+        std::string dataPtr = allocTemp("l");
+        std::string offsetTemp = allocTemp("l");
+        
+        // Load data pointer from array descriptor
+        emit("    " + dataPtr + " =l loadl " + loop->forEachArrayDesc + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Calculate offset: index * 8
+        emit("    " + offsetTemp + " =l mul " + loop->forEachIndex + ", 8\n");
+        m_stats.instructionsGenerated++;
+        
+        // Calculate element address
+        emit("    " + elemAddr + " =l add " + dataPtr + ", " + offsetTemp + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Load and return element value based on type
+        std::string elemVal = allocTemp(getQBEType(loop->forEachElemType));
+        if (loop->forEachElemType == VariableType::STRING || 
+            loop->forEachElemType == VariableType::INT) {
+            emit("    " + elemVal + " =l loadl " + elemAddr + "\n");
+        } else {
+            emit("    " + elemVal + " =d loadd " + elemAddr + "\n");
+        }
+        m_stats.instructionsGenerated++;
+        return elemVal;
+    }
+    
+    // Sanitize the variable name first
+    std::string safeName = sanitizeQBEVariableName(varName);
+    
     // FOR loop variables use plain names without suffix
-    std::string plainName = stripTypeSuffix(varName);
+    std::string plainName = stripTypeSuffix(safeName);
     if (m_forLoopVariables.count(plainName) > 0) {
         return "%var_" + plainName;
     }
@@ -316,28 +371,28 @@ std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
     if (m_inFunction && m_cfg) {
         // Check if varName is a parameter of the current function
         for (const auto& param : m_cfg->parameters) {
-            if (param == varName) {
+            if (param == varName || param == safeName) {
                 // This is a parameter - use it directly without var_ prefix
-                return "%" + varName;
+                return "%" + safeName;
             }
         }
         
         // Check if this is a local variable
-        if (m_localVariables.count(varName) > 0) {
+        if (m_localVariables.count(varName) > 0 || m_localVariables.count(safeName) > 0) {
             // Local variable - use %local_ prefix
-            return "%local_" + varName;
+            return "%local_" + safeName;
         }
         
         // Check if this is explicitly shared (or default to shared if not local)
         // In functions, variables are local unless declared SHARED
-        if (m_sharedVariables.count(varName) > 0) {
+        if (m_sharedVariables.count(varName) > 0 || m_sharedVariables.count(safeName) > 0) {
             // Shared (global) variable - use %var_ prefix
-            return "%var_" + varName;
+            return "%var_" + safeName;
         }
         
         // Default: if not local and not shared, treat as shared for backward compatibility
         // (In proper BASIC, undeclared vars in functions should error, but we're lenient)
-        return "%var_" + varName;
+        return "%var_" + safeName;
     }
     
     // Outside functions, all variables are global
@@ -351,7 +406,7 @@ std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
     //   Z   -> "Z_FLOAT"   -> %var_Z_FLOAT (default SINGLE type)
     //
     // This makes the QBE IL self-documenting with explicit types in variable names
-    return "%var_" + varName;
+    return "%var_" + safeName;
 }
 
 std::string QBECodeGenerator::stripTypeSuffix(const std::string& varName) {
@@ -483,11 +538,13 @@ double QBECodeGenerator::evaluateConstantDouble(const Expression* expr) {
 // Loop Context Management
 // =============================================================================
 
-void QBECodeGenerator::pushLoop(const std::string& exitLabel, 
+QBECodeGenerator::LoopContext* QBECodeGenerator::pushLoop(const std::string& exitLabel,
                                const std::string& continueLabel,
                                const std::string& type,
-                               const std::string& forVariable) {
-    m_loopStack.push_back({exitLabel, continueLabel, type, forVariable});
+                               const std::string& forVariable,
+                               bool isForEach) {
+    m_loopStack.push_back({exitLabel, continueLabel, type, forVariable, isForEach});
+    return &m_loopStack.back();
 }
 
 void QBECodeGenerator::popLoop() {
@@ -713,9 +770,41 @@ std::string QBECodeGenerator::promoteToType(const std::string& value,
         return emitIntToDouble(value);
     }
     
+    // Promote INT to FLOAT (w or l -> s)
+    if (fromType == VariableType::INT && toType == VariableType::FLOAT) {
+        std::string temp = allocTemp("s");
+        emit("    " + temp + " =s sltof " + value + "\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    // Convert DOUBLE to FLOAT (d -> s)
+    if (fromType == VariableType::DOUBLE && toType == VariableType::FLOAT) {
+        std::string temp = allocTemp("s");
+        emit("    " + temp + " =s truncd " + value + "\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    // Convert FLOAT to DOUBLE (s -> d)
+    if (fromType == VariableType::FLOAT && toType == VariableType::DOUBLE) {
+        std::string temp = allocTemp("d");
+        emit("    " + temp + " =d exts " + value + "\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
     // Demote DOUBLE to INT (d -> w or l)
     if (fromType == VariableType::DOUBLE && toType == VariableType::INT) {
         return emitDoubleToInt(value);
+    }
+    
+    // Demote FLOAT to INT (s -> w or l)
+    if (fromType == VariableType::FLOAT && toType == VariableType::INT) {
+        std::string temp = allocTemp("l");
+        emit("    " + temp + " =l stosi " + value + "\n");
+        m_stats.instructionsGenerated++;
+        return temp;
     }
     
     // String conversions

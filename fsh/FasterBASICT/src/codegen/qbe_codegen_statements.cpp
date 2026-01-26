@@ -16,6 +16,22 @@
 namespace FasterBASIC {
 
 // =============================================================================
+// Helper Functions
+// =============================================================================
+
+// Sanitize BASIC variable names for QBE - replace type suffix characters with underscores
+static std::string sanitizeForQBE(const std::string& name) {
+    std::string result = name;
+    for (size_t i = 0; i < result.length(); ++i) {
+        char c = result[i];
+        if (c == '%' || c == '$' || c == '#' || c == '!' || c == '&' || c == '@' || c == '^') {
+            result[i] = '_';
+        }
+    }
+    return result;
+}
+
+// =============================================================================
 // Statement Dispatcher
 // =============================================================================
 
@@ -52,6 +68,10 @@ void QBECodeGenerator::emitStatement(const Statement* stmt) {
             
         case ASTNodeType::STMT_FOR:
             emitFor(static_cast<const ForStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_FOR_IN:
+            emitForIn(static_cast<const ForInStatement*>(stmt));
             break;
             
         case ASTNodeType::STMT_NEXT:
@@ -505,7 +525,65 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
             }
         }
         
-        // Get the correct QBE memory operation for the type
+        // Convert value type to match array element type
+        // Work with QBE types directly for better control over conversions
+        std::string valueQBE = getQBEType(inferExpressionType(stmt->value.get()));
+        std::string elemQBE = getQBETypeD(elementTypeDesc);
+        
+        // Convert if types don't match
+        if (valueQBE != elemQBE) {
+            if (valueQBE == "d" && elemQBE == "s") {
+                // Double to single (float) conversion - truncate precision
+                std::string convertedTemp = allocTemp("s");
+                emit("    " + convertedTemp + " =s truncd " + valueTemp + "\n");
+                m_stats.instructionsGenerated++;
+                valueTemp = convertedTemp;
+            } else if (valueQBE == "d" && elemQBE == "w") {
+                // Double to integer word conversion
+                std::string convertedTemp = allocTemp("w");
+                emit("    " + convertedTemp + " =w dtosi " + valueTemp + "\n");
+                m_stats.instructionsGenerated++;
+                valueTemp = convertedTemp;
+            } else if (valueQBE == "d" && elemQBE == "l") {
+                // Double to long conversion
+                std::string convertedTemp = allocTemp("l");
+                emit("    " + convertedTemp + " =l dtosi " + valueTemp + "\n");
+                m_stats.instructionsGenerated++;
+                valueTemp = convertedTemp;
+            } else if ((valueQBE == "w" || valueQBE == "l") && elemQBE == "d") {
+                // Integer to double conversion
+                std::string convertedTemp = allocTemp("d");
+                emit("    " + convertedTemp + " =d sltof " + valueTemp + "\n");
+                m_stats.instructionsGenerated++;
+                valueTemp = convertedTemp;
+            } else if ((valueQBE == "w" || valueQBE == "l") && elemQBE == "s") {
+                // Integer to single (float) conversion
+                std::string convertedTemp = allocTemp("s");
+                emit("    " + convertedTemp + " =s sltof " + valueTemp + "\n");
+                m_stats.instructionsGenerated++;
+                valueTemp = convertedTemp;
+            } else if (valueQBE == "s" && elemQBE == "d") {
+                // Single to double conversion
+                std::string convertedTemp = allocTemp("d");
+                emit("    " + convertedTemp + " =d exts " + valueTemp + "\n");
+                m_stats.instructionsGenerated++;
+                valueTemp = convertedTemp;
+            } else if (valueQBE == "w" && elemQBE == "l") {
+                // Word to long extension
+                std::string convertedTemp = allocTemp("l");
+                emit("    " + convertedTemp + " =l extsw " + valueTemp + "\n");
+                m_stats.instructionsGenerated++;
+                valueTemp = convertedTemp;
+            } else if (valueQBE == "l" && elemQBE == "w") {
+                // Long to word truncation
+                std::string convertedTemp = allocTemp("w");
+                emit("    " + convertedTemp + " =w copy " + valueTemp + "\n");
+                m_stats.instructionsGenerated++;
+                valueTemp = convertedTemp;
+            }
+        }
+        
+        // Get the correct memory operation for the element type
         std::string memOp = getQBEMemOpD(elementTypeDesc);
         
         // Store value at element pointer with correct operation
@@ -589,9 +667,20 @@ void QBECodeGenerator::emitIf(const IfStatement* stmt) {
 void QBECodeGenerator::emitFor(const ForStatement* stmt) {
     if (!stmt || !stmt->start || !stmt->end) return;
     
-    // FOR loop variable is a regular INTEGER variable (32-bit int 'w')
+    // FOR loop variable is a regular 64-bit INTEGER ('l')
     // Variable name has no suffix - it's just a plain name
     std::string varRef = getVariableRef(stmt->variable);
+
+    // Find the user-visible variable (with type suffix) to mirror the counter into
+    std::string userVarRef = varRef;
+    if (m_symbols) {
+        for (const auto& entry : m_symbols->variables) {
+            if (stripTypeSuffix(entry.first) == stmt->variable) {
+                userVarRef = "%var_" + sanitizeForQBE(entry.first);
+                break;
+            }
+        }
+    }
     
     // Set up loop context for EXIT FOR to work
     if (m_currentBlock && m_cfg) {
@@ -612,60 +701,122 @@ void QBECodeGenerator::emitFor(const ForStatement* stmt) {
     // Initialize loop variable
     std::string startTemp = emitExpression(stmt->start.get());
     
-    // Convert start value to integer
+    // Convert start value to 64-bit integer
     VariableType startType = inferExpressionType(stmt->start.get());
     if (startType == VariableType::DOUBLE || startType == VariableType::FLOAT) {
-        std::string intTemp = allocTemp("w");
-        emit("    " + intTemp + " =w dtosi " + startTemp + "\n");
-        m_stats.instructionsGenerated++;
-        startTemp = intTemp;
+        startTemp = emitDoubleToInt(startTemp);
     }
-    
-    emit("    " + varRef + " =w copy " + startTemp + "\n");
+
+    emit("    " + varRef + " =l copy " + startTemp + "\n");
     m_stats.instructionsGenerated++;
+
+    // Keep user-declared variable in sync for BASIC visibility
+    if (userVarRef != varRef) {
+        emit("    " + userVarRef + " =l copy " + varRef + "\n");
+        m_stats.instructionsGenerated++;
+    }
     
     // Emit step value (default 1)
     std::string stepTemp;
     if (stmt->step) {
         stepTemp = emitExpression(stmt->step.get());
         
-        // Convert step value to integer
+        // Convert step value to 64-bit integer
         VariableType stepType = inferExpressionType(stmt->step.get());
         if (stepType == VariableType::DOUBLE || stepType == VariableType::FLOAT) {
-            std::string intTemp = allocTemp("w");
-            emit("    " + intTemp + " =w dtosi " + stepTemp + "\n");
-            m_stats.instructionsGenerated++;
-            stepTemp = intTemp;
+            stepTemp = emitDoubleToInt(stepTemp);
         }
     } else {
-        stepTemp = allocTemp("w");
-        emit("    " + stepTemp + " =w copy 1\n");
+        stepTemp = allocTemp("l");
+        emit("    " + stepTemp + " =l copy 1\n");
         m_stats.instructionsGenerated++;
     }
     
     // Store step for NEXT statement
-    std::string stepVar = "%step_" + stmt->variable;
-    emit("    " + stepVar + " =w copy " + stepTemp + "\n");
+    std::string stepVar = "%step_" + sanitizeForQBE(stmt->variable);
+    emit("    " + stepVar + " =l copy " + stepTemp + "\n");
     m_stats.instructionsGenerated++;
     
     // Emit end value (evaluate once and store)
     std::string endTemp = emitExpression(stmt->end.get());
     
-    // Convert end value to integer
+    // Convert end value to 64-bit integer
     VariableType endType = inferExpressionType(stmt->end.get());
     if (endType == VariableType::DOUBLE || endType == VariableType::FLOAT) {
-        std::string intTemp = allocTemp("w");
-        emit("    " + intTemp + " =w dtosi " + endTemp + "\n");
-        m_stats.instructionsGenerated++;
-        endTemp = intTemp;
+        endTemp = emitDoubleToInt(endTemp);
     }
     
-    std::string endVar = "%end_" + stmt->variable;
-    emit("    " + endVar + " =w copy " + endTemp + "\n");
+    std::string endVar = "%end_" + sanitizeForQBE(stmt->variable);
+    emit("    " + endVar + " =l copy " + endTemp + "\n");
     m_stats.instructionsGenerated++;
     
     // Note: Loop condition check happens in the FOR check block (separate block)
     // This init block just sets up the loop variables and falls through to check block
+}
+
+// =============================================================================
+// FOR EACH...IN Statement (Array Iteration Loop Header)
+// =============================================================================
+
+void QBECodeGenerator::emitForIn(const ForInStatement* stmt) {
+    if (!stmt || !stmt->array) return;
+    
+    emitComment("FOR EACH...IN loop initialization");
+    
+    // Evaluate the array expression to get array descriptor pointer
+    std::string arrayTemp = emitExpression(stmt->array.get());
+    
+    // Use the element type that was inferred during semantic analysis (cast from int)
+    VariableType elemType = static_cast<VariableType>(stmt->inferredType);
+    std::string qbeType = getQBEType(elemType);
+    
+    // Declare the loop variable with the inferred type (ADAPTIVE type resolved here)
+    std::string loopVarName = stmt->variable;
+    // Note: We do NOT declare the FOR EACH variable as a real variable
+    // It's just an accessor for the current array element
+    
+    // Create loop index variable (hidden from user)
+    std::string indexVar = "%foreach_idx_" + sanitizeForQBE(stmt->variable);
+    emit("    " + indexVar + " =l copy 0\n");
+    m_stats.instructionsGenerated++;
+    
+    // Get array size from descriptor (element_count at offset 8)
+    std::string sizePtr = allocTemp("l");
+    std::string arraySize = allocTemp("l");
+    emit("    " + sizePtr + " =l add " + arrayTemp + ", 8\n");
+    emit("    " + arraySize + " =l loadl " + sizePtr + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // Store array descriptor and size for NEXT to use
+    std::string arrayVar = "%foreach_arr_" + sanitizeForQBE(stmt->variable);
+    std::string sizeVar = "%foreach_size_" + sanitizeForQBE(stmt->variable);
+    emit("    " + arrayVar + " =l copy " + arrayTemp + "\n");
+    emit("    " + sizeVar + " =l copy " + arraySize + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // Set up loop context for EXIT FOR
+    if (m_currentBlock && m_cfg) {
+        int exitBlockId = -1;
+        for (int i = m_currentBlock->id + 1; i < m_cfg->getBlockCount(); i++) {
+            const BasicBlock* candidateBlock = m_cfg->getBlock(i);
+            if (candidateBlock && candidateBlock->label.find("After FOR") != std::string::npos) {
+                exitBlockId = i;
+                break;
+            }
+        }
+        if (exitBlockId >= 0) {
+            std::string exitLabel = getBlockLabel(exitBlockId);
+            auto* loop = pushLoop(exitLabel, "", "FOR", stmt->variable, true);
+            // Store FOR EACH context
+            if (loop) {
+                loop->forEachArrayDesc = arrayVar;
+                loop->forEachIndex = indexVar;
+                loop->forEachElemType = elemType;
+            }
+        }
+    }
+    
+    emitComment("FOR EACH...IN loop body starts - variable is virtual, accessed via array");
 }
 
 // =============================================================================
@@ -689,18 +840,64 @@ void QBECodeGenerator::emitNext(const NextStatement* stmt) {
         }
     }
     
-    std::string varRef = getVariableRef(varName);
-    std::string stepVar = "%step_" + varName;
+    // For FOR EACH loops, find the variable with correct type suffix
+    auto* loop = getCurrentLoop();
+    bool isForEachLoop = (loop && loop->isForEach);
     
-    // Increment loop variable: var = var + step (32-bit integer arithmetic)
-    std::string newValueTemp = allocTemp("w");
-    emit("    " + newValueTemp + " =w add " + varRef + ", " + stepVar + "\n");
-    emit("    " + varRef + " =w copy " + newValueTemp + "\n");
-    m_stats.instructionsGenerated += 2;
+    if (isForEachLoop && m_symbols) {
+        // Look for variable with matching base name
+        for (const auto& entry : m_symbols->variables) {
+            if (stripTypeSuffix(entry.first) == varName) {
+                varName = entry.first;
+                break;
+            }
+        }
+    }
+
     
-    // The condition check happens at the FOR header (loop header block)
-    // NEXT just increments and jumps back (CFG provides the back-edge)
-    emitComment("NEXT: increment and jump back to FOR header");
+    if (isForEachLoop) {
+        // Handle FOR EACH...IN loop iteration - just increment index
+        std::string foreachIndexVar = "%foreach_idx_" + sanitizeForQBE(varName);
+        
+        emitComment("NEXT: increment FOR EACH index");
+        
+        // Increment index (the variable is accessed on-demand via getVariableRef)
+        std::string indexTemp = allocTemp("l");
+        emit("    " + indexTemp + " =l add " + foreachIndexVar + ", 1\n");
+        emit("    " + foreachIndexVar + " =l copy " + indexTemp + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        emitComment("NEXT: jump back to FOR EACH header");
+    } else {
+        // Handle traditional FOR loop
+        std::string varRef = getVariableRef(varName);
+        std::string stepVar = "%step_" + sanitizeForQBE(varName);
+
+        // Find the user-visible variable (with type suffix) to mirror the counter into
+        std::string userVarRef = varRef;
+        if (m_symbols) {
+            for (const auto& entry : m_symbols->variables) {
+                if (stripTypeSuffix(entry.first) == varName) {
+                    userVarRef = "%var_" + sanitizeForQBE(entry.first);
+                    break;
+                }
+            }
+        }
+        
+        // Increment loop variable: var = var + step (64-bit integer arithmetic)
+        std::string newValueTemp = allocTemp("l");
+        emit("    " + newValueTemp + " =l add " + varRef + ", " + stepVar + "\n");
+        emit("    " + varRef + " =l copy " + newValueTemp + "\n");
+        m_stats.instructionsGenerated += 2;
+
+        // Keep user-declared variable in sync for BASIC visibility
+        if (userVarRef != varRef) {
+            emit("    " + userVarRef + " =l copy " + varRef + "\n");
+            m_stats.instructionsGenerated++;
+        }
+        
+        emitComment("NEXT: increment and jump back to FOR header");
+    }
     
     // Pop loop context when we're done with the loop body
     popLoop();

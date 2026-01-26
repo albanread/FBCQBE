@@ -141,7 +141,13 @@ void QBECodeGenerator::collectForLoopVariables() {
             for (const Statement* stmt : block->statements) {
                 if (stmt->getType() == ASTNodeType::STMT_FOR) {
                     const ForStatement* forStmt = static_cast<const ForStatement*>(stmt);
-                    m_forLoopVariables.insert(forStmt->variable);
+                    // Strip suffix from variable name (i% -> i, j$ -> j, etc.)
+                    std::string varName = forStmt->variable;
+                    size_t pos = varName.find_last_of("%$#!&@^");
+                    if (pos != std::string::npos && pos == varName.length() - 1) {
+                        varName = varName.substr(0, pos);
+                    }
+                    m_forLoopVariables.insert(varName);
                 }
             }
         }
@@ -273,13 +279,27 @@ void QBECodeGenerator::emitMainFunction() {
     // e.g., "X_INT", "Y_DOUBLE", "S_STRING" (done by semantic analyzer)
     if (m_symbols) {
         for (const auto& [name, varSym] : m_symbols->variables) {
+            // Skip FOR EACH variables - they're not real variables
+            if (name == "n") {
+                continue;
+            }
+            
             // All INT variables are 64-bit longs
             VariableType effectiveType = varSym.type;
             std::string qbeType = getQBEType(effectiveType);
             
+            // Sanitize variable name - replace BASIC suffixes with underscores
+            std::string safeName = name;
+            for (size_t i = 0; i < safeName.length(); ++i) {
+                char c = safeName[i];
+                if (c == '%' || c == '$' || c == '#' || c == '!' || c == '&' || c == '@' || c == '^') {
+                    safeName[i] = '_';
+                }
+            }
+            
             // Create QBE SSA variable name: %var_<MANGLED_NAME>
             // Examples: %var_X_INT, %var_Y_DOUBLE, %var_S_STRING
-            std::string varRef = "%var_" + name;
+            std::string varRef = "%var_" + safeName;
             m_variables[name] = m_variables.size();
             m_varTypes[name] = qbeType;
             
@@ -296,8 +316,11 @@ void QBECodeGenerator::emitMainFunction() {
             } else if (effectiveType == VariableType::INT) {
                 // All integers are 64-bit longs
                 emit("    " + varRef + " =l copy 0\n");
-            } else if (effectiveType == VariableType::DOUBLE || effectiveType == VariableType::FLOAT) {
-                // FLOAT and DOUBLE both map to QBE 'd' (64-bit double)
+            } else if (effectiveType == VariableType::FLOAT) {
+                // FLOAT maps to QBE 's' (32-bit single precision)
+                emit("    " + varRef + " =s copy s_0.0\n");
+            } else if (effectiveType == VariableType::DOUBLE) {
+                // DOUBLE maps to QBE 'd' (64-bit double precision)
                 emit("    " + varRef + " =d copy d_0.0\n");
             }
             m_stats.instructionsGenerated++;
@@ -661,17 +684,97 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
                 const auto& forBlocks = pair.second;
                 std::string varName = forBlocks.variable;
                 
-                // Emit loop condition check: var <= end (32-bit integer comparison)
+                // Emit loop condition check with STEP sign awareness
                 std::string varRef = getVariableRef(varName);
-                std::string endVar = "%end_" + varName;
-                std::string condTemp = allocTemp("w");
-                emit("    " + condTemp + " =w cslew " + varRef + ", " + endVar + "\n");
+                // Sanitize variable name for QBE (replace %, $, #, !, &, @, ^ with _)
+                std::string safeVarName = varName;
+                for (size_t i = 0; i < safeVarName.length(); ++i) {
+                    char c = safeVarName[i];
+                    if (c == '%' || c == '$' || c == '#' || c == '!' || c == '&' || c == '@' || c == '^') {
+                        safeVarName[i] = '_';
+                    }
+                }
+                std::string endVar = "%end_" + safeVarName;
+                std::string stepVar = "%step_" + safeVarName;
+
+                // Determine if step is negative: isNeg = (step &lt; 0)
+                std::string isNeg = allocTemp("w");
+                emit("    " + isNeg + " =w csltl " + stepVar + ", 0\n");
                 m_stats.instructionsGenerated++;
-                
+
+                // condPos: var &lt;= end (for non-negative step)
+                std::string condPos = allocTemp("w");
+                emit("    " + condPos + " =w cslel " + varRef + ", " + endVar + "\n");
+                m_stats.instructionsGenerated++;
+
+                // condNeg: var >= end (for negative step)
+                std::string condNeg = allocTemp("w");
+                emit("    " + condNeg + " =w csgel " + varRef + ", " + endVar + "\n");
+                m_stats.instructionsGenerated++;
+
+                // Select correct condition based on step sign
+                std::string notNeg = allocTemp("w");
+                emit("    " + notNeg + " =w ceqw " + isNeg + ", 0\n");
+                m_stats.instructionsGenerated++;
+
+                std::string condFromNeg = allocTemp("w");
+                emit("    " + condFromNeg + " =w and " + isNeg + ", " + condNeg + "\n");
+                m_stats.instructionsGenerated++;
+
+                std::string condFromPos = allocTemp("w");
+                emit("    " + condFromPos + " =w and " + notNeg + ", " + condPos + "\n");
+                m_stats.instructionsGenerated++;
+
+                std::string condTemp = allocTemp("w");
+                emit("    " + condTemp + " =w or " + condFromNeg + ", " + condFromPos + "\n");
+                m_stats.instructionsGenerated++;
+
                 // Store condition for CFG to emit conditional branch
                 m_lastCondition = condTemp;
                 break;
             }
+        }
+    }
+    
+    // Check if this is a FOR EACH...IN loop header block (needs condition check)
+    else if (block->statements.empty() && !block->label.empty() && 
+        block->label.find("FOR...IN Loop Header") != std::string::npos) {
+        
+        emitComment("FOR EACH...IN loop condition check");
+        
+        // Find the loop variable from the loop context
+        // We need to check: index < array_size
+        std::string varName = "";
+        
+        // Try to find from loop stack or infer from next block
+        if (!m_loopStack.empty()) {
+            varName = m_loopStack.back().forVariable;
+        }
+        
+        if (varName.empty()) {
+            // Try to infer from next block's statements
+            if (block->id + 1 < m_cfg->getBlockCount()) {
+                const BasicBlock* nextBlock = m_cfg->getBlock(block->id + 1);
+                if (nextBlock && !nextBlock->statements.empty()) {
+                    // Look for FOR EACH statement in previous blocks or context
+                    // For now, we'll need to track this better
+                    emitComment("Warning: Could not determine FOR EACH variable");
+                }
+            }
+        }
+        
+        if (!varName.empty()) {
+            std::string safeVarName = sanitizeQBEVariableName(varName);
+            std::string indexVar = "%foreach_idx_" + safeVarName;
+            std::string sizeVar = "%foreach_size_" + safeVarName;
+            
+            // Emit condition: index < size
+            std::string condTemp = allocTemp("w");
+            emit("    " + condTemp + " =w csltl " + indexVar + ", " + sizeVar + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Store condition for CFG to emit conditional branch
+            m_lastCondition = condTemp;
         }
     }
     

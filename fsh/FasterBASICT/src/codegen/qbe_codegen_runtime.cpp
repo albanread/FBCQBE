@@ -23,14 +23,24 @@ void QBECodeGenerator::emitPrintValue(const std::string& value, VariableType typ
         // String is now a StringDescriptor pointer (l type)
         emit("    call $basic_print_string_desc(l " + value + ")\n");
     } else if (type == VariableType::INT) {
-        emit("    call $basic_print_int(l " + value + ")\n");  // INT is now 64-bit long
+        // INT could be a word (w) from byte/short loads - extend to long if needed
+        // Check if the value is already a long or needs extension
+        // For simplicity, always extend words to longs for print
+        std::string longValue = allocTemp("l");
+        emit("    " + longValue + " =l extsw " + value + "\n");
+        emit("    call $basic_print_int(l " + longValue + ")\n");
+        m_stats.instructionsGenerated++;
     } else if (type == VariableType::DOUBLE) {
         emit("    call $basic_print_double(d " + value + ")\n");
     } else if (type == VariableType::FLOAT) {
-        emit("    call $basic_print_float(d " + value + ")\n");
+        // FLOAT (single) passes directly as float
+        emit("    call $basic_print_float(s " + value + ")\n");
     } else {
-        // Default to int
-        emit("    call $basic_print_int(l " + value + ")\n");  // INT is now 64-bit long
+        // Default to int - extend word to long
+        std::string longValue = allocTemp("l");
+        emit("    " + longValue + " =l extsw " + value + "\n");
+        emit("    call $basic_print_int(l " + longValue + ")\n");
+        m_stats.instructionsGenerated++;
     }
     m_stats.instructionsGenerated++;
 }

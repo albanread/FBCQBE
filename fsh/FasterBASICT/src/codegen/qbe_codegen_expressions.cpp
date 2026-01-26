@@ -1296,13 +1296,13 @@ std::string QBECodeGenerator::emitArrayAccessExpr(const ArrayAccessExpression* e
     
     std::string valueTemp;
     std::string qbeType = getQBETypeD(elementTypeDesc);
-    std::string memOp = getQBEMemOpD(elementTypeDesc);
+    std::string loadOp = getQBELoadOpD(elementTypeDesc);
     
     // Allocate temporary with correct QBE type
     valueTemp = allocTemp(qbeType);
     
     // Load with correct operation (handles sign/zero extension for byte/short)
-    emit("    " + valueTemp + " =" + qbeType + " load" + memOp + " " + elementPtr + "\n");
+    emit("    " + valueTemp + " =" + qbeType + " load" + loadOp + " " + elementPtr + "\n");
     m_stats.instructionsGenerated++;
     
     return valueTemp;

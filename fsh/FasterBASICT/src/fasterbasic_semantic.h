@@ -18,6 +18,7 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <set>
 #include <unordered_set>
 #include <stack>
 #include <memory>
@@ -37,6 +38,7 @@ enum class VariableType {
     UNICODE,    // Unicode string ($) - codepoint array (OPTION UNICODE mode)
     VOID,       // No return value (for SUB)
     USER_DEFINED, // User-defined type (TYPE...END TYPE)
+    ADAPTIVE,   // Adaptive type - inferred from context (FOR EACH loop variables)
     UNKNOWN     // Not yet determined
 };
 
@@ -207,6 +209,31 @@ struct TypeDescriptor {
     
     // Map to QBE memory operation suffix
     std::string toQBEMemOp() const {
+        switch (baseType) {
+            case BaseType::BYTE:
+            case BaseType::UBYTE:
+                return "b";   // Byte (for store)
+            case BaseType::SHORT:
+            case BaseType::USHORT:
+                return "h";   // Halfword (for store)
+            case BaseType::INTEGER:
+            case BaseType::UINTEGER:
+                return "w";   // Word
+            case BaseType::LONG:
+            case BaseType::ULONG:
+            case BaseType::LOOP_INDEX:
+                return "l";   // Long
+            case BaseType::SINGLE:
+                return "s";   // Single
+            case BaseType::DOUBLE:
+                return "d";   // Double
+            default:
+                return "l";   // Default
+        }
+    }
+    
+    // Map to QBE load operation suffix (handles sign/zero extension)
+    std::string toQBELoadOp() const {
         switch (baseType) {
             case BaseType::BYTE:
                 return "sb";  // Sign-extend byte
@@ -892,6 +919,7 @@ private:
     void collectDefStatements(Program& program);
     void collectFunctionAndSubStatements(Program& program);
     void collectDataStatements(Program& program);
+    void collectForEachVariables(Program& program);
     void collectConstantStatements(Program& program);
     void collectTypeDeclarations(Program& program);  // Collect TYPE/END TYPE declarations
     void collectTimerHandlers(Program& program);  // Collect AFTER/EVERY handlers in pass1
@@ -924,7 +952,7 @@ private:
     void validateOnGosubStatement(const OnGosubStatement& stmt);
     void validateIfStatement(const IfStatement& stmt);
     void validateForStatement(const ForStatement& stmt);
-    void validateForInStatement(const ForInStatement& stmt);
+    void validateForInStatement(ForInStatement& stmt);
     void validateNextStatement(const NextStatement& stmt);
     void validateWhileStatement(const WhileStatement& stmt);
     void validateWendStatement(const WendStatement& stmt);
@@ -1069,6 +1097,9 @@ private:
     SymbolTable m_symbolTable;
     std::vector<SemanticError> m_errors;
     std::vector<SemanticWarning> m_warnings;
+    
+    // Track FOR EACH variables (they should NOT be in symbol table)
+    std::set<std::string> m_forEachVariables;
     ConstantsManager m_constantsManager;
 
     // Configuration

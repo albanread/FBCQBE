@@ -450,6 +450,7 @@ void basic_print_int(int64_t value) {
 
 // Print float (takes double for QBE compatibility)
 void basic_print_float(double value) {
+    fprintf(stderr, "DEBUG: basic_print_float received value=%f (as hex: %llx)\n", value, *(unsigned long long*)&value);
     printf("%f", value);
 }
 
@@ -622,4 +623,9 @@ int basic_string_compare(const char* s1, const char* s2) {
 
 int basic_string_length(const char* str) {
     return str ? (int)strlen(str) : 0;
+}
+
+void basic_array_bounds_error(int64_t idx, int64_t lower, int64_t upper) {
+    fprintf(stderr, "Array bounds error: index %lld not in [%lld..%lld]\n", idx, lower, upper);
+    exit(1);
 }
