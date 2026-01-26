@@ -1,0 +1,4 @@
+DIM x
+x = 10
+PRINT x
+END

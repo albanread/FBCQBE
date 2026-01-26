@@ -167,12 +167,15 @@ main(int ac, char *av[])
 	char *runtime_path = NULL;
 	char temp_asm[256] = {0};
 	char cmd[2048];
-	int c, compile_only = 0, is_basic = 0;
+	int c, compile_only = 0, is_basic = 0, il_only = 0;
 
 	T = Deftgt;
 	outf = stdout;
-	while ((c = getopt(ac, av, "hcd:o:t:")) != -1)
+	while ((c = getopt(ac, av, "hicd:o:t:")) != -1)
 		switch (c) {
+		case 'i':
+			il_only = 1;
+			break;
 		case 'c':
 			compile_only = 1;
 			break;
@@ -209,6 +212,7 @@ main(int ac, char *av[])
 			fprintf(hf, "%s [OPTIONS] {file.ssa, file.bas, -}\n", av[0]);
 			fprintf(hf, "\t%-11s prints this help\n", "-h");
 			fprintf(hf, "\t%-11s output to file\n", "-o file");
+			fprintf(hf, "\t%-11s output IL only (stop before assembly)\n", "-i");
 			fprintf(hf, "\t%-11s compile only (stop at assembly)\n", "-c");
 			fprintf(hf, "\t%-11s generate for a target among:\n", "-t <target>");
 			fprintf(hf, "\t%-11s ", "");
@@ -270,11 +274,21 @@ main(int ac, char *av[])
 				}
 			}
 		}
-		parse(inf, f, dbgfile, data, func);
-		fclose(inf);
+		if (il_only) {
+			/* Just output the IL without processing through QBE */
+			char buf[4096];
+			size_t n;
+			while ((n = fread(buf, 1, sizeof(buf), inf)) > 0) {
+				fwrite(buf, 1, n, outf);
+			}
+			fclose(inf);
+		} else {
+			parse(inf, f, dbgfile, data, func);
+			fclose(inf);
+		}
 	} while (++optind < ac);
 
-	if (!dbg)
+	if (!dbg && !il_only)
 		T.emitfin(outf);
 
 	/* If we created a temp assembly file, now assemble and link */

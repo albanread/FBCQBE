@@ -55,12 +55,46 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
         
         if (!ast || parser.hasErrors()) {
             std::cerr << "Parse errors in: " << basic_path << "\n";
+            const auto& errors = parser.getErrors();
+            for (const auto& error : errors) {
+                std::cerr << "  Line " << error.location.line << ": " << error.what() << "\n";
+            }
             return nullptr;
         }
         
         // Semantic analysis
         const auto& compilerOptions = parser.getOptions();
         semantic.analyze(*ast, compilerOptions);
+        
+        if (semantic.hasErrors()) {
+            std::cerr << "Semantic errors in: " << basic_path << "\n";
+            const auto& errors = semantic.getErrors();
+            for (const auto& error : errors) {
+                std::cerr << "  " << error.toString() << "\n";
+            }
+            return nullptr;
+        }
+        
+        // Debug: Dump symbol table if requested
+        if (getenv("TRACE_SYMBOLS")) {
+            std::cerr << "\n=== Symbol Table Dump ===\n";
+            const auto& symbols = semantic.getSymbolTable();
+            
+            std::cerr << "\nArrays:\n";
+            for (const auto& [name, arr] : symbols.arrays) {
+                std::cerr << "  " << name << ": elementTypeDesc=" << arr.elementTypeDesc.toString()
+                          << " legacyType=" << (int)arr.type 
+                          << " dimensions=" << arr.dimensions.size() << "\n";
+            }
+            
+            std::cerr << "\nVariables:\n";
+            for (const auto& [name, var] : symbols.variables) {
+                std::cerr << "  " << name << ": typeDesc=" << var.typeDesc.toString()
+                          << " legacyType=" << (int)var.type << "\n";
+            }
+            
+            std::cerr << "=== End Symbol Table ===\n\n";
+        }
         
         // Build CFG - use CFGBuilder
         CFGBuilder cfgBuilder;
@@ -74,6 +108,13 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
         QBECodeGenerator qbeGen;
         qbeGen.setDataValues(dataResult);
         std::string qbeIL = qbeGen.generate(*cfg, semantic.getSymbolTable(), compilerOptions);
+        
+        // Debug: Dump QBE IL if DEBUG_IL environment variable is set
+        if (getenv("DEBUG_IL")) {
+            std::cerr << "\n=== QBE IL Output ===\n";
+            std::cerr << qbeIL;
+            std::cerr << "\n=== End QBE IL ===\n\n";
+        }
         
         // Return as C string
         char *result = (char*)malloc(qbeIL.length() + 1);

@@ -1581,10 +1581,10 @@ public:
 // FOR statement
 class ForStatement : public Statement {
 public:
-    std::string variable;
+    std::string variable;          // Loop variable name (plain, no suffix)
     ExpressionPtr start;
     ExpressionPtr end;
-    ExpressionPtr step;  // nullptr if no STEP clause
+    ExpressionPtr step;            // nullptr if no STEP clause
 
     ForStatement(const std::string& var) : variable(var) {}
 
@@ -1806,10 +1806,11 @@ public:
         TokenType typeSuffix;
         std::vector<ExpressionPtr> dimensions;
         std::string asTypeName;        // For AS TypeName declarations (user-defined types)
+        TokenType asTypeKeyword;       // For AS built-in type keywords (preserves UBYTE vs BYTE, etc.)
         bool hasAsType;                // true if AS TypeName was specified
 
         ArrayDim(const std::string& n, TokenType suffix = TokenType::UNKNOWN)
-            : name(n), typeSuffix(suffix), hasAsType(false) {}
+            : name(n), typeSuffix(suffix), asTypeKeyword(TokenType::UNKNOWN), hasAsType(false) {}
     };
 
     std::vector<ArrayDim> arrays;

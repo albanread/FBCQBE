@@ -661,11 +661,11 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
                 const auto& forBlocks = pair.second;
                 std::string varName = forBlocks.variable;
                 
-                // Emit loop condition check: var <= end (64-bit long comparison)
+                // Emit loop condition check: var <= end (32-bit integer comparison)
                 std::string varRef = getVariableRef(varName);
                 std::string endVar = "%end_" + varName;
                 std::string condTemp = allocTemp("w");
-                emit("    " + condTemp + " =w cslel " + varRef + ", " + endVar + "\n");
+                emit("    " + condTemp + " =w cslew " + varRef + ", " + endVar + "\n");
                 m_stats.instructionsGenerated++;
                 
                 // Store condition for CFG to emit conditional branch

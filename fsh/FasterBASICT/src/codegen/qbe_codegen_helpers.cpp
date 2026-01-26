@@ -158,6 +158,78 @@ std::string QBECodeGenerator::getQBEType(VariableType type) {
     }
 }
 
+// =============================================================================
+// TypeDescriptor-based Type System (New QBE-aligned system)
+// =============================================================================
+
+std::string QBECodeGenerator::getQBETypeD(const TypeDescriptor& typeDesc) {
+    // Use the TypeDescriptor's built-in QBE type mapping
+    return typeDesc.toQBEType();
+}
+
+std::string QBECodeGenerator::getQBEMemOpD(const TypeDescriptor& typeDesc) {
+    // Use the TypeDescriptor's built-in QBE memory operation suffix
+    return typeDesc.toQBEMemOp();
+}
+
+TypeDescriptor QBECodeGenerator::getVariableTypeD(const std::string& varName) {
+    // FOR loop indices are ALWAYS INTEGER - check plain name without suffix
+    std::string plainName = stripTypeSuffix(varName);
+    if (m_forLoopVariables.count(plainName) > 0) {
+        return TypeDescriptor(BaseType::INTEGER);
+    }
+    
+    // Check if this is a function return variable (function name = return variable)
+    if (m_inFunction && m_cfg && varName == m_currentFunction) {
+        // Convert legacy return type to TypeDescriptor
+        return legacyTypeToDescriptor(m_cfg->returnType);
+    }
+    
+    // Check if this is a function parameter
+    if (m_inFunction && m_cfg) {
+        for (size_t i = 0; i < m_cfg->parameters.size(); ++i) {
+            if (m_cfg->parameters[i] == varName) {
+                // Found the parameter - return its type
+                if (i < m_cfg->parameterTypes.size()) {
+                    return legacyTypeToDescriptor(m_cfg->parameterTypes[i]);
+                }
+                break;
+            }
+        }
+    }
+    
+    // Check symbol table for TypeDescriptor
+    if (m_symbols) {
+        auto it = m_symbols->variables.find(varName);
+        if (it != m_symbols->variables.end()) {
+            // Use the new TypeDescriptor if available
+            if (it->second.typeDesc.baseType != BaseType::UNKNOWN) {
+                return it->second.typeDesc;
+            }
+            // Fall back to legacy type
+            return legacyTypeToDescriptor(it->second.type);
+        }
+    }
+    
+    // Fall back to type suffix inference
+    char suffix = getTypeSuffix(varName);
+    return tokenSuffixToDescriptor(getTokenTypeFromSuffix(suffix));
+}
+
+// Helper to convert suffix character to TokenType
+TokenType QBECodeGenerator::getTokenTypeFromSuffix(char suffix) {
+    switch (suffix) {
+        case '%': return TokenType::TYPE_INT;
+        case '!': return TokenType::TYPE_FLOAT;
+        case '#': return TokenType::TYPE_DOUBLE;
+        case '$': return TokenType::TYPE_STRING;
+        case '@': return TokenType::TYPE_BYTE;
+        case '^': return TokenType::TYPE_SHORT;
+        case '&': return TokenType::TYPE_INT;  // LONG uses same token as INT
+        default: return TokenType::TYPE_DOUBLE;  // Default numeric type
+    }
+}
+
 std::string QBECodeGenerator::getQBETypeFromSuffix(char suffix) {
     switch (suffix) {
         case '%': return "w";  // INTEGER
@@ -176,7 +248,8 @@ std::string QBECodeGenerator::getQBETypeFromSuffix(char suffix) {
 char QBECodeGenerator::getTypeSuffix(const std::string& varName) {
     if (varName.empty()) return '#';  // Default to DOUBLE
     char last = varName.back();
-    if (last == '%' || last == '!' || last == '#' || last == '$' || last == '&') {
+    if (last == '%' || last == '!' || last == '#' || last == '$' || 
+        last == '&' || last == '@' || last == '^') {
         return last;
     }
     return '#';  // Default to DOUBLE (numeric default in BASIC)
@@ -184,7 +257,9 @@ char QBECodeGenerator::getTypeSuffix(const std::string& varName) {
 
 VariableType QBECodeGenerator::getVariableType(const std::string& varName) {
     // FOR loop indices are ALWAYS integers (hard rule in BASIC)
-    if (m_forLoopVariables.count(varName) > 0) {
+    // Check plain name without suffix
+    std::string plainName = stripTypeSuffix(varName);
+    if (m_forLoopVariables.count(plainName) > 0) {
         return VariableType::INT;
     }
     
@@ -231,6 +306,12 @@ VariableType QBECodeGenerator::getVariableType(const std::string& varName) {
 // =============================================================================
 
 std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
+    // FOR loop variables use plain names without suffix
+    std::string plainName = stripTypeSuffix(varName);
+    if (m_forLoopVariables.count(plainName) > 0) {
+        return "%var_" + plainName;
+    }
+    
     // Check if we're in a function and if this is a parameter
     if (m_inFunction && m_cfg) {
         // Check if varName is a parameter of the current function
@@ -271,6 +352,15 @@ std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
     //
     // This makes the QBE IL self-documenting with explicit types in variable names
     return "%var_" + varName;
+}
+
+std::string QBECodeGenerator::stripTypeSuffix(const std::string& varName) {
+    // Strip common type suffix patterns: _INT, _FLOAT, _DOUBLE, _STRING, _BYTE, _SHORT, etc.
+    size_t pos = varName.find('_');
+    if (pos != std::string::npos) {
+        return varName.substr(0, pos);
+    }
+    return varName;
 }
 
 std::string QBECodeGenerator::getArrayRef(const std::string& arrayName) {

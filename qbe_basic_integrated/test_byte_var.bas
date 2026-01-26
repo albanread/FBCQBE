@@ -1,0 +1,4 @@
+DIM x AS BYTE
+x = 10
+PRINT x
+END

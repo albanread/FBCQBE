@@ -584,8 +584,8 @@ StatementPtr Parser::parseStatement() {
             return parseLetStatement();
         case TokenType::IDENTIFIER:
             // Check if this is an implicit LET statement (variable assignment)
-            // Look ahead to see if next token is '='
-            if (peek().type == TokenType::EQUAL) {
+            // Use isAssignment() to handle arrays like buffer(0) = 10
+            if (isAssignment()) {
                 return parseLetStatement();
             }
             // Fall through to error for bare identifiers
@@ -2213,8 +2213,17 @@ StatementPtr Parser::parseForStatement() {
         return nullptr;
     }
 
-    TokenType suffix = TokenType::UNKNOWN;
-    std::string varName = parseVariableName(suffix);
+    // FOR loop variables are plain names - no suffix mangling
+    // Just get the raw identifier text
+    std::string varName = current().text;
+    advance(); // consume identifier
+    
+    // Skip any type suffix token (%, &, !, #, @, ^)
+    if (current().type == TokenType::PERCENT || current().type == TokenType::AMPERSAND ||
+        current().type == TokenType::EXCLAMATION || current().type == TokenType::HASH ||
+        current().type == TokenType::AT || current().type == TokenType::CARET) {
+        advance(); // skip suffix
+    }
 
     // Check if this is FOR...IN or traditional FOR...TO
     if (current().type == TokenType::IN) {
@@ -2234,8 +2243,15 @@ StatementPtr Parser::parseForStatement() {
             return nullptr;
         }
 
-        TokenType indexSuffix = TokenType::UNKNOWN;
-        std::string indexVarName = parseVariableName(indexSuffix);
+        std::string indexVarName = current().text;
+        advance(); // consume identifier
+        
+        // Skip any type suffix token
+        if (current().type == TokenType::PERCENT || current().type == TokenType::AMPERSAND ||
+            current().type == TokenType::EXCLAMATION || current().type == TokenType::HASH ||
+            current().type == TokenType::AT || current().type == TokenType::CARET) {
+            advance(); // skip suffix
+        }
 
         consume(TokenType::IN, "Expected IN after index variable in FOR statement");
 
@@ -2269,10 +2285,17 @@ StatementPtr Parser::parseNextStatement() {
 
     auto stmt = std::make_unique<NextStatement>();
 
-    // Optional variable name
+    // Optional variable name - plain name, no suffix mangling
     if (current().type == TokenType::IDENTIFIER) {
-        TokenType suffix = TokenType::UNKNOWN;
-        stmt->variable = parseVariableName(suffix);
+        stmt->variable = current().text;
+        advance(); // consume identifier
+        
+        // Skip any type suffix token
+        if (current().type == TokenType::PERCENT || current().type == TokenType::AMPERSAND ||
+            current().type == TokenType::EXCLAMATION || current().type == TokenType::HASH ||
+            current().type == TokenType::AT || current().type == TokenType::CARET) {
+            advance(); // skip suffix
+        }
     }
 
     return stmt;
@@ -2514,15 +2537,17 @@ StatementPtr Parser::parseDimStatement() {
             
             // Check if it's a built-in type or user-defined type
             if (isTypeKeyword(current().type)) {
-                // Built-in type keyword (INT, FLOAT, DOUBLE, STRING)
+                // Built-in type keyword (INT, FLOAT, DOUBLE, STRING, BYTE, SHORT, etc.)
                 TokenType asType = current().type;
                 advance();
                 
-                // Convert AS type keyword to type suffix
-                TokenType convertedType = asTypeToSuffix(asType);
-                
-                // For built-in types, merge with any explicit suffix
+                // Store the original keyword to preserve unsigned information
                 if (!stmt->arrays.empty()) {
+                    stmt->arrays.back().asTypeKeyword = asType;
+                    stmt->arrays.back().hasAsType = true;
+                    
+                    // Also convert to suffix for backward compatibility
+                    TokenType convertedType = asTypeToSuffix(asType);
                     stmt->arrays.back().typeSuffix = mergeTypes(suffix, convertedType, varName);
                 }
             } else if (current().type == TokenType::IDENTIFIER) {
@@ -3386,7 +3411,14 @@ StatementPtr Parser::parseFunctionStatement() {
         current().type != TokenType::KEYWORD_DOUBLE &&
         current().type != TokenType::KEYWORD_INTEGER &&
         current().type != TokenType::KEYWORD_SINGLE &&
-        current().type != TokenType::KEYWORD_STRING) {
+        current().type != TokenType::KEYWORD_STRING &&
+        current().type != TokenType::KEYWORD_LONG &&
+        current().type != TokenType::KEYWORD_BYTE &&
+        current().type != TokenType::KEYWORD_SHORT &&
+        current().type != TokenType::KEYWORD_UBYTE &&
+        current().type != TokenType::KEYWORD_USHORT &&
+        current().type != TokenType::KEYWORD_UINTEGER &&
+        current().type != TokenType::KEYWORD_ULONG) {
         error("Expected function name after FUNCTION");
         return nullptr;
     }
@@ -3611,7 +3643,14 @@ StatementPtr Parser::parseSubStatement() {
         current().type != TokenType::KEYWORD_DOUBLE &&
         current().type != TokenType::KEYWORD_INTEGER &&
         current().type != TokenType::KEYWORD_SINGLE &&
-        current().type != TokenType::KEYWORD_STRING) {
+        current().type != TokenType::KEYWORD_STRING &&
+        current().type != TokenType::KEYWORD_LONG &&
+        current().type != TokenType::KEYWORD_BYTE &&
+        current().type != TokenType::KEYWORD_SHORT &&
+        current().type != TokenType::KEYWORD_UBYTE &&
+        current().type != TokenType::KEYWORD_USHORT &&
+        current().type != TokenType::KEYWORD_UINTEGER &&
+        current().type != TokenType::KEYWORD_ULONG) {
         error("Expected subroutine name after SUB");
         return nullptr;
     }
@@ -4367,7 +4406,14 @@ ExpressionPtr Parser::parsePrimary() {
         current().type == TokenType::KEYWORD_DOUBLE ||
         current().type == TokenType::KEYWORD_INTEGER ||
         current().type == TokenType::KEYWORD_SINGLE ||
-        current().type == TokenType::KEYWORD_STRING) {
+        current().type == TokenType::KEYWORD_STRING ||
+        current().type == TokenType::KEYWORD_LONG ||
+        current().type == TokenType::KEYWORD_BYTE ||
+        current().type == TokenType::KEYWORD_SHORT ||
+        current().type == TokenType::KEYWORD_UBYTE ||
+        current().type == TokenType::KEYWORD_USHORT ||
+        current().type == TokenType::KEYWORD_UINTEGER ||
+        current().type == TokenType::KEYWORD_ULONG) {
 
         std::string name;
         TokenType suffix = TokenType::UNKNOWN;
@@ -4376,7 +4422,14 @@ ExpressionPtr Parser::parsePrimary() {
         if (current().type == TokenType::KEYWORD_DOUBLE ||
             current().type == TokenType::KEYWORD_INTEGER ||
             current().type == TokenType::KEYWORD_SINGLE ||
-            current().type == TokenType::KEYWORD_STRING) {
+            current().type == TokenType::KEYWORD_STRING ||
+            current().type == TokenType::KEYWORD_LONG ||
+            current().type == TokenType::KEYWORD_BYTE ||
+            current().type == TokenType::KEYWORD_SHORT ||
+            current().type == TokenType::KEYWORD_UBYTE ||
+            current().type == TokenType::KEYWORD_USHORT ||
+            current().type == TokenType::KEYWORD_UINTEGER ||
+            current().type == TokenType::KEYWORD_ULONG) {
             name = current().value;
             advance();
         } else {
@@ -4689,7 +4742,8 @@ bool Parser::isAssignment() const {
     if (lookAhead < m_tokens->size()) {
         TokenType type = (*m_tokens)[lookAhead].type;
         if (type == TokenType::TYPE_INT || type == TokenType::TYPE_STRING ||
-            type == TokenType::TYPE_FLOAT || type == TokenType::TYPE_DOUBLE) {
+            type == TokenType::TYPE_FLOAT || type == TokenType::TYPE_DOUBLE ||
+            type == TokenType::TYPE_BYTE || type == TokenType::TYPE_SHORT) {
             lookAhead++;
         }
     }
@@ -4739,7 +4793,10 @@ TokenType Parser::peekTypeSuffix() const {
 bool Parser::isTypeKeyword(TokenType type) const {
     return type == TokenType::KEYWORD_INTEGER || type == TokenType::KEYWORD_DOUBLE ||
            type == TokenType::KEYWORD_SINGLE || type == TokenType::KEYWORD_STRING ||
-           type == TokenType::KEYWORD_LONG;
+           type == TokenType::KEYWORD_LONG || type == TokenType::KEYWORD_BYTE ||
+           type == TokenType::KEYWORD_SHORT || type == TokenType::KEYWORD_UBYTE ||
+           type == TokenType::KEYWORD_USHORT || type == TokenType::KEYWORD_UINTEGER ||
+           type == TokenType::KEYWORD_ULONG;
 }
 
 // Convert AS type keyword to equivalent type suffix
@@ -4750,6 +4807,12 @@ TokenType Parser::asTypeToSuffix(TokenType asType) const {
         case TokenType::KEYWORD_SINGLE:  return TokenType::TYPE_FLOAT;
         case TokenType::KEYWORD_STRING:  return TokenType::TYPE_STRING;
         case TokenType::KEYWORD_LONG:    return TokenType::TYPE_INT; // Treat LONG as INT for now
+        case TokenType::KEYWORD_BYTE:    return TokenType::TYPE_BYTE;
+        case TokenType::KEYWORD_SHORT:   return TokenType::TYPE_SHORT;
+        case TokenType::KEYWORD_UBYTE:   return TokenType::TYPE_BYTE;  // Use same suffix, track unsigned in TypeDescriptor
+        case TokenType::KEYWORD_USHORT:  return TokenType::TYPE_SHORT; // Use same suffix, track unsigned in TypeDescriptor
+        case TokenType::KEYWORD_UINTEGER: return TokenType::TYPE_INT;  // Use same suffix, track unsigned in TypeDescriptor
+        case TokenType::KEYWORD_ULONG:   return TokenType::TYPE_INT;   // Use same suffix, track unsigned in TypeDescriptor
         default: return TokenType::UNKNOWN;
     }
 }
@@ -4815,12 +4878,14 @@ std::string Parser::parseVariableName(TokenType& outSuffix) {
 
         // Fast path: no suffix - just return the token value
         if (lastChar != '$' && lastChar != '%' && lastChar != '#' &&
-            lastChar != '!' && lastChar != '&') {
+            lastChar != '!' && lastChar != '&' && lastChar != '@' && lastChar != '^') {
             // Also check if next token is a separate type suffix (alternative syntax)
             if (current().type == TokenType::TYPE_INT ||
                 current().type == TokenType::TYPE_STRING ||
                 current().type == TokenType::TYPE_FLOAT ||
-                current().type == TokenType::TYPE_DOUBLE) {
+                current().type == TokenType::TYPE_DOUBLE ||
+                current().type == TokenType::TYPE_BYTE ||
+                current().type == TokenType::TYPE_SHORT) {
                 outSuffix = current().type;
                 advance();
             }
@@ -4858,6 +4923,16 @@ std::string Parser::parseVariableName(TokenType& outSuffix) {
                 suffixStr = "_LONG";
                 suffixLen = 5;
                 break;
+            case '@':
+                outSuffix = TokenType::TYPE_BYTE;
+                suffixStr = "_BYTE";
+                suffixLen = 5;
+                break;
+            case '^':
+                outSuffix = TokenType::TYPE_SHORT;
+                suffixStr = "_SHORT";
+                suffixLen = 6;
+                break;
             default:
                 // Should not reach here, but handle gracefully
                 return tokenValue;
@@ -4876,7 +4951,9 @@ std::string Parser::parseVariableName(TokenType& outSuffix) {
         if (current().type == TokenType::TYPE_INT ||
             current().type == TokenType::TYPE_STRING ||
             current().type == TokenType::TYPE_FLOAT ||
-            current().type == TokenType::TYPE_DOUBLE) {
+            current().type == TokenType::TYPE_DOUBLE ||
+            current().type == TokenType::TYPE_BYTE ||
+            current().type == TokenType::TYPE_SHORT) {
             outSuffix = current().type;
             advance();
         }

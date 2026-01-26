@@ -55,23 +55,406 @@ inline const char* typeToString(VariableType type) {
 }
 
 // =============================================================================
+// QBE-Aligned Type System (New)
+// =============================================================================
+
+// Base type categories aligned with QBE type system
+enum class BaseType {
+    // Numeric types (map to QBE w, l, s, d)
+    BYTE,           // 8-bit signed integer (memory ops: sb)
+    UBYTE,          // 8-bit unsigned integer (memory ops: ub)
+    SHORT,          // 16-bit signed integer (memory ops: sh)
+    USHORT,         // 16-bit unsigned integer (memory ops: uh)
+    INTEGER,        // 32-bit signed integer (QBE: w)
+    UINTEGER,       // 32-bit unsigned integer (QBE: w)
+    LONG,           // 64-bit signed integer (QBE: l)
+    ULONG,          // 64-bit unsigned integer (QBE: l)
+    SINGLE,         // 32-bit float (QBE: s)
+    DOUBLE,         // 64-bit float (QBE: d)
+    
+    // String types
+    STRING,         // Byte-based string (descriptor with byte array)
+    UNICODE,        // Unicode string (descriptor with codepoint array)
+    
+    // Composite types
+    USER_DEFINED,   // User-defined TYPE (aggregate)
+    POINTER,        // Pointer type (QBE: l on 64-bit)
+    
+    // Hidden/internal types (not directly user-visible)
+    ARRAY_DESC,     // Array descriptor structure
+    STRING_DESC,    // String descriptor structure
+    LOOP_INDEX,     // Internal loop index (always LONG)
+    
+    // Special types
+    VOID,           // No value (for SUB)
+    UNKNOWN         // Not yet determined
+};
+
+// Type attributes (bitfield flags)
+enum TypeAttribute : uint32_t {
+    TYPE_ATTR_NONE          = 0,
+    TYPE_ATTR_ARRAY         = 1 << 0,   // Is an array
+    TYPE_ATTR_POINTER       = 1 << 1,   // Is a pointer
+    TYPE_ATTR_CONST         = 1 << 2,   // Constant/read-only
+    TYPE_ATTR_BYREF         = 1 << 3,   // Pass by reference
+    TYPE_ATTR_UNSIGNED      = 1 << 4,   // Unsigned integer
+    TYPE_ATTR_DYNAMIC       = 1 << 5,   // Dynamic array (REDIM)
+    TYPE_ATTR_STATIC        = 1 << 6,   // Static array (fixed)
+    TYPE_ATTR_HIDDEN        = 1 << 7,   // Hidden/internal type
+};
+
+// Complete type descriptor
+struct TypeDescriptor {
+    BaseType baseType;              // Base type
+    uint32_t attributes;            // Type attribute flags
+    int udtTypeId;                  // Unique ID for USER_DEFINED types (-1 if not UDT)
+    std::string udtName;            // Name of UDT (empty if not USER_DEFINED)
+    std::vector<int> arrayDims;     // Array dimensions (empty if not array)
+    BaseType elementType;           // For arrays/pointers: type of element
+    
+    // Constructors
+    TypeDescriptor()
+        : baseType(BaseType::UNKNOWN), attributes(TYPE_ATTR_NONE), udtTypeId(-1), elementType(BaseType::UNKNOWN) {}
+    
+    explicit TypeDescriptor(BaseType bt)
+        : baseType(bt), attributes(TYPE_ATTR_NONE), udtTypeId(-1), elementType(BaseType::UNKNOWN) {}
+    
+    TypeDescriptor(BaseType bt, uint32_t attrs)
+        : baseType(bt), attributes(attrs), udtTypeId(-1), elementType(BaseType::UNKNOWN) {}
+    
+    // Type predicates
+    bool isArray() const { return (attributes & TYPE_ATTR_ARRAY) != 0; }
+    bool isPointer() const { return (attributes & TYPE_ATTR_POINTER) != 0; }
+    bool isConst() const { return (attributes & TYPE_ATTR_CONST) != 0; }
+    bool isByRef() const { return (attributes & TYPE_ATTR_BYREF) != 0; }
+    bool isUnsigned() const { return (attributes & TYPE_ATTR_UNSIGNED) != 0; }
+    bool isDynamic() const { return (attributes & TYPE_ATTR_DYNAMIC) != 0; }
+    bool isStatic() const { return (attributes & TYPE_ATTR_STATIC) != 0; }
+    bool isHidden() const { return (attributes & TYPE_ATTR_HIDDEN) != 0; }
+    bool isUserDefined() const { return baseType == BaseType::USER_DEFINED; }
+    
+    bool isInteger() const {
+        return baseType == BaseType::BYTE || baseType == BaseType::UBYTE ||
+               baseType == BaseType::SHORT || baseType == BaseType::USHORT ||
+               baseType == BaseType::INTEGER || baseType == BaseType::UINTEGER ||
+               baseType == BaseType::LONG || baseType == BaseType::ULONG;
+    }
+    
+    bool isFloat() const {
+        return baseType == BaseType::SINGLE || baseType == BaseType::DOUBLE;
+    }
+    
+    bool isNumeric() const {
+        return isInteger() || isFloat();
+    }
+    
+    bool isString() const {
+        return baseType == BaseType::STRING || baseType == BaseType::UNICODE;
+    }
+    
+    // Get bit width for numeric types
+    int getBitWidth() const {
+        switch (baseType) {
+            case BaseType::BYTE:
+            case BaseType::UBYTE:
+                return 8;
+            case BaseType::SHORT:
+            case BaseType::USHORT:
+                return 16;
+            case BaseType::INTEGER:
+            case BaseType::UINTEGER:
+            case BaseType::SINGLE:
+                return 32;
+            case BaseType::LONG:
+            case BaseType::ULONG:
+            case BaseType::DOUBLE:
+            case BaseType::POINTER:
+                return 64;
+            default:
+                return 0;
+        }
+    }
+    
+    // Map to QBE type
+    std::string toQBEType() const {
+        if (isArray() || isPointer() || baseType == BaseType::ARRAY_DESC || 
+            baseType == BaseType::STRING_DESC || baseType == BaseType::STRING || 
+            baseType == BaseType::UNICODE) {
+            return "l";  // Arrays, pointers, and strings are pointers (64-bit)
+        }
+        
+        switch (baseType) {
+            case BaseType::BYTE:
+            case BaseType::UBYTE:
+            case BaseType::SHORT:
+            case BaseType::USHORT:
+            case BaseType::INTEGER:
+            case BaseType::UINTEGER:
+                return "w";  // 32-bit integer
+            case BaseType::LONG:
+            case BaseType::ULONG:
+            case BaseType::LOOP_INDEX:
+            case BaseType::POINTER:
+                return "l";  // 64-bit integer
+            case BaseType::SINGLE:
+                return "s";  // 32-bit float
+            case BaseType::DOUBLE:
+                return "d";  // 64-bit float
+            default:
+                return "l";  // Default to 64-bit pointer
+        }
+    }
+    
+    // Map to QBE memory operation suffix
+    std::string toQBEMemOp() const {
+        switch (baseType) {
+            case BaseType::BYTE:
+                return "sb";  // Sign-extend byte
+            case BaseType::UBYTE:
+                return "ub";  // Zero-extend byte
+            case BaseType::SHORT:
+                return "sh";  // Sign-extend halfword
+            case BaseType::USHORT:
+                return "uh";  // Zero-extend halfword
+            case BaseType::INTEGER:
+            case BaseType::UINTEGER:
+                return "w";   // Word
+            case BaseType::LONG:
+            case BaseType::ULONG:
+            case BaseType::LOOP_INDEX:
+                return "l";   // Long
+            case BaseType::SINGLE:
+                return "s";   // Single
+            case BaseType::DOUBLE:
+                return "d";   // Double
+            default:
+                return "l";   // Default
+        }
+    }
+    
+    // Convert to string for debugging
+    std::string toString() const {
+        std::ostringstream oss;
+        
+        // Base type
+        switch (baseType) {
+            case BaseType::BYTE: oss << "BYTE"; break;
+            case BaseType::UBYTE: oss << "UBYTE"; break;
+            case BaseType::SHORT: oss << "SHORT"; break;
+            case BaseType::USHORT: oss << "USHORT"; break;
+            case BaseType::INTEGER: oss << "INTEGER"; break;
+            case BaseType::UINTEGER: oss << "UINTEGER"; break;
+            case BaseType::LONG: oss << "LONG"; break;
+            case BaseType::ULONG: oss << "ULONG"; break;
+            case BaseType::SINGLE: oss << "SINGLE"; break;
+            case BaseType::DOUBLE: oss << "DOUBLE"; break;
+            case BaseType::STRING: oss << "STRING"; break;
+            case BaseType::UNICODE: oss << "UNICODE"; break;
+            case BaseType::USER_DEFINED: oss << "UDT:" << udtName; break;
+            case BaseType::POINTER: oss << "POINTER"; break;
+            case BaseType::ARRAY_DESC: oss << "ARRAY_DESC"; break;
+            case BaseType::STRING_DESC: oss << "STRING_DESC"; break;
+            case BaseType::LOOP_INDEX: oss << "LOOP_INDEX"; break;
+            case BaseType::VOID: oss << "VOID"; break;
+            case BaseType::UNKNOWN: oss << "UNKNOWN"; break;
+        }
+        
+        // Attributes
+        if (isArray()) {
+            oss << "[";
+            for (size_t i = 0; i < arrayDims.size(); ++i) {
+                if (i > 0) oss << ",";
+                oss << arrayDims[i];
+            }
+            oss << "]";
+        }
+        if (isPointer()) oss << "*";
+        if (isConst()) oss << " CONST";
+        if (isByRef()) oss << " BYREF";
+        
+        return oss.str();
+    }
+    
+    // Equality comparison
+    bool operator==(const TypeDescriptor& other) const {
+        if (baseType != other.baseType) return false;
+        if (isUserDefined() && udtTypeId != other.udtTypeId) return false;
+        if (isArray() != other.isArray()) return false;
+        if (isArray() && arrayDims != other.arrayDims) return false;
+        return true;
+    }
+    
+    bool operator!=(const TypeDescriptor& other) const {
+        return !(*this == other);
+    }
+};
+
+// Conversion helpers between old and new type systems
+inline TypeDescriptor legacyTypeToDescriptor(VariableType legacyType) {
+    switch (legacyType) {
+        case VariableType::INT:
+            return TypeDescriptor(BaseType::INTEGER);
+        case VariableType::FLOAT:
+            return TypeDescriptor(BaseType::SINGLE);
+        case VariableType::DOUBLE:
+            return TypeDescriptor(BaseType::DOUBLE);
+        case VariableType::STRING:
+            return TypeDescriptor(BaseType::STRING);
+        case VariableType::UNICODE:
+            return TypeDescriptor(BaseType::UNICODE);
+        case VariableType::VOID:
+            return TypeDescriptor(BaseType::VOID);
+        case VariableType::USER_DEFINED:
+            return TypeDescriptor(BaseType::USER_DEFINED);
+        case VariableType::UNKNOWN:
+        default:
+            return TypeDescriptor(BaseType::UNKNOWN);
+    }
+}
+
+inline VariableType descriptorToLegacyType(const TypeDescriptor& desc) {
+    switch (desc.baseType) {
+        case BaseType::BYTE:
+        case BaseType::UBYTE:
+        case BaseType::SHORT:
+        case BaseType::USHORT:
+        case BaseType::INTEGER:
+        case BaseType::UINTEGER:
+        case BaseType::LONG:
+        case BaseType::ULONG:
+        case BaseType::LOOP_INDEX:
+            return VariableType::INT;
+        case BaseType::SINGLE:
+            return VariableType::FLOAT;
+        case BaseType::DOUBLE:
+            return VariableType::DOUBLE;
+        case BaseType::STRING:
+        case BaseType::STRING_DESC:
+            return VariableType::STRING;
+        case BaseType::UNICODE:
+            return VariableType::UNICODE;
+        case BaseType::USER_DEFINED:
+            return VariableType::USER_DEFINED;
+        case BaseType::VOID:
+            return VariableType::VOID;
+        default:
+            return VariableType::UNKNOWN;
+    }
+}
+
+// Convert TokenType suffix to TypeDescriptor
+inline TypeDescriptor tokenSuffixToDescriptor(TokenType suffix, bool isUnsigned = false) {
+    switch (suffix) {
+        case TokenType::TYPE_INT:
+            return TypeDescriptor(isUnsigned ? BaseType::UINTEGER : BaseType::INTEGER);
+        case TokenType::TYPE_FLOAT:
+            return TypeDescriptor(BaseType::SINGLE);
+        case TokenType::TYPE_DOUBLE:
+            return TypeDescriptor(BaseType::DOUBLE);
+        case TokenType::TYPE_STRING:
+            return TypeDescriptor(BaseType::STRING);
+        case TokenType::TYPE_BYTE:
+            return TypeDescriptor(isUnsigned ? BaseType::UBYTE : BaseType::BYTE);
+        case TokenType::TYPE_SHORT:
+            return TypeDescriptor(isUnsigned ? BaseType::USHORT : BaseType::SHORT);
+        default:
+            return TypeDescriptor(BaseType::UNKNOWN);
+    }
+}
+
+// Convert AS type keyword to TypeDescriptor
+inline TypeDescriptor keywordToDescriptor(TokenType keyword) {
+    switch (keyword) {
+        case TokenType::KEYWORD_INTEGER:
+            return TypeDescriptor(BaseType::INTEGER);
+        case TokenType::KEYWORD_LONG:
+            return TypeDescriptor(BaseType::LONG);
+        case TokenType::KEYWORD_SINGLE:
+            return TypeDescriptor(BaseType::SINGLE);
+        case TokenType::KEYWORD_DOUBLE:
+            return TypeDescriptor(BaseType::DOUBLE);
+        case TokenType::KEYWORD_STRING:
+            return TypeDescriptor(BaseType::STRING);
+        case TokenType::KEYWORD_BYTE:
+            return TypeDescriptor(BaseType::BYTE);
+        case TokenType::KEYWORD_SHORT:
+            return TypeDescriptor(BaseType::SHORT);
+        case TokenType::KEYWORD_UBYTE:
+            return TypeDescriptor(BaseType::UBYTE);
+        case TokenType::KEYWORD_USHORT:
+            return TypeDescriptor(BaseType::USHORT);
+        case TokenType::KEYWORD_UINTEGER:
+            return TypeDescriptor(BaseType::UINTEGER);
+        case TokenType::KEYWORD_ULONG:
+            return TypeDescriptor(BaseType::ULONG);
+        default:
+            return TypeDescriptor(BaseType::UNKNOWN);
+    }
+}
+
+// Type suffix mapping
+inline char getTypeSuffix(BaseType type) {
+    switch (type) {
+        case BaseType::INTEGER: return '%';
+        case BaseType::LONG: return '&';
+        case BaseType::SINGLE: return '!';
+        case BaseType::DOUBLE: return '#';
+        case BaseType::STRING:
+        case BaseType::UNICODE: return '$';
+        case BaseType::BYTE: return '@';
+        case BaseType::SHORT: return '^';
+        default: return '\0';
+    }
+}
+
+inline BaseType baseTypeFromSuffix(char suffix) {
+    switch (suffix) {
+        case '%': return BaseType::INTEGER;
+        case '&': return BaseType::LONG;
+        case '!': return BaseType::SINGLE;
+        case '#': return BaseType::DOUBLE;
+        case '$': return BaseType::STRING;  // Will be STRING or UNICODE based on mode
+        case '@': return BaseType::BYTE;
+        case '^': return BaseType::SHORT;
+        default: return BaseType::UNKNOWN;
+    }
+}
+
+// =============================================================================
 // Symbol Tables
 // =============================================================================
 
 // Variable symbol
 struct VariableSymbol {
     std::string name;
-    VariableType type;
-    std::string typeName;   // For USER_DEFINED types (e.g., "Point", "Sprite")
-    bool isDeclared;        // Explicit declaration vs implicit
+    TypeDescriptor typeDesc;                         // New: TypeDescriptor
+    VariableType type;                               // Legacy: for compatibility (deprecated)
+    std::string typeName;                            // Legacy: for USER_DEFINED types (deprecated)
+    bool isDeclared;                                 // Explicit declaration vs implicit
     bool isUsed;
     SourceLocation firstUse;
-    std::string functionScope;  // Empty string = global, otherwise function name
+    std::string functionScope;                       // Empty string = global, otherwise function name
 
     VariableSymbol()
-        : type(VariableType::UNKNOWN), isDeclared(false), isUsed(false), functionScope("") {}
+        : typeDesc(BaseType::UNKNOWN), type(VariableType::UNKNOWN), isDeclared(false), isUsed(false), functionScope("") {}
+
+    // Constructor from TypeDescriptor
+    VariableSymbol(const std::string& n, const TypeDescriptor& td, bool decl = false)
+        : name(n), typeDesc(td), type(descriptorToLegacyType(td)), isDeclared(decl), isUsed(false), functionScope("") {
+        if (td.isUserDefined()) {
+            typeName = td.udtName;
+        }
+    }
 
     std::string toString() const {
+        std::ostringstream oss;
+        oss << name << ": " << typeDesc.toString();
+        if (!isDeclared) oss << " [implicit]";
+        return oss.str();
+    }
+    
+    // Legacy compatibility method
+    std::string toLegacyString() const {
         std::ostringstream oss;
         oss << name << ": " << typeToString(type);
         if (type == VariableType::USER_DEFINED && !typeName.empty()) {
@@ -85,18 +468,45 @@ struct VariableSymbol {
 // Array symbol
 struct ArraySymbol {
     std::string name;
-    VariableType type;
+    TypeDescriptor elementTypeDesc;                  // New: Element type descriptor
+    VariableType type;                               // Legacy: element type (deprecated)
     std::vector<int> dimensions;
     bool isDeclared;
     SourceLocation declaration;
-    int totalSize;          // Product of all dimensions
-    std::string asTypeName; // For user-defined types (AS TypeName)
-    std::string functionScope;  // Empty string = global, otherwise function name
+    int totalSize;                                   // Product of all dimensions
+    std::string asTypeName;                          // Legacy: for user-defined types (deprecated)
+    std::string functionScope;                       // Empty string = global, otherwise function name
 
     ArraySymbol()
-        : type(VariableType::UNKNOWN), isDeclared(false), totalSize(0), functionScope("") {}
+        : elementTypeDesc(BaseType::UNKNOWN), type(VariableType::UNKNOWN), isDeclared(false), totalSize(0), functionScope("") {}
+
+    // Constructor from TypeDescriptor
+    ArraySymbol(const std::string& n, const TypeDescriptor& elemType, const std::vector<int>& dims, bool decl = false)
+        : name(n), elementTypeDesc(elemType), type(descriptorToLegacyType(elemType)), 
+          dimensions(dims), isDeclared(decl), totalSize(1), functionScope("") {
+        if (elemType.isUserDefined()) {
+            asTypeName = elemType.udtName;
+        }
+        // Calculate total size
+        for (int dim : dimensions) {
+            totalSize *= dim;
+        }
+    }
 
     std::string toString() const {
+        std::ostringstream oss;
+        oss << name << "(";
+        for (size_t i = 0; i < dimensions.size(); ++i) {
+            if (i > 0) oss << ", ";
+            oss << dimensions[i];
+        }
+        oss << ") : " << elementTypeDesc.toString();
+        oss << " [" << totalSize << " elements]";
+        return oss.str();
+    }
+    
+    // Legacy compatibility method
+    std::string toLegacyString() const {
         std::ostringstream oss;
         oss << name << "(";
         for (size_t i = 0; i < dimensions.size(); ++i) {
@@ -113,18 +523,52 @@ struct ArraySymbol {
 struct FunctionSymbol {
     std::string name;
     std::vector<std::string> parameters;
-    std::vector<VariableType> parameterTypes;        // Type for each parameter
-    std::vector<std::string> parameterTypeNames;     // User-defined type names (empty if built-in)
+    std::vector<TypeDescriptor> parameterTypeDescs;  // New: Parameter type descriptors
+    std::vector<VariableType> parameterTypes;        // Legacy: Type for each parameter (deprecated)
+    std::vector<std::string> parameterTypeNames;     // Legacy: User-defined type names (deprecated)
     std::vector<bool> parameterIsByRef;              // BYREF flag for each parameter
-    VariableType returnType;
-    std::string returnTypeName;                      // User-defined return type name (empty if built-in)
+    TypeDescriptor returnTypeDesc;                   // New: Return type descriptor
+    VariableType returnType;                         // Legacy: (deprecated)
+    std::string returnTypeName;                      // Legacy: User-defined return type name (deprecated)
     SourceLocation definition;
-    const Expression* body;     // Pointer to AST node (not owned)
+    const Expression* body;                          // Pointer to AST node (not owned)
 
     FunctionSymbol()
-        : returnType(VariableType::UNKNOWN), body(nullptr) {}
+        : returnTypeDesc(BaseType::UNKNOWN), returnType(VariableType::UNKNOWN), body(nullptr) {}
+    
+    // Constructor from TypeDescriptors
+    FunctionSymbol(const std::string& n, const std::vector<std::string>& params,
+                   const std::vector<TypeDescriptor>& paramTypes, const TypeDescriptor& retType)
+        : name(n), parameters(params), parameterTypeDescs(paramTypes), 
+          returnTypeDesc(retType), returnType(descriptorToLegacyType(retType)), body(nullptr) {
+        // Fill legacy types for compatibility
+        for (const auto& td : paramTypes) {
+            parameterTypes.push_back(descriptorToLegacyType(td));
+            parameterTypeNames.push_back(td.isUserDefined() ? td.udtName : "");
+            parameterIsByRef.push_back(td.isByRef());
+        }
+        if (retType.isUserDefined()) {
+            returnTypeName = retType.udtName;
+        }
+    }
 
     std::string toString() const {
+        std::ostringstream oss;
+        oss << "FN " << name << "(";
+        for (size_t i = 0; i < parameters.size(); ++i) {
+            if (i > 0) oss << ", ";
+            oss << parameters[i];
+            if (i < parameterTypeDescs.size()) {
+                oss << " : " << parameterTypeDescs[i].toString();
+                if (parameterIsByRef[i]) oss << " BYREF";
+            }
+        }
+        oss << ") : " << returnTypeDesc.toString();
+        return oss.str();
+    }
+    
+    // Legacy compatibility method
+    std::string toLegacyString() const {
         std::ostringstream oss;
         oss << "FN " << name << "(";
         for (size_t i = 0; i < parameters.size(); ++i) {
@@ -229,12 +673,24 @@ struct ConstantSymbol {
 struct TypeSymbol {
     struct Field {
         std::string name;
-        std::string typeName;      // Type name: "INT", "FLOAT", "DOUBLE", "STRING", or user-defined type
-        VariableType builtInType;  // If built-in type
-        bool isBuiltIn;            // true if built-in, false if user-defined
+        TypeDescriptor typeDesc;                     // New: Field type descriptor
+        std::string typeName;                        // Legacy: Type name (deprecated)
+        VariableType builtInType;                    // Legacy: If built-in type (deprecated)
+        bool isBuiltIn;                              // Legacy: true if built-in (deprecated)
         
+        // New constructor from TypeDescriptor
+        Field(const std::string& n, const TypeDescriptor& td)
+            : name(n), typeDesc(td), typeName(td.isUserDefined() ? td.udtName : ""),
+              builtInType(descriptorToLegacyType(td)), isBuiltIn(!td.isUserDefined()) {}
+        
+        // Legacy constructor for compatibility
         Field(const std::string& n, const std::string& tname, VariableType btype, bool builtin)
-            : name(n), typeName(tname), builtInType(btype), isBuiltIn(builtin) {}
+            : name(n), typeDesc(builtin ? legacyTypeToDescriptor(btype) : TypeDescriptor(BaseType::USER_DEFINED)),
+              typeName(tname), builtInType(btype), isBuiltIn(builtin) {
+            if (!builtin) {
+                typeDesc.udtName = tname;
+            }
+        }
     };
     
     std::string name;
@@ -285,6 +741,27 @@ struct SymbolTable {
     bool eventsUsed = false;  // EVENT DETECTION: if true, program uses ON EVENT statements and needs event processing code
     bool forceYieldEnabled = false;  // OPTION FORCE_YIELD: if true, enable quasi-preemptive handler yielding
     int forceYieldBudget = 10000;  // OPTION FORCE_YIELD budget: instructions before forced yield
+    
+    // Type registry for UDT type IDs (new type system)
+    std::unordered_map<std::string, int> typeNameToId;  // UDT name -> unique type ID
+    int nextTypeId = 1;  // Next available UDT type ID
+    
+    // Allocate a new type ID for a UDT
+    int allocateTypeId(const std::string& typeName) {
+        auto it = typeNameToId.find(typeName);
+        if (it != typeNameToId.end()) {
+            return it->second;  // Already allocated
+        }
+        int id = nextTypeId++;
+        typeNameToId[typeName] = id;
+        return id;
+    }
+    
+    // Get type ID for a UDT (returns -1 if not found)
+    int getTypeId(const std::string& typeName) const {
+        auto it = typeNameToId.find(typeName);
+        return (it != typeNameToId.end()) ? it->second : -1;
+    }
 
     std::string toString() const;
 };
@@ -485,7 +962,49 @@ private:
     VariableType promoteTypes(VariableType left, VariableType right);
     bool isNumericType(VariableType type);
 
-    // Symbol table management
+    // New TypeDescriptor-based type inference (Phase 2)
+    TypeDescriptor inferExpressionTypeD(const Expression& expr);
+    TypeDescriptor inferBinaryExpressionTypeD(const BinaryExpression& expr);
+    TypeDescriptor inferUnaryExpressionTypeD(const UnaryExpression& expr);
+    TypeDescriptor inferVariableTypeD(const VariableExpression& expr);
+    TypeDescriptor inferArrayAccessTypeD(const ArrayAccessExpression& expr);
+    TypeDescriptor inferFunctionCallTypeD(const FunctionCallExpression& expr);
+    TypeDescriptor inferRegistryFunctionTypeD(const RegistryFunctionExpression& expr);
+    TypeDescriptor inferMemberAccessTypeD(const MemberAccessExpression& expr);
+
+    // Coercion and type checking with TypeDescriptor
+    enum class CoercionResult {
+        IDENTICAL,          // Types are identical, no conversion needed
+        IMPLICIT_SAFE,      // Implicit widening conversion (e.g., INT -> LONG)
+        IMPLICIT_LOSSY,     // Implicit narrowing with potential loss (warn)
+        EXPLICIT_REQUIRED,  // Explicit conversion required (e.g., DOUBLE -> INT)
+        INCOMPATIBLE        // Types cannot be converted
+    };
+    
+    CoercionResult checkCoercion(const TypeDescriptor& from, const TypeDescriptor& to) const;
+    CoercionResult checkNumericCoercion(const TypeDescriptor& from, const TypeDescriptor& to) const;
+    bool validateAssignment(const TypeDescriptor& lhs, const TypeDescriptor& rhs, const SourceLocation& loc);
+    TypeDescriptor promoteTypesD(const TypeDescriptor& left, const TypeDescriptor& right) const;
+    
+    // Type inference helpers
+    TypeDescriptor inferTypeFromSuffixD(TokenType suffix) const;
+    TypeDescriptor inferTypeFromSuffixD(char suffix) const;
+    TypeDescriptor inferTypeFromNameD(const std::string& name) const;
+
+    // Symbol table management (new TypeDescriptor-based)
+    VariableSymbol* declareVariableD(const std::string& name, const TypeDescriptor& type,
+                                     const SourceLocation& loc, bool isDeclared = false);
+    ArraySymbol* declareArrayD(const std::string& name, const TypeDescriptor& elementType,
+                              const std::vector<int>& dimensions,
+                              const SourceLocation& loc);
+    FunctionSymbol* declareFunctionD(const std::string& name,
+                                     const std::vector<std::string>& params,
+                                     const std::vector<TypeDescriptor>& paramTypes,
+                                     const TypeDescriptor& returnType,
+                                     const Expression* body,
+                                     const SourceLocation& loc);
+
+    // Symbol table management (legacy - maintained for compatibility)
     VariableSymbol* declareVariable(const std::string& name, VariableType type,
                                    const SourceLocation& loc, bool isDeclared = false);
     ArraySymbol* declareArray(const std::string& name, VariableType type,

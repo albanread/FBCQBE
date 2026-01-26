@@ -331,10 +331,17 @@ private:
     char getTypeSuffix(const std::string& varName);
     VariableType getVariableType(const std::string& varName);
     
+    // TypeDescriptor-based type system (new)
+    std::string getQBETypeD(const TypeDescriptor& typeDesc);
+    std::string getQBEMemOpD(const TypeDescriptor& typeDesc);
+    TypeDescriptor getVariableTypeD(const std::string& varName);
+    TokenType getTokenTypeFromSuffix(char suffix);
+    
     // Variable management
     std::string getVariableRef(const std::string& varName);
     std::string getArrayRef(const std::string& arrayName);
     void declareVariable(const std::string& varName, VariableType type);
+    std::string stripTypeSuffix(const std::string& varName);
     void declareArray(const std::string& arrayName, VariableType type);
     
     // String escaping

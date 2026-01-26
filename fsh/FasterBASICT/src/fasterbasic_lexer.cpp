@@ -90,6 +90,13 @@ void Lexer::initializeKeywords() {
         s_keywords["FLOAT"] = TokenType::KEYWORD_SINGLE;  // Alias for SINGLE
         s_keywords["STRING"] = TokenType::KEYWORD_STRING;
         s_keywords["LONG"] = TokenType::KEYWORD_LONG;
+        s_keywords["BYTE"] = TokenType::KEYWORD_BYTE;
+        s_keywords["SHORT"] = TokenType::KEYWORD_SHORT;
+        s_keywords["UBYTE"] = TokenType::KEYWORD_UBYTE;
+        s_keywords["USHORT"] = TokenType::KEYWORD_USHORT;
+        s_keywords["UINTEGER"] = TokenType::KEYWORD_UINTEGER;
+        s_keywords["UINT"] = TokenType::KEYWORD_UINTEGER;  // Alias for UINTEGER
+        s_keywords["ULONG"] = TokenType::KEYWORD_ULONG;
     
         // Data
         s_keywords["DIM"] = TokenType::DIM;
@@ -455,9 +462,10 @@ Token Lexer::scanIdentifierOrKeyword() {
         text += advance();
     }
     
-    // Check for type suffix (%, !, #, $)
+    // Check for type suffix (%, !, #, $, @, ^)
     char suffix = currentChar();
-    if (suffix == '%' || suffix == '!' || suffix == '#' || suffix == '$') {
+    if (suffix == '%' || suffix == '!' || suffix == '#' || suffix == '$' || 
+        suffix == '@' || suffix == '^') {
         text += advance();
     }
     

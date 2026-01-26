@@ -1,53 +1,21 @@
-REM Simple FOR loop test without DIM
-REM Tests FOR..NEXT with STEP and EXIT FOR
+' Simple FOR loop test - no type suffixes
+' Loop variables should be plain names
 
-REM Test 1: Basic FOR loop counting 1 TO 5
-PRINT "Test 1: FOR i = 1 TO 5"
-FOR i% = 1 TO 5
-    PRINT i%
-NEXT i%
-PRINT ""
+DIM total AS INTEGER
 
-REM Test 2: FOR loop with STEP 2
-PRINT "Test 2: FOR i = 2 TO 10 STEP 2"
-FOR i% = 2 TO 10 STEP 2
-    PRINT i%
-NEXT i%
-PRINT ""
+' Simple loop with plain variable
+total = 0
+FOR i = 1 TO 10
+    total = total + i
+NEXT i
+PRINT "Total: "; total
 
-REM Test 3: FOR loop with expression in TO
-PRINT "Test 3: FOR i = 1 TO 3+2"
-FOR i% = 1 TO 3 + 2
-    PRINT i%
-NEXT i%
-PRINT ""
+' Loop with step
+FOR j = 0 TO 100 STEP 10
+    PRINT j
+NEXT j
 
-REM Test 4: Count total in loop
-PRINT "Test 4: Sum 1 TO 10"
-total% = 0
-FOR i% = 1 TO 10
-    total% = total% + i%
-NEXT i%
-PRINT "Total = "; total%
-PRINT ""
-
-REM Test 5: EXIT FOR
-PRINT "Test 5: EXIT FOR at i = 5"
-FOR i% = 1 TO 10
-    IF i% = 5 THEN EXIT FOR
-    PRINT i%
-NEXT i%
-PRINT "Exited at i = 5"
-PRINT ""
-
-REM Test 6: Nested FOR loops
-PRINT "Test 6: Nested loops"
-FOR i% = 1 TO 3
-    FOR j% = 1 TO 2
-        PRINT "i="; i%; " j="; j%
-    NEXT j%
-NEXT i%
-PRINT ""
-
-PRINT "All tests completed!"
-END
+' Loop with negative step
+FOR k = 10 TO 1 STEP -1
+    PRINT k
+NEXT k

@@ -456,6 +456,9 @@ void SemanticAnalyzer::processTypeDeclarationStatement(const TypeDeclarationStat
         return;
     }
     
+    // Allocate a unique type ID for this UDT
+    int udtTypeId = m_symbolTable.allocateTypeId(stmt->typeName);
+    
     // Create the type symbol
     TypeSymbol typeSymbol(stmt->typeName);
     typeSymbol.declaration = stmt->location;
@@ -508,24 +511,27 @@ void SemanticAnalyzer::processTypeDeclarationStatement(const TypeDeclarationStat
         }
         fieldNames.insert(field.name);
         
-        // Convert TokenType to VariableType for built-in types
-        VariableType varType = VariableType::UNKNOWN;
+        // Create TypeDescriptor for the field
+        TypeDescriptor fieldTypeDesc;
+        
         if (field.isBuiltIn) {
+            // Built-in type - convert TokenType to TypeDescriptor
             switch (field.builtInType) {
                 case TokenType::KEYWORD_INTEGER:
-                    varType = VariableType::INT;
+                    fieldTypeDesc = TypeDescriptor(BaseType::INTEGER);
                     break;
                 case TokenType::KEYWORD_SINGLE:
-                    varType = VariableType::FLOAT;
+                    fieldTypeDesc = TypeDescriptor(BaseType::SINGLE);
                     break;
                 case TokenType::KEYWORD_DOUBLE:
-                    varType = VariableType::DOUBLE;
+                    fieldTypeDesc = TypeDescriptor(BaseType::DOUBLE);
                     break;
                 case TokenType::KEYWORD_STRING:
-                    varType = m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
+                    fieldTypeDesc = m_symbolTable.unicodeMode ? 
+                        TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
                     break;
                 case TokenType::KEYWORD_LONG:
-                    varType = VariableType::INT;  // Treat LONG as INT for now
+                    fieldTypeDesc = TypeDescriptor(BaseType::LONG);
                     break;
                 default:
                     error(SemanticErrorType::INVALID_TYPE_FIELD,
@@ -533,10 +539,15 @@ void SemanticAnalyzer::processTypeDeclarationStatement(const TypeDeclarationStat
                           stmt->location);
                     continue;
             }
+        } else {
+            // User-defined type - will be validated in second pass
+            fieldTypeDesc = TypeDescriptor(BaseType::USER_DEFINED);
+            fieldTypeDesc.udtName = field.typeName;
+            // Type ID will be resolved later when all types are registered
         }
         
-        // Add field to type (validation of user-defined types will happen in second pass)
-        TypeSymbol::Field typeField(field.name, field.typeName, varType, field.isBuiltIn);
+        // Add field using new TypeDescriptor constructor
+        TypeSymbol::Field typeField(field.name, fieldTypeDesc);
         typeSymbol.fields.push_back(typeField);
     }
     
@@ -849,15 +860,15 @@ void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
                 continue;
             }
             
-            VariableSymbol sym;
-            sym.name = arrayDim.name;
-            sym.type = VariableType::USER_DEFINED;
-            sym.typeName = arrayDim.asTypeName;
-            sym.isDeclared = true;
-            sym.firstUse = stmt.location;
-            sym.functionScope = m_currentFunctionName;  // Track function scope
+            // Use new TypeDescriptor system
+            TypeDescriptor typeDesc(BaseType::USER_DEFINED);
+            typeDesc.udtName = arrayDim.asTypeName;
+            typeDesc.udtTypeId = m_symbolTable.allocateTypeId(arrayDim.asTypeName);
             
-            m_symbolTable.variables[arrayDim.name] = sym;
+            VariableSymbol* sym = declareVariableD(arrayDim.name, typeDesc, stmt.location, true);
+            if (sym) {
+                sym->functionScope = m_currentFunctionName;  // Track function scope
+            }
             continue;
         }
         
@@ -872,40 +883,52 @@ void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
                 continue;
             }
             
-            VariableSymbol sym;
-            sym.name = arrayDim.name;
+            // Use new TypeDescriptor system
+            TypeDescriptor typeDesc;
             
             // Infer type from suffix or explicit AS type
             if (arrayDim.hasAsType && !arrayDim.asTypeName.empty()) {
-                // AS INTEGER, AS DOUBLE, etc. but check if it's actually a UDT
-                // (UDT case was already handled above, so this must be built-in)
-                // Try to map type name to VariableType
+                // AS INTEGER, AS DOUBLE, etc.
                 std::string typeName = arrayDim.asTypeName;
                 if (typeName == "INTEGER" || typeName == "INT") {
-                    sym.type = VariableType::INT;
+                    typeDesc = TypeDescriptor(BaseType::INTEGER);
+                } else if (typeName == "LONG") {
+                    typeDesc = TypeDescriptor(BaseType::LONG);
+                } else if (typeName == "SHORT") {
+                    typeDesc = TypeDescriptor(BaseType::SHORT);
+                } else if (typeName == "BYTE") {
+                    typeDesc = TypeDescriptor(BaseType::BYTE);
                 } else if (typeName == "DOUBLE") {
-                    sym.type = VariableType::DOUBLE;
+                    typeDesc = TypeDescriptor(BaseType::DOUBLE);
                 } else if (typeName == "FLOAT" || typeName == "SINGLE") {
-                    sym.type = VariableType::FLOAT;
+                    typeDesc = TypeDescriptor(BaseType::SINGLE);
                 } else if (typeName == "STRING") {
-                    sym.type = VariableType::STRING;
+                    typeDesc = m_symbolTable.unicodeMode ? 
+                        TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
+                } else if (typeName == "UBYTE") {
+                    typeDesc = TypeDescriptor(BaseType::UBYTE);
+                } else if (typeName == "USHORT") {
+                    typeDesc = TypeDescriptor(BaseType::USHORT);
+                } else if (typeName == "UINTEGER") {
+                    typeDesc = TypeDescriptor(BaseType::UINTEGER);
+                } else if (typeName == "ULONG") {
+                    typeDesc = TypeDescriptor(BaseType::ULONG);
                 } else {
                     // Unknown built-in type name, default to DOUBLE
-                    sym.type = VariableType::DOUBLE;
+                    typeDesc = TypeDescriptor(BaseType::DOUBLE);
                 }
             } else {
                 // Infer from suffix or name
-                sym.type = inferTypeFromSuffix(arrayDim.typeSuffix);
-                if (sym.type == VariableType::UNKNOWN) {
-                    sym.type = inferTypeFromName(arrayDim.name);
+                typeDesc = inferTypeFromSuffixD(arrayDim.typeSuffix);
+                if (typeDesc.baseType == BaseType::UNKNOWN) {
+                    typeDesc = inferTypeFromNameD(arrayDim.name);
                 }
             }
             
-            sym.isDeclared = true;
-            sym.firstUse = stmt.location;
-            sym.functionScope = m_currentFunctionName;  // Track function scope
-            
-            m_symbolTable.variables[arrayDim.name] = sym;
+            VariableSymbol* sym = declareVariableD(arrayDim.name, typeDesc, stmt.location, true);
+            if (sym) {
+                sym->functionScope = m_currentFunctionName;  // Track function scope
+            }
             continue;
         }
         
@@ -973,11 +996,14 @@ void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
             }
         }
         
-        ArraySymbol sym;
-        sym.name = arrayDim.name;
+        // Determine element type using TypeDescriptor
+        TypeDescriptor elementType;
         
-        // Check if this is a UDT array (has AS TypeName)
-        if (arrayDim.hasAsType && !arrayDim.asTypeName.empty()) {
+        // Check if this is a built-in type with AS keyword (preserves unsigned info)
+        if (arrayDim.hasAsType && arrayDim.asTypeKeyword != TokenType::UNKNOWN) {
+            // Use keywordToDescriptor to get correct unsigned type
+            elementType = keywordToDescriptor(arrayDim.asTypeKeyword);
+        } else if (arrayDim.hasAsType && !arrayDim.asTypeName.empty()) {
             // Verify the type exists
             if (m_symbolTable.types.find(arrayDim.asTypeName) == m_symbolTable.types.end()) {
                 error(SemanticErrorType::UNDEFINED_TYPE,
@@ -985,24 +1011,62 @@ void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
                       stmt.location);
                 continue;
             }
-            sym.type = VariableType::USER_DEFINED;
-            sym.asTypeName = arrayDim.asTypeName;
+            elementType = TypeDescriptor(BaseType::USER_DEFINED);
+            elementType.udtName = arrayDim.asTypeName;
+            elementType.udtTypeId = m_symbolTable.allocateTypeId(arrayDim.asTypeName);
         } else {
-            // Regular typed array - infer from suffix or name
-            sym.type = inferTypeFromSuffix(arrayDim.typeSuffix);
-            if (sym.type == VariableType::UNKNOWN) {
-                sym.type = inferTypeFromName(arrayDim.name);
+            // Built-in type - check for AS clause or infer from suffix/name
+            if (arrayDim.hasAsType && !arrayDim.asTypeName.empty()) {
+                std::string typeName = arrayDim.asTypeName;
+                if (typeName == "INTEGER" || typeName == "INT") {
+                    elementType = TypeDescriptor(BaseType::INTEGER);
+                } else if (typeName == "LONG") {
+                    elementType = TypeDescriptor(BaseType::LONG);
+                } else if (typeName == "SHORT") {
+                    elementType = TypeDescriptor(BaseType::SHORT);
+                } else if (typeName == "BYTE") {
+                    elementType = TypeDescriptor(BaseType::BYTE);
+                } else if (typeName == "DOUBLE") {
+                    elementType = TypeDescriptor(BaseType::DOUBLE);
+                } else if (typeName == "FLOAT" || typeName == "SINGLE") {
+                    elementType = TypeDescriptor(BaseType::SINGLE);
+                } else if (typeName == "STRING") {
+                    elementType = m_symbolTable.unicodeMode ? 
+                        TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
+                } else if (typeName == "UBYTE") {
+                    elementType = TypeDescriptor(BaseType::UBYTE);
+                } else if (typeName == "USHORT") {
+                    elementType = TypeDescriptor(BaseType::USHORT);
+                } else if (typeName == "UINTEGER") {
+                    elementType = TypeDescriptor(BaseType::UINTEGER);
+                } else if (typeName == "ULONG") {
+                    elementType = TypeDescriptor(BaseType::ULONG);
+                } else {
+                    elementType = TypeDescriptor(BaseType::DOUBLE);
+                }
+            } else {
+                // Infer from suffix or name
+                elementType = inferTypeFromSuffixD(arrayDim.typeSuffix);
+                if (elementType.baseType == BaseType::UNKNOWN) {
+                    elementType = inferTypeFromNameD(arrayDim.name);
+                }
             }
         }
         
-        sym.dimensions = dimensions;
-        sym.isDeclared = true;
-        sym.declaration = stmt.location;
-        // Only store totalSize if all dimensions are known at compile time
-        sym.totalSize = hasUnknownDimensions ? -1 : totalSize;
-        sym.functionScope = m_currentFunctionName;  // Track function scope
+        // Use new TypeDescriptor-based array declaration
+        ArraySymbol* sym = declareArrayD(arrayDim.name, elementType, dimensions, stmt.location);
+        if (!sym) {
+            continue;
+        }
         
-        m_symbolTable.arrays[arrayDim.name] = sym;
+        // Set additional properties
+        sym->functionScope = m_currentFunctionName;
+        if (hasUnknownDimensions) {
+            sym->totalSize = -1;  // Runtime-determined
+        } else {
+            sym->totalSize = totalSize;
+        }
+
     }
 }
 
@@ -1608,11 +1672,25 @@ void SemanticAnalyzer::validateIfStatement(const IfStatement& stmt) {
 }
 
 void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
-    // Declare/use loop variable
+    // FOR loop variables are ALWAYS plain integers (no type suffix)
+    // Strip any suffix from the variable name and register as INTEGER
+    std::string plainVarName = stmt.variable;
+    
+    // Register the variable as INTEGER type in symbol table
     if (m_currentFunctionScope.inFunction) {
-        validateVariableInFunction(stmt.variable, stmt.location);
+        // In function: use local variable
+        m_symbolTable.variables[plainVarName] = VariableInfo{
+            VariableType::INT,
+            TypeDescriptor(BaseType::INTEGER),
+            stmt.location
+        };
     } else {
-        useVariable(stmt.variable, stmt.location);
+        // Global: use global variable
+        m_symbolTable.variables[plainVarName] = VariableInfo{
+            VariableType::INT,
+            TypeDescriptor(BaseType::INTEGER),
+            stmt.location
+        };
     }
     
     // Validate expressions
@@ -1623,7 +1701,6 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
     }
     
     // Type check
-    VariableType varType = inferTypeFromName(stmt.variable);
     VariableType startType = inferExpressionType(*stmt.start);
     VariableType endType = inferExpressionType(*stmt.end);
     
@@ -1635,7 +1712,7 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
     
     // Push to control flow stack
     ForContext ctx;
-    ctx.variable = stmt.variable;
+    ctx.variable = plainVarName;
     ctx.location = stmt.location;
     m_forStack.push(ctx);
 }
@@ -2593,6 +2670,27 @@ VariableSymbol* SemanticAnalyzer::declareVariable(const std::string& name, Varia
     return &m_symbolTable.variables[name];
 }
 
+// New TypeDescriptor-based variable declaration
+VariableSymbol* SemanticAnalyzer::declareVariableD(const std::string& name, const TypeDescriptor& typeDesc,
+                                                   const SourceLocation& loc, bool isDeclared) {
+    auto it = m_symbolTable.variables.find(name);
+    if (it != m_symbolTable.variables.end()) {
+        // Update existing variable with new type info
+        it->second.typeDesc = typeDesc;
+        it->second.type = descriptorToLegacyType(typeDesc);
+        if (typeDesc.isUserDefined()) {
+            it->second.typeName = typeDesc.udtName;
+        }
+        return &it->second;
+    }
+    
+    VariableSymbol sym(name, typeDesc, isDeclared);
+    sym.firstUse = loc;
+    
+    m_symbolTable.variables[name] = sym;
+    return &m_symbolTable.variables[name];
+}
+
 VariableSymbol* SemanticAnalyzer::lookupVariable(const std::string& name) {
     auto it = m_symbolTable.variables.find(name);
     if (it != m_symbolTable.variables.end()) {
@@ -2616,12 +2714,54 @@ VariableSymbol* SemanticAnalyzer::lookupVariable(const std::string& name) {
     return nullptr;
 }
 
+// New TypeDescriptor-based array declaration
+ArraySymbol* SemanticAnalyzer::declareArrayD(const std::string& name, const TypeDescriptor& elementType,
+                                             const std::vector<int>& dimensions,
+                                             const SourceLocation& loc) {
+    auto it = m_symbolTable.arrays.find(name);
+    if (it != m_symbolTable.arrays.end()) {
+        error(SemanticErrorType::ARRAY_REDECLARED,
+              "Array '" + name + "' already declared",
+              loc);
+        return &it->second;
+    }
+    
+    ArraySymbol sym(name, elementType, dimensions, true);
+    sym.declaration = loc;
+    
+    m_symbolTable.arrays[name] = sym;
+    return &m_symbolTable.arrays[name];
+}
+
 ArraySymbol* SemanticAnalyzer::lookupArray(const std::string& name) {
     auto it = m_symbolTable.arrays.find(name);
     if (it != m_symbolTable.arrays.end()) {
         return &it->second;
     }
     return nullptr;
+}
+
+// New TypeDescriptor-based function declaration
+FunctionSymbol* SemanticAnalyzer::declareFunctionD(const std::string& name,
+                                                   const std::vector<std::string>& params,
+                                                   const std::vector<TypeDescriptor>& paramTypes,
+                                                   const TypeDescriptor& returnType,
+                                                   const Expression* body,
+                                                   const SourceLocation& loc) {
+    auto it = m_symbolTable.functions.find(name);
+    if (it != m_symbolTable.functions.end()) {
+        error(SemanticErrorType::FUNCTION_REDECLARED,
+              "Function '" + name + "' already declared",
+              loc);
+        return &it->second;
+    }
+    
+    FunctionSymbol sym(name, params, paramTypes, returnType);
+    sym.body = body;
+    sym.definition = loc;
+    
+    m_symbolTable.functions[name] = sym;
+    return &m_symbolTable.functions[name];
 }
 
 FunctionSymbol* SemanticAnalyzer::lookupFunction(const std::string& name) {
@@ -3779,6 +3919,449 @@ void SemanticAnalyzer::validateVariableInFunction(const std::string& varName,
           m_currentFunctionScope.functionName + ". " +
           "Use LOCAL or SHARED to declare it.",
           loc);
+}
+
+// =============================================================================
+// TypeDescriptor-Based Type Inference (Phase 2)
+// =============================================================================
+
+TypeDescriptor SemanticAnalyzer::inferExpressionTypeD(const Expression& expr) {
+    switch (expr.getType()) {
+        case ASTNodeType::EXPR_NUMBER: {
+            // Number literals default to DOUBLE unless they have a suffix
+            const auto* numExpr = static_cast<const NumberExpression*>(&expr);
+            // Check if it's an integer literal (no decimal point)
+            if (numExpr->value == static_cast<int64_t>(numExpr->value)) {
+                // Integer literal - infer based on magnitude
+                int64_t val = static_cast<int64_t>(numExpr->value);
+                if (val >= -128 && val <= 127) {
+                    return TypeDescriptor(BaseType::BYTE);
+                } else if (val >= -32768 && val <= 32767) {
+                    return TypeDescriptor(BaseType::SHORT);
+                } else if (val >= INT32_MIN && val <= INT32_MAX) {
+                    return TypeDescriptor(BaseType::INTEGER);
+                } else {
+                    return TypeDescriptor(BaseType::LONG);
+                }
+            }
+            return TypeDescriptor(BaseType::DOUBLE);
+        }
+        
+        case ASTNodeType::EXPR_STRING:
+            return m_symbolTable.unicodeMode ? 
+                TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
+        
+        case ASTNodeType::EXPR_VARIABLE:
+            return inferVariableTypeD(static_cast<const VariableExpression&>(expr));
+        
+        case ASTNodeType::EXPR_BINARY:
+            return inferBinaryExpressionTypeD(static_cast<const BinaryExpression&>(expr));
+        
+        case ASTNodeType::EXPR_UNARY:
+            return inferUnaryExpressionTypeD(static_cast<const UnaryExpression&>(expr));
+        
+        case ASTNodeType::EXPR_ARRAY_ACCESS:
+            return inferArrayAccessTypeD(static_cast<const ArrayAccessExpression&>(expr));
+        
+        case ASTNodeType::EXPR_FUNCTION_CALL:
+            // Check if it's a registry function
+            if (expr.getType() == ASTNodeType::EXPR_FUNCTION_CALL) {
+                const auto* funcCall = static_cast<const FunctionCallExpression*>(&expr);
+                // RegistryFunctionExpression is a subclass, check if we can handle it
+                const auto* regFunc = dynamic_cast<const RegistryFunctionExpression*>(&expr);
+                if (regFunc) {
+                    return inferRegistryFunctionTypeD(*regFunc);
+                }
+                return inferFunctionCallTypeD(*funcCall);
+            }
+            return inferFunctionCallTypeD(static_cast<const FunctionCallExpression&>(expr));
+        
+        case ASTNodeType::EXPR_MEMBER_ACCESS:
+            return inferMemberAccessTypeD(static_cast<const MemberAccessExpression&>(expr));
+        
+        default:
+            return TypeDescriptor(BaseType::UNKNOWN);
+    }
+}
+
+TypeDescriptor SemanticAnalyzer::inferBinaryExpressionTypeD(const BinaryExpression& expr) {
+    TypeDescriptor leftType = inferExpressionTypeD(*expr.left);
+    TypeDescriptor rightType = inferExpressionTypeD(*expr.right);
+    
+    // String operations
+    if (leftType.isString() || rightType.isString()) {
+        if (expr.op == TokenType::PLUS) {
+            // String concatenation - result is UNICODE if either operand is UNICODE
+            if (leftType.baseType == BaseType::UNICODE || rightType.baseType == BaseType::UNICODE) {
+                return TypeDescriptor(BaseType::UNICODE);
+            }
+            return TypeDescriptor(BaseType::STRING);
+        }
+        // String comparison operators return INTEGER
+        if (expr.op == TokenType::EQUAL || expr.op == TokenType::NOT_EQUAL ||
+            expr.op == TokenType::LESS_THAN || expr.op == TokenType::GREATER_THAN ||
+            expr.op == TokenType::LESS_EQUAL || expr.op == TokenType::GREATER_EQUAL) {
+            return TypeDescriptor(BaseType::INTEGER);
+        }
+    }
+    
+    // Comparison operators return INTEGER
+    if (expr.op == TokenType::EQUAL || expr.op == TokenType::NOT_EQUAL ||
+        expr.op == TokenType::LESS_THAN || expr.op == TokenType::GREATER_THAN ||
+        expr.op == TokenType::LESS_EQUAL || expr.op == TokenType::GREATER_EQUAL) {
+        return TypeDescriptor(BaseType::INTEGER);
+    }
+    
+    // Logical operators return INTEGER
+    if (expr.op == TokenType::AND || expr.op == TokenType::OR || expr.op == TokenType::XOR) {
+        return TypeDescriptor(BaseType::INTEGER);
+    }
+    
+    // Arithmetic operators - promote types
+    return promoteTypesD(leftType, rightType);
+}
+
+TypeDescriptor SemanticAnalyzer::inferUnaryExpressionTypeD(const UnaryExpression& expr) {
+    TypeDescriptor exprType = inferExpressionTypeD(*expr.expr);
+    
+    if (expr.op == TokenType::NOT) {
+        return TypeDescriptor(BaseType::INTEGER);
+    }
+    
+    // Unary + or - preserve type
+    return exprType;
+}
+
+TypeDescriptor SemanticAnalyzer::inferVariableTypeD(const VariableExpression& expr) {
+    // Check function scope
+    if (m_currentFunctionScope.inFunction) {
+        if (m_currentFunctionScope.parameters.count(expr.name) ||
+            m_currentFunctionScope.localVariables.count(expr.name)) {
+            return inferTypeFromNameD(expr.name);
+        }
+    }
+    
+    // Look up in symbol table
+    auto* varSym = lookupVariable(expr.name);
+    if (varSym) {
+        // Use new TypeDescriptor field directly
+        return varSym->typeDesc;
+    }
+    
+    // Infer from name
+    return inferTypeFromNameD(expr.name);
+}
+
+TypeDescriptor SemanticAnalyzer::inferArrayAccessTypeD(const ArrayAccessExpression& expr) {
+    std::string mangledName = mangleNameWithSuffix(expr.name, expr.typeSuffix);
+    
+    // Check if it's a function call
+    if (m_symbolTable.functions.find(mangledName) != m_symbolTable.functions.end()) {
+        const auto& funcSym = m_symbolTable.functions.at(mangledName);
+        return legacyTypeToDescriptor(funcSym.returnType);
+    }
+    
+    // Check array symbol
+    auto* arraySym = lookupArray(expr.name);
+    if (arraySym) {
+        // Use new TypeDescriptor field directly
+        return arraySym->elementTypeDesc;
+    }
+    
+    // Infer from name
+    return inferTypeFromNameD(expr.name);
+}
+
+TypeDescriptor SemanticAnalyzer::inferFunctionCallTypeD(const FunctionCallExpression& expr) {
+    auto* sym = lookupFunction(expr.name);
+    if (sym) {
+        // Use new TypeDescriptor field directly
+        return sym->returnTypeDesc;
+    }
+    
+    // Check built-in functions
+    if (isBuiltinFunction(expr.name)) {
+        return legacyTypeToDescriptor(getBuiltinReturnType(expr.name));
+    }
+    
+    return TypeDescriptor(BaseType::UNKNOWN);
+}
+
+TypeDescriptor SemanticAnalyzer::inferRegistryFunctionTypeD(const RegistryFunctionExpression& expr) {
+    switch (expr.returnType) {
+        case FasterBASIC::ModularCommands::ReturnType::INT:
+            return TypeDescriptor(BaseType::INTEGER);
+        case FasterBASIC::ModularCommands::ReturnType::FLOAT:
+            return TypeDescriptor(BaseType::DOUBLE);  // FLOAT in registry is treated as DOUBLE
+        case FasterBASIC::ModularCommands::ReturnType::STRING:
+            return m_symbolTable.unicodeMode ? 
+                TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
+        case FasterBASIC::ModularCommands::ReturnType::VOID:
+            return TypeDescriptor(BaseType::VOID);
+        default:
+            return TypeDescriptor(BaseType::UNKNOWN);
+    }
+}
+
+TypeDescriptor SemanticAnalyzer::inferMemberAccessTypeD(const MemberAccessExpression& expr) {
+    // Determine base object type
+    TypeDescriptor baseType = TypeDescriptor(BaseType::UNKNOWN);
+    std::string baseTypeName;
+    
+    if (expr.object->getType() == ASTNodeType::EXPR_VARIABLE) {
+        const auto* varExpr = static_cast<const VariableExpression*>(expr.object.get());
+        auto* varSym = lookupVariable(varExpr->name);
+        if (varSym && varSym->type == VariableType::USER_DEFINED) {
+            baseTypeName = varSym->typeName;
+            baseType.baseType = BaseType::USER_DEFINED;
+            baseType.udtName = baseTypeName;
+            baseType.udtTypeId = m_symbolTable.getTypeId(baseTypeName);
+        }
+    } else if (expr.object->getType() == ASTNodeType::EXPR_ARRAY_ACCESS) {
+        const auto* arrExpr = static_cast<const ArrayAccessExpression*>(expr.object.get());
+        auto* arrSym = lookupArray(arrExpr->name);
+        if (arrSym && arrSym->type == VariableType::USER_DEFINED) {
+            baseTypeName = arrSym->asTypeName;
+            baseType.baseType = BaseType::USER_DEFINED;
+            baseType.udtName = baseTypeName;
+            baseType.udtTypeId = m_symbolTable.getTypeId(baseTypeName);
+        }
+    }
+    
+    // Look up field type
+    if (!baseTypeName.empty()) {
+        auto* typeSym = lookupType(baseTypeName);
+        if (typeSym) {
+            const auto* field = typeSym->findField(expr.memberName);
+            if (field) {
+                // Use new TypeDescriptor field directly
+                return field->typeDesc;
+            }
+        }
+    }
+    
+    return TypeDescriptor(BaseType::UNKNOWN);
+}
+
+// =============================================================================
+// Type Coercion and Checking
+// =============================================================================
+
+SemanticAnalyzer::CoercionResult SemanticAnalyzer::checkCoercion(
+    const TypeDescriptor& from, const TypeDescriptor& to) const {
+    
+    // Identical types
+    if (from == to) {
+        return CoercionResult::IDENTICAL;
+    }
+    
+    // Cannot coerce from/to UNKNOWN
+    if (from.baseType == BaseType::UNKNOWN || to.baseType == BaseType::UNKNOWN) {
+        return CoercionResult::INCOMPATIBLE;
+    }
+    
+    // String to string conversions
+    if (from.isString() && to.isString()) {
+        // STRING <-> UNICODE conversion is safe (runtime handles it)
+        return CoercionResult::IMPLICIT_SAFE;
+    }
+    
+    // Numeric conversions
+    if (from.isNumeric() && to.isNumeric()) {
+        return checkNumericCoercion(from, to);
+    }
+    
+    // String <-> Numeric requires explicit conversion
+    if ((from.isString() && to.isNumeric()) || (from.isNumeric() && to.isString())) {
+        return CoercionResult::EXPLICIT_REQUIRED;
+    }
+    
+    // UDT conversions - only identical UDT types are compatible
+    if (from.isUserDefined() || to.isUserDefined()) {
+        return CoercionResult::INCOMPATIBLE;
+    }
+    
+    return CoercionResult::INCOMPATIBLE;
+}
+
+SemanticAnalyzer::CoercionResult SemanticAnalyzer::checkNumericCoercion(
+    const TypeDescriptor& from, const TypeDescriptor& to) const {
+    
+    if (from.isInteger() && to.isInteger()) {
+        int fromWidth = from.getBitWidth();
+        int toWidth = to.getBitWidth();
+        
+        if (fromWidth < toWidth) {
+            // Widening conversion - always safe
+            return CoercionResult::IMPLICIT_SAFE;
+        } else if (fromWidth == toWidth) {
+            // Same width - check signed/unsigned
+            if (from.isUnsigned() == to.isUnsigned()) {
+                return CoercionResult::IDENTICAL;
+            }
+            // Signed <-> unsigned of same width is lossy
+            return CoercionResult::IMPLICIT_LOSSY;
+        } else {
+            // Narrowing conversion - lossy
+            return CoercionResult::IMPLICIT_LOSSY;
+        }
+    }
+    
+    if (from.isInteger() && to.isFloat()) {
+        // Integer to float is generally safe (may lose precision for very large integers)
+        if (from.getBitWidth() <= 32 && to.baseType == BaseType::DOUBLE) {
+            return CoercionResult::IMPLICIT_SAFE;
+        }
+        return CoercionResult::IMPLICIT_LOSSY;
+    }
+    
+    if (from.isFloat() && to.isInteger()) {
+        // Float to integer truncates - requires explicit conversion
+        return CoercionResult::EXPLICIT_REQUIRED;
+    }
+    
+    if (from.isFloat() && to.isFloat()) {
+        if (from.baseType == BaseType::SINGLE && to.baseType == BaseType::DOUBLE) {
+            // SINGLE -> DOUBLE widening is safe
+            return CoercionResult::IMPLICIT_SAFE;
+        } else if (from.baseType == BaseType::DOUBLE && to.baseType == BaseType::SINGLE) {
+            // DOUBLE -> SINGLE narrowing is lossy
+            return CoercionResult::IMPLICIT_LOSSY;
+        }
+    }
+    
+    return CoercionResult::INCOMPATIBLE;
+}
+
+bool SemanticAnalyzer::validateAssignment(
+    const TypeDescriptor& lhs, const TypeDescriptor& rhs, const SourceLocation& loc) {
+    
+    CoercionResult result = checkCoercion(rhs, lhs);
+    
+    switch (result) {
+        case CoercionResult::IDENTICAL:
+        case CoercionResult::IMPLICIT_SAFE:
+            return true;
+        
+        case CoercionResult::IMPLICIT_LOSSY:
+            warning("Implicit narrowing conversion from " + rhs.toString() + 
+                   " to " + lhs.toString() + " may lose precision", loc);
+            return true;
+        
+        case CoercionResult::EXPLICIT_REQUIRED:
+            error(SemanticErrorType::TYPE_MISMATCH,
+                  "Cannot implicitly convert " + rhs.toString() + " to " + lhs.toString() +
+                  ". Use explicit conversion function (CINT, CLNG, CSNG, CDBL, STR$, VAL).",
+                  loc);
+            return false;
+        
+        case CoercionResult::INCOMPATIBLE:
+            error(SemanticErrorType::TYPE_MISMATCH,
+                  "Incompatible types: cannot convert " + rhs.toString() + " to " + lhs.toString(),
+                  loc);
+            return false;
+    }
+    
+    return false;
+}
+
+TypeDescriptor SemanticAnalyzer::promoteTypesD(
+    const TypeDescriptor& left, const TypeDescriptor& right) const {
+    
+    // If either is DOUBLE, result is DOUBLE
+    if (left.baseType == BaseType::DOUBLE || right.baseType == BaseType::DOUBLE) {
+        return TypeDescriptor(BaseType::DOUBLE);
+    }
+    
+    // If either is SINGLE, result is SINGLE
+    if (left.baseType == BaseType::SINGLE || right.baseType == BaseType::SINGLE) {
+        return TypeDescriptor(BaseType::SINGLE);
+    }
+    
+    // Integer promotion: use the wider type
+    int leftWidth = left.getBitWidth();
+    int rightWidth = right.getBitWidth();
+    
+    if (leftWidth >= rightWidth) {
+        return left;
+    } else {
+        return right;
+    }
+}
+
+// =============================================================================
+// Type Inference Helpers
+// =============================================================================
+
+TypeDescriptor SemanticAnalyzer::inferTypeFromSuffixD(TokenType suffix) const {
+    switch (suffix) {
+        case TokenType::TYPE_INT:
+            return TypeDescriptor(BaseType::INTEGER);
+        case TokenType::TYPE_FLOAT:
+            return TypeDescriptor(BaseType::SINGLE);
+        case TokenType::TYPE_DOUBLE:
+            return TypeDescriptor(BaseType::DOUBLE);
+        case TokenType::TYPE_STRING:
+            return m_symbolTable.unicodeMode ? 
+                TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
+        case TokenType::TYPE_BYTE:
+            return TypeDescriptor(BaseType::BYTE);
+        case TokenType::TYPE_SHORT:
+            return TypeDescriptor(BaseType::SHORT);
+        default:
+            return TypeDescriptor(BaseType::UNKNOWN);
+    }
+}
+
+TypeDescriptor SemanticAnalyzer::inferTypeFromSuffixD(char suffix) const {
+    BaseType type = baseTypeFromSuffix(suffix);
+    if (type == BaseType::STRING && m_symbolTable.unicodeMode) {
+        type = BaseType::UNICODE;
+    }
+    return TypeDescriptor(type);
+}
+
+TypeDescriptor SemanticAnalyzer::inferTypeFromNameD(const std::string& name) const {
+    if (name.empty()) {
+        return TypeDescriptor(BaseType::DOUBLE);  // Default numeric type
+    }
+    
+    // Check for normalized suffixes (e.g., A_STRING, B_INT)
+    if (name.length() > 7 && name.substr(name.length() - 7) == "_STRING") {
+        return m_symbolTable.unicodeMode ? 
+            TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
+    }
+    if (name.length() > 4 && name.substr(name.length() - 4) == "_INT") {
+        return TypeDescriptor(BaseType::INTEGER);
+    }
+    if (name.length() > 7 && name.substr(name.length() - 7) == "_DOUBLE") {
+        return TypeDescriptor(BaseType::DOUBLE);
+    }
+    if (name.length() > 6 && name.substr(name.length() - 6) == "_FLOAT") {
+        return TypeDescriptor(BaseType::SINGLE);
+    }
+    if (name.length() > 5 && name.substr(name.length() - 5) == "_LONG") {
+        return TypeDescriptor(BaseType::LONG);
+    }
+    if (name.length() > 5 && name.substr(name.length() - 5) == "_BYTE") {
+        return TypeDescriptor(BaseType::BYTE);
+    }
+    if (name.length() > 6 && name.substr(name.length() - 6) == "_SHORT") {
+        return TypeDescriptor(BaseType::SHORT);
+    }
+    
+    // Check for type suffix characters
+    char lastChar = name.back();
+    BaseType type = baseTypeFromSuffix(lastChar);
+    if (type != BaseType::UNKNOWN) {
+        if (type == BaseType::STRING && m_symbolTable.unicodeMode) {
+            type = BaseType::UNICODE;
+        }
+        return TypeDescriptor(type);
+    }
+    
+    // No suffix - default to DOUBLE for numeric
+    return TypeDescriptor(BaseType::DOUBLE);
 }
 
 } // namespace FasterBASIC

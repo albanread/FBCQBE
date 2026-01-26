@@ -233,7 +233,7 @@ public:
         int checkBlock;  // Block that checks loop condition
         int bodyBlock;   // Block with loop body statements
         int exitBlock;   // Block after loop (NEXT exit point)
-        std::string variable;  // Loop variable name
+        std::string variable;  // Loop variable name (plain, no suffix)
     };
     std::map<int, ForLoopBlocks> forLoopStructure;  // initBlock → ForLoopBlocks
     

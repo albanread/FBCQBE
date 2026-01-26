@@ -493,20 +493,23 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
         // Get element pointer (this includes bounds checking)
         std::string elementPtr = emitArrayElementPtr(stmt->variable, stmt->indices);
         
-        // Determine value type and store
-        VariableType valueType = inferExpressionType(stmt->value.get());
-        
-        // Store value at element pointer
-        if (valueType == VariableType::INT) {
-            emit("    storew " + valueTemp + ", " + elementPtr + "\n");
-        } else if (valueType == VariableType::DOUBLE || valueType == VariableType::FLOAT) {
-            emit("    stored " + valueTemp + ", " + elementPtr + "\n");
-        } else if (valueType == VariableType::STRING) {
-            emit("    storel " + valueTemp + ", " + elementPtr + "\n");
-        } else {
-            // Default to word storage
-            emit("    storew " + valueTemp + ", " + elementPtr + "\n");
+        // Determine array element type using TypeDescriptor
+        TypeDescriptor elementTypeDesc = TypeDescriptor(BaseType::INTEGER); // Default
+        if (m_symbols && m_symbols->arrays.find(stmt->variable) != m_symbols->arrays.end()) {
+            const auto& arraySym = m_symbols->arrays.at(stmt->variable);
+            // Use TypeDescriptor if available, otherwise convert from legacy type
+            if (arraySym.elementTypeDesc.baseType != BaseType::UNKNOWN) {
+                elementTypeDesc = arraySym.elementTypeDesc;
+            } else {
+                elementTypeDesc = legacyTypeToDescriptor(arraySym.type);
+            }
         }
+        
+        // Get the correct QBE memory operation for the type
+        std::string memOp = getQBEMemOpD(elementTypeDesc);
+        
+        // Store value at element pointer with correct operation
+        emit("    store" + memOp + " " + valueTemp + ", " + elementPtr + "\n");
         m_stats.instructionsGenerated++;
     }
 }
@@ -586,14 +589,12 @@ void QBECodeGenerator::emitIf(const IfStatement* stmt) {
 void QBECodeGenerator::emitFor(const ForStatement* stmt) {
     if (!stmt || !stmt->start || !stmt->end) return;
     
-    // Mark FOR loop variable as integer (hard rule: FOR indices are always integers)
-    m_forLoopVariables.insert(stmt->variable);
+    // FOR loop variable is a regular INTEGER variable (32-bit int 'w')
+    // Variable name has no suffix - it's just a plain name
+    std::string varRef = getVariableRef(stmt->variable);
     
     // Set up loop context for EXIT FOR to work
-    // Find the exit block by looking at CFG structure
-    // The current block should have a successor that leads to the loop exit
     if (m_currentBlock && m_cfg) {
-        // Look for a block labeled "After FOR" or the exit block
         int exitBlockId = -1;
         for (int i = m_currentBlock->id + 1; i < m_cfg->getBlockCount(); i++) {
             const BasicBlock* candidateBlock = m_cfg->getBlock(i);
@@ -611,22 +612,16 @@ void QBECodeGenerator::emitFor(const ForStatement* stmt) {
     // Initialize loop variable
     std::string startTemp = emitExpression(stmt->start.get());
     
-    // Coerce start value to 64-bit LONG INTEGER (FOR loop variables are ALWAYS 64-bit longs)
+    // Convert start value to integer
     VariableType startType = inferExpressionType(stmt->start.get());
     if (startType == VariableType::DOUBLE || startType == VariableType::FLOAT) {
-        std::string longTemp = allocTemp("l");
-        emit("    " + longTemp + " =l dtosi " + startTemp + "\n");
+        std::string intTemp = allocTemp("w");
+        emit("    " + intTemp + " =w dtosi " + startTemp + "\n");
         m_stats.instructionsGenerated++;
-        startTemp = longTemp;
-    } else if (startType == VariableType::INT) {
-        std::string longTemp = allocTemp("l");
-        emit("    " + longTemp + " =l extsw " + startTemp + "\n");
-        m_stats.instructionsGenerated++;
-        startTemp = longTemp;
+        startTemp = intTemp;
     }
     
-    std::string varRef = getVariableRef(stmt->variable);
-    emit("    " + varRef + " =l copy " + startTemp + "\n");
+    emit("    " + varRef + " =w copy " + startTemp + "\n");
     m_stats.instructionsGenerated++;
     
     // Emit step value (default 1)
@@ -634,49 +629,39 @@ void QBECodeGenerator::emitFor(const ForStatement* stmt) {
     if (stmt->step) {
         stepTemp = emitExpression(stmt->step.get());
         
-        // Coerce step value to 64-bit LONG INTEGER (ALWAYS)
+        // Convert step value to integer
         VariableType stepType = inferExpressionType(stmt->step.get());
         if (stepType == VariableType::DOUBLE || stepType == VariableType::FLOAT) {
-            std::string longTemp = allocTemp("l");
-            emit("    " + longTemp + " =l dtosi " + stepTemp + "\n");
+            std::string intTemp = allocTemp("w");
+            emit("    " + intTemp + " =w dtosi " + stepTemp + "\n");
             m_stats.instructionsGenerated++;
-            stepTemp = longTemp;
-        } else if (stepType == VariableType::INT) {
-            std::string longTemp = allocTemp("l");
-            emit("    " + longTemp + " =l extsw " + stepTemp + "\n");
-            m_stats.instructionsGenerated++;
-            stepTemp = longTemp;
+            stepTemp = intTemp;
         }
     } else {
-        stepTemp = allocTemp("l");
-        emit("    " + stepTemp + " =l copy 1\n");
+        stepTemp = allocTemp("w");
+        emit("    " + stepTemp + " =w copy 1\n");
         m_stats.instructionsGenerated++;
     }
     
     // Store step for NEXT statement
     std::string stepVar = "%step_" + stmt->variable;
-    emit("    " + stepVar + " =l copy " + stepTemp + "\n");
+    emit("    " + stepVar + " =w copy " + stepTemp + "\n");
     m_stats.instructionsGenerated++;
     
     // Emit end value (evaluate once and store)
     std::string endTemp = emitExpression(stmt->end.get());
     
-    // Coerce end value to 64-bit LONG INTEGER (ALWAYS)
+    // Convert end value to integer
     VariableType endType = inferExpressionType(stmt->end.get());
     if (endType == VariableType::DOUBLE || endType == VariableType::FLOAT) {
-        std::string longTemp = allocTemp("l");
-        emit("    " + longTemp + " =l dtosi " + endTemp + "\n");
+        std::string intTemp = allocTemp("w");
+        emit("    " + intTemp + " =w dtosi " + endTemp + "\n");
         m_stats.instructionsGenerated++;
-        endTemp = longTemp;
-    } else if (endType == VariableType::INT) {
-        std::string longTemp = allocTemp("l");
-        emit("    " + longTemp + " =l extsw " + endTemp + "\n");
-        m_stats.instructionsGenerated++;
-        endTemp = longTemp;
+        endTemp = intTemp;
     }
     
     std::string endVar = "%end_" + stmt->variable;
-    emit("    " + endVar + " =l copy " + endTemp + "\n");
+    emit("    " + endVar + " =w copy " + endTemp + "\n");
     m_stats.instructionsGenerated++;
     
     // Note: Loop condition check happens in the FOR check block (separate block)
@@ -707,10 +692,10 @@ void QBECodeGenerator::emitNext(const NextStatement* stmt) {
     std::string varRef = getVariableRef(varName);
     std::string stepVar = "%step_" + varName;
     
-    // Increment loop variable: var = var + step (64-bit long arithmetic)
-    std::string newValueTemp = allocTemp("l");
-    emit("    " + newValueTemp + " =l add " + varRef + ", " + stepVar + "\n");
-    emit("    " + varRef + " =l copy " + newValueTemp + "\n");
+    // Increment loop variable: var = var + step (32-bit integer arithmetic)
+    std::string newValueTemp = allocTemp("w");
+    emit("    " + newValueTemp + " =w add " + varRef + ", " + stepVar + "\n");
+    emit("    " + varRef + " =w copy " + newValueTemp + "\n");
     m_stats.instructionsGenerated += 2;
     
     // The condition check happens at the FOR header (loop header block)
@@ -1210,20 +1195,59 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
             continue;
         }
         
-        // Determine element size and type suffix
+        // Determine element size and type suffix using TypeDescriptor
         size_t elementSize;
         char typeSuffixChar = 0; // 0 for UDT/opaque
+        TypeDescriptor elementTypeDesc;
+        
         if (isUDTArray) {
             elementSize = calculateTypeSize(udtTypeName);
             m_arrayElementTypes[arrayName] = udtTypeName;
         } else {
-            // Regular BASIC types: INT=4, DOUBLE=8, STRING=8 (pointer)
-            elementSize = 8; // Default to 8 for now (handles most types)
+            // Use TypeDescriptor to get correct element size
+            // Prefer asTypeKeyword (preserves LONG, unsigned info) over typeSuffix
+            if (arrayDecl.hasAsType && arrayDecl.asTypeKeyword != TokenType::UNKNOWN) {
+                elementTypeDesc = keywordToDescriptor(arrayDecl.asTypeKeyword);
+            } else {
+                elementTypeDesc = tokenSuffixToDescriptor(arrayDecl.typeSuffix);
+            }
+            
+            // Calculate element size based on BaseType
+            switch (elementTypeDesc.baseType) {
+                case BaseType::BYTE:
+                case BaseType::UBYTE:
+                    elementSize = 1;
+                    break;
+                case BaseType::SHORT:
+                case BaseType::USHORT:
+                    elementSize = 2;
+                    break;
+                case BaseType::INTEGER:
+                case BaseType::UINTEGER:
+                case BaseType::SINGLE:
+                    elementSize = 4;
+                    break;
+                case BaseType::LONG:
+                case BaseType::ULONG:
+                case BaseType::DOUBLE:
+                case BaseType::STRING:
+                case BaseType::UNICODE:
+                case BaseType::POINTER:
+                    elementSize = 8;
+                    break;
+                default:
+                    elementSize = 8; // Default
+                    break;
+            }
+            
+            // Set type suffix character for descriptor
             switch (arrayDecl.typeSuffix) {
                 case TokenType::TYPE_INT:    typeSuffixChar = '%'; break;
                 case TokenType::TYPE_FLOAT:  typeSuffixChar = '!'; break;
                 case TokenType::TYPE_DOUBLE: typeSuffixChar = '#'; break;
                 case TokenType::TYPE_STRING: typeSuffixChar = '$'; break;
+                case TokenType::TYPE_BYTE:   typeSuffixChar = '@'; break;
+                case TokenType::TYPE_SHORT:  typeSuffixChar = '^'; break;
                 default: typeSuffixChar = 0; break;
             }
         }

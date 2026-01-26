@@ -1282,24 +1282,27 @@ std::string QBECodeGenerator::emitArrayAccessExpr(const ArrayAccessExpression* e
     }
     
     // Regular scalar array - load and return the value
-    // Determine array element type from symbol table
-    VariableType elementType = VariableType::INT; // Default
+    // Determine array element type from symbol table using TypeDescriptor
+    TypeDescriptor elementTypeDesc = TypeDescriptor(BaseType::INTEGER); // Default
     if (m_symbols && m_symbols->arrays.find(expr->name) != m_symbols->arrays.end()) {
-        elementType = m_symbols->arrays.at(expr->name).type;
+        const auto& arraySym = m_symbols->arrays.at(expr->name);
+        // Use TypeDescriptor if available, otherwise convert from legacy type
+        if (arraySym.elementTypeDesc.baseType != BaseType::UNKNOWN) {
+            elementTypeDesc = arraySym.elementTypeDesc;
+        } else {
+            elementTypeDesc = legacyTypeToDescriptor(arraySym.type);
+        }
     }
     
     std::string valueTemp;
-    if (elementType == VariableType::DOUBLE || elementType == VariableType::FLOAT) {
-        valueTemp = allocTemp("d");
-        emit("    " + valueTemp + " =d loadd " + elementPtr + "\n");
-    } else if (elementType == VariableType::STRING) {
-        valueTemp = allocTemp("l");
-        emit("    " + valueTemp + " =l loadl " + elementPtr + "\n");
-    } else {
-        // INT or default
-        valueTemp = allocTemp("w");
-        emit("    " + valueTemp + " =w loadw " + elementPtr + "\n");
-    }
+    std::string qbeType = getQBETypeD(elementTypeDesc);
+    std::string memOp = getQBEMemOpD(elementTypeDesc);
+    
+    // Allocate temporary with correct QBE type
+    valueTemp = allocTemp(qbeType);
+    
+    // Load with correct operation (handles sign/zero extension for byte/short)
+    emit("    " + valueTemp + " =" + qbeType + " load" + memOp + " " + elementPtr + "\n");
     m_stats.instructionsGenerated++;
     
     return valueTemp;

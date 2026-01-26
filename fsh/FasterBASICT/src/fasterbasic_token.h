@@ -106,6 +106,12 @@ enum class TokenType {
     KEYWORD_SINGLE,     // SINGLE (for AS declarations)
     KEYWORD_STRING,     // STRING (for AS declarations)
     KEYWORD_LONG,       // LONG (for AS declarations)
+    KEYWORD_BYTE,       // BYTE (for AS declarations)
+    KEYWORD_SHORT,      // SHORT (for AS declarations)
+    KEYWORD_UBYTE,      // UBYTE (for AS declarations)
+    KEYWORD_USHORT,     // USHORT (for AS declarations)
+    KEYWORD_UINTEGER,   // UINTEGER (for AS declarations)
+    KEYWORD_ULONG,      // ULONG (for AS declarations)
     
     // Keywords - Data
     DIM,             // DIM
@@ -230,6 +236,8 @@ enum class TokenType {
     TYPE_FLOAT,      // ! (single precision)
     TYPE_DOUBLE,     // # (double precision)
     TYPE_STRING,     // $ (string)
+    TYPE_BYTE,       // @ (byte)
+    TYPE_SHORT,      // ^ (short)
     HASH,            // # (file stream indicator for PRINT#/INPUT#)
     
     // Special
@@ -386,6 +394,12 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::KEYWORD_SINGLE: return "SINGLE";
         case TokenType::KEYWORD_STRING: return "STRING";
         case TokenType::KEYWORD_LONG: return "LONG";
+        case TokenType::KEYWORD_BYTE: return "BYTE";
+        case TokenType::KEYWORD_SHORT: return "SHORT";
+        case TokenType::KEYWORD_UBYTE: return "UBYTE";
+        case TokenType::KEYWORD_USHORT: return "USHORT";
+        case TokenType::KEYWORD_UINTEGER: return "UINTEGER";
+        case TokenType::KEYWORD_ULONG: return "ULONG";
         case TokenType::DIM: return "DIM";
         case TokenType::REDIM: return "REDIM";
         case TokenType::ERASE: return "ERASE";
@@ -463,6 +477,8 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::TYPE_FLOAT: return "!";
         case TokenType::TYPE_DOUBLE: return "#";
         case TokenType::TYPE_STRING: return "$";
+        case TokenType::TYPE_BYTE: return "@";
+        case TokenType::TYPE_SHORT: return "^";
         case TokenType::HASH: return "#";
         
         case TokenType::USING: return "USING";
