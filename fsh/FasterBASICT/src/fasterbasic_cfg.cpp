@@ -406,8 +406,12 @@ void CFGBuilder::processGotoStatement(const GotoStatement& stmt, BasicBlock* cur
 }
 
 void CFGBuilder::processGosubStatement(const GosubStatement& stmt, BasicBlock* currentBlock) {
-    // GOSUB is like a call - execution continues after it
-    // Edge will be added in buildEdges phase
+    // GOSUB is like a call - execution continues after it in a new block
+    // Create a new block for the return point (statement after GOSUB)
+    BasicBlock* nextBlock = createNewBlock();
+    m_currentBlock = nextBlock;
+    
+    // Edge will be added in buildEdges phase when we know target block IDs
 }
 
 void CFGBuilder::processOnGotoStatement(const OnGotoStatement& stmt, BasicBlock* currentBlock) {
@@ -652,6 +656,22 @@ void CFGBuilder::processDoStatement(const DoStatement& stmt, BasicBlock* current
     BasicBlock* loopHeader = createNewBlock("DO Loop Header");
     loopHeader->isLoopHeader = true;
     
+    // Add the DO statement to the header block (it was already added to currentBlock)
+    // We need to move it to the header block
+    if (!currentBlock->statements.empty() && currentBlock->statements.back() == &stmt) {
+        // Get the line number for this statement
+        int lineNum = 0;
+        auto it = currentBlock->statementLineNumbers.find(&stmt);
+        if (it != currentBlock->statementLineNumbers.end()) {
+            lineNum = it->second;
+        }
+        
+        // Remove from current block and add to header
+        currentBlock->statements.pop_back();
+        currentBlock->statementLineNumbers.erase(&stmt);
+        loopHeader->addStatement(&stmt, lineNum);
+    }
+    
     BasicBlock* loopBody = createNewBlock("DO Loop Body");
     BasicBlock* loopExit = createNewBlock("After DO");
     loopExit->isLoopExit = true;
@@ -663,6 +683,13 @@ void CFGBuilder::processDoStatement(const DoStatement& stmt, BasicBlock* current
     m_loopStack.push_back(ctx);
     
     m_currentCFG->doLoopHeaders[loopHeader->id] = loopHeader->id;
+    
+    // Store DO loop structure (similar to FOR loops)
+    ControlFlowGraph::DoLoopBlocks doBlocks;
+    doBlocks.headerBlock = loopHeader->id;
+    doBlocks.bodyBlock = loopBody->id;
+    doBlocks.exitBlock = loopExit->id;
+    m_currentCFG->doLoopStructure[loopHeader->id] = doBlocks;
     
     m_currentBlock = loopBody;
 }
@@ -1166,6 +1193,59 @@ void CFGBuilder::buildEdges() {
                 break;
             }
             
+            case ASTNodeType::STMT_DO: {
+                // DO header - needs conditional or unconditional edges based on condition type
+                auto it = m_currentCFG->doLoopHeaders.find(block->id);
+                if (it != m_currentCFG->doLoopHeaders.end()) {
+                    // This is a DO header
+                    const auto& doStmt = static_cast<const DoStatement&>(*lastStmt);
+                    
+                    if (doStmt.conditionType == DoStatement::ConditionType::WHILE ||
+                        doStmt.conditionType == DoStatement::ConditionType::UNTIL) {
+                        // Pre-test loop: conditional edges
+                        // True condition: go to body (next block)
+                        if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
+                            addConditionalEdge(block->id, block->id + 1, "true");
+                        }
+                        
+                        // False condition: find the exit block after matching LOOP
+                        int nestingLevel = 0;
+                        for (size_t i = block->id + 1; i < m_currentCFG->blocks.size(); i++) {
+                            const auto& futureBlock = m_currentCFG->blocks[i];
+                            if (!futureBlock->statements.empty()) {
+                                for (const Statement* stmt : futureBlock->statements) {
+                                    if (stmt->getType() == ASTNodeType::STMT_DO) {
+                                        nestingLevel++;
+                                    } else if (stmt->getType() == ASTNodeType::STMT_LOOP) {
+                                        if (nestingLevel == 0) {
+                                            // Found the matching LOOP
+                                            // Exit is the block after LOOP
+                                            if (i + 1 < m_currentCFG->blocks.size()) {
+                                                addConditionalEdge(block->id, i + 1, "false");
+                                            }
+                                            goto found_loop;
+                                        }
+                                        nestingLevel--;
+                                    }
+                                }
+                            }
+                        }
+                        found_loop:;
+                    } else {
+                        // Plain DO - unconditional jump to body (next block)
+                        if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
+                            addUnconditionalEdge(block->id, block->id + 1);
+                        }
+                    }
+                } else {
+                    // Fallthrough if not a loop header
+                    if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
+                        addFallthroughEdge(block->id, block->id + 1);
+                    }
+                }
+                break;
+            }
+            
             case ASTNodeType::STMT_UNTIL: {
                 // UNTIL is the end of a REPEAT loop
                 // Need to create:
@@ -1431,6 +1511,22 @@ void CFGBuilder::identifyLoops() {
     if (m_currentCFG->entryBlock >= 0) {
         detectCycles(m_currentCFG->entryBlock);
     }
+    
+    // Populate CFG's selectCaseInfo map so codegen can look up which CaseStatement each test block belongs to
+    for (const auto& ctx : m_selectCaseStack) {
+        ControlFlowGraph::SelectCaseInfo info;
+        info.selectBlock = ctx.selectBlock;
+        info.testBlocks = ctx.testBlocks;
+        info.bodyBlocks = ctx.bodyBlocks;
+        info.elseBlock = ctx.elseBlock;
+        info.exitBlock = ctx.exitBlock;
+        info.caseStatement = ctx.caseStatement;
+        
+        // Map each test block to this SelectCaseInfo
+        for (int testBlockId : ctx.testBlocks) {
+            m_currentCFG->selectCaseInfo[testBlockId] = info;
+        }
+    }
 }
 
 // =============================================================================
@@ -1583,7 +1679,7 @@ std::string CFGBuilder::generateReport(const ControlFlowGraph& cfg) const {
 
 // Helper function to infer type from variable name (suffix-based)
 VariableType CFGBuilder::inferTypeFromName(const std::string& name) {
-    if (name.empty()) return VariableType::FLOAT;
+    if (name.empty()) return VariableType::DOUBLE;  // Default numeric type is DOUBLE
     
     char lastChar = name.back();
     switch (lastChar) {
@@ -1591,7 +1687,7 @@ VariableType CFGBuilder::inferTypeFromName(const std::string& name) {
         case '!': return VariableType::FLOAT;
         case '#': return VariableType::DOUBLE;
         case '$': return VariableType::STRING;
-        default: return VariableType::FLOAT;  // Default in BASIC
+        default: return VariableType::DOUBLE;  // Default numeric type is DOUBLE (matches semantic analyzer)
     }
 }
 

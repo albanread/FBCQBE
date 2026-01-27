@@ -45,6 +45,7 @@ enum class TokenType {
     ELSEIF,          // ELSEIF
     ENDIF,           // ENDIF (if we support it)
     FOR,             // FOR
+    EACH,            // EACH (for FOR EACH...IN loops)
     TO,              // TO
     STEP,            // STEP
     IN,              // IN (for FOR...IN loops)
@@ -239,14 +240,21 @@ enum class TokenType {
     TYPE_BYTE,       // @ (byte)
     TYPE_SHORT,      // ^ (short)
     HASH,            // # (file stream indicator for PRINT#/INPUT#)
-    
+
+    // Type Suffixes (alternative names for parser compatibility)
+    PERCENT,         // % (integer suffix)
+    AMPERSAND,       // & (long suffix)
+    EXCLAMATION,     // ! (single suffix)
+    CARET,           // ^ (short suffix)
+    AT_SUFFIX,       // @ (byte suffix)
+
     // Special
     USING,           // USING (for PRINT USING)
-    
+
     // Registry-based modular commands and functions
     REGISTRY_COMMAND, // Commands registered via ModularCommands system
     REGISTRY_FUNCTION, // Functions registered via ModularCommands system
-    
+
     // Error/Unknown
     UNKNOWN
 };
@@ -346,6 +354,7 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::ELSEIF: return "ELSEIF";
         case TokenType::ENDIF: return "ENDIF";
         case TokenType::FOR: return "FOR";
+        case TokenType::EACH: return "EACH";
         case TokenType::TO: return "TO";
         case TokenType::STEP: return "STEP";
         case TokenType::IN: return "IN";
@@ -480,7 +489,14 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::TYPE_BYTE: return "@";
         case TokenType::TYPE_SHORT: return "^";
         case TokenType::HASH: return "#";
-        
+
+        // Type suffix alternatives
+        case TokenType::PERCENT: return "%";
+        case TokenType::AMPERSAND: return "&";
+        case TokenType::EXCLAMATION: return "!";
+        case TokenType::CARET: return "^";
+        case TokenType::AT_SUFFIX: return "@";
+
         case TokenType::USING: return "USING";
         case TokenType::UNKNOWN: return "UNKNOWN";
     }

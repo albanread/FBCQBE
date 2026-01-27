@@ -227,15 +227,34 @@ public:
     // Mapping from BASIC line numbers to block IDs
     std::map<int, int> lineNumberToBlock;
     
+    // SELECT CASE structure tracking
+    struct SelectCaseInfo {
+        int selectBlock;                 // Block that evaluates the SELECT expression
+        std::vector<int> testBlocks;     // Blocks that test each CASE condition
+        std::vector<int> bodyBlocks;     // Blocks that execute each CASE body
+        int elseBlock;                   // ELSE/OTHERWISE block (-1 if none)
+        int exitBlock;                   // Block after END SELECT
+        const CaseStatement* caseStatement;  // Pointer to AST node
+    };
+    std::map<int, SelectCaseInfo> selectCaseInfo;  // testBlock ID → SelectCaseInfo
+    
     // FOR loop structure tracking
     struct ForLoopBlocks {
         int initBlock;   // Block with FOR statement (initialization)
         int checkBlock;  // Block that checks loop condition
         int bodyBlock;   // Block with loop body statements
-        int exitBlock;   // Block after loop (NEXT exit point)
+        int exitBlock;   // Block after loop (exit target)
         std::string variable;  // Loop variable name (plain, no suffix)
     };
     std::map<int, ForLoopBlocks> forLoopStructure;  // initBlock → ForLoopBlocks
+    
+    // DO loop structure tracking
+    struct DoLoopBlocks {
+        int headerBlock;  // Block with DO statement (header)
+        int bodyBlock;    // Block with loop body statements
+        int exitBlock;    // Block after loop (exit target)
+    };
+    std::map<int, DoLoopBlocks> doLoopStructure;  // headerBlock → DoLoopBlocks
     
     // Mapping from loop constructs
     std::map<int, int> forLoopHeaders;      // FOR statement → block ID (deprecated, use forLoopStructure)

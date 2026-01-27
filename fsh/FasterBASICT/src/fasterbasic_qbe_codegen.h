@@ -114,6 +114,7 @@ private:
     std::unordered_set<std::string> m_localVariables;  // Local variables in current function
     std::unordered_set<std::string> m_sharedVariables; // Shared (global) variables accessed in function
     std::unordered_set<std::string> m_forLoopVariables; // FOR loop indices (always INTEGER)
+    std::unordered_map<std::string, std::string> m_defFnParams; // DEF FN parameter name -> QBE temp mapping
     
     // Current block being emitted (for statement handlers)
     const BasicBlock* m_currentBlock = nullptr;
@@ -122,13 +123,18 @@ private:
     std::string m_lastCondition;
     
     // SELECT CASE context (for emitting test blocks)
-    std::string m_selectCaseValue;
-    std::string m_selectCaseType;
-    std::vector<std::vector<std::string>> m_caseClauseValues;
-    std::vector<std::vector<const Expression*>> m_caseClauseExpressions;
-    std::vector<bool> m_caseClauseIsCaseIs;
-    std::vector<TokenType> m_caseClauseIsOperators;
-    size_t m_currentCaseClauseIndex = 0;
+    // Use map keyed by CaseStatement pointer to handle multiple SELECT CASEs
+    std::map<const CaseStatement*, std::string> m_selectCaseValues;
+    std::map<const CaseStatement*, std::string> m_selectCaseTypes;
+    std::map<const CaseStatement*, std::vector<std::vector<std::string>>> m_selectCaseClauseValues;
+    std::map<const CaseStatement*, std::vector<std::vector<const Expression*>>> m_selectCaseClauseExpressions;
+    std::map<const CaseStatement*, std::vector<bool>> m_selectCaseClauseIsCaseIs;
+    std::map<const CaseStatement*, std::vector<TokenType>> m_selectCaseClauseIsOperators;
+    std::map<const CaseStatement*, std::vector<bool>> m_selectCaseClauseIsRange;
+    std::map<const CaseStatement*, std::vector<const Expression*>> m_selectCaseClauseRangeStart;
+    std::map<const CaseStatement*, std::vector<const Expression*>> m_selectCaseClauseRangeEnd;
+    std::map<const CaseStatement*, size_t> m_selectCaseClauseIndex;
+    const CaseStatement* m_currentSelectCase = nullptr;  // Track which SELECT CASE we're processing
     
     // Flag: did last statement emit a terminator (jump/return)?
     bool m_lastStatementWasTerminator = false;
@@ -293,7 +299,7 @@ private:
     std::string emitDoubleToString(const std::string& value);
     std::string emitStringToInt(const std::string& value);
     std::string emitStringToDouble(const std::string& value);
-    std::string emitIntToDouble(const std::string& value);
+    std::string emitIntToDouble(const std::string& value, const std::string& valueQBEType = "l");
     std::string emitDoubleToInt(const std::string& value);
     
     // Math operations
@@ -337,6 +343,7 @@ private:
     
     // Type mapping
     std::string getQBEType(VariableType type);
+    std::string getActualQBEType(const Expression* expr);  // Get actual QBE type (w for comparisons, l for ints)
     std::string getQBETypeFromSuffix(char suffix);
     char getTypeSuffix(const std::string& varName);
     VariableType getVariableType(const std::string& varName);

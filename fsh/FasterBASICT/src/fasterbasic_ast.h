@@ -1516,9 +1516,12 @@ public:
         bool isCaseIs;                      // true for CASE IS conditions, false for regular CASE values
         TokenType caseIsOperator;           // Operator for CASE IS (e.g., GREATER_EQUAL)
         ExpressionPtr caseIsRightExpr;      // Right operand for CASE IS
+        bool isRange;                       // true for CASE x TO y range syntax
+        ExpressionPtr rangeStart;           // Start value for range (CASE x TO y)
+        ExpressionPtr rangeEnd;             // End value for range (CASE x TO y)
         std::vector<StatementPtr> statements;
 
-        WhenClause() : isCaseIs(false), caseIsOperator(TokenType::UNKNOWN) {}
+        WhenClause() : isCaseIs(false), caseIsOperator(TokenType::UNKNOWN), isRange(false) {}
     };
 
     ExpressionPtr caseExpression;  // The expression after CASE (e.g., TRUE)
@@ -1611,10 +1614,11 @@ public:
     std::string variable;        // Loop variable name
     std::string indexVariable;  // Optional index variable name (empty if not used)
     ExpressionPtr array;         // Array expression to iterate over
+    int inferredType;            // Inferred element type from array (stored as int, cast to VariableType)
 
-    ForInStatement(const std::string& var) : variable(var) {}
+    ForInStatement(const std::string& var) : variable(var), inferredType(0) {}
     ForInStatement(const std::string& var, const std::string& indexVar) 
-        : variable(var), indexVariable(indexVar) {}
+        : variable(var), indexVariable(indexVar), inferredType(0) {}
 
     ASTNodeType getType() const override { return ASTNodeType::STMT_FOR_IN; }
 

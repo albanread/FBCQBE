@@ -169,6 +169,86 @@ std::string QBECodeGenerator::getQBETypeD(const TypeDescriptor& typeDesc) {
     return typeDesc.toQBEType();
 }
 
+// Get the actual QBE type that an expression produces
+// This is important because comparisons return 'w' but variables use 'l'
+std::string QBECodeGenerator::getActualQBEType(const Expression* expr) {
+    if (!expr) return "d";  // Default to double
+    
+    ASTNodeType nodeType = expr->getType();
+    
+    // Comparisons always return 'w' (32-bit word for boolean result)
+    if (nodeType == ASTNodeType::EXPR_BINARY) {
+        const BinaryExpression* binExpr = static_cast<const BinaryExpression*>(expr);
+        TokenType op = binExpr->op;
+        
+        bool comparisonOp = (op == TokenType::EQUAL ||
+                            op == TokenType::NOT_EQUAL ||
+                            op == TokenType::LESS_THAN ||
+                            op == TokenType::LESS_EQUAL ||
+                            op == TokenType::GREATER_THAN ||
+                            op == TokenType::GREATER_EQUAL);
+        
+        if (comparisonOp) {
+            return "w";  // Comparisons return word (boolean)
+        }
+        
+        // For AND/OR/XOR, recursively check operands to determine size
+        bool logicalOp = (op == TokenType::AND || 
+                         op == TokenType::OR || 
+                         op == TokenType::XOR);
+        if (logicalOp) {
+            std::string leftType = getActualQBEType(binExpr->left.get());
+            std::string rightType = getActualQBEType(binExpr->right.get());
+            // If either is 'l', result is 'l', otherwise 'w'
+            if (leftType == "l" || rightType == "l") {
+                return "l";
+            }
+            return "w";
+        }
+    }
+    
+    // For function calls, check if it's an intrinsic that returns 'w' instead of 'l'
+    if (nodeType == ASTNodeType::EXPR_FUNCTION_CALL) {
+        const FunctionCallExpression* funcExpr = static_cast<const FunctionCallExpression*>(expr);
+        std::string upper = funcExpr->name;
+        for (char& c : upper) c = std::toupper(c);
+        
+        // These intrinsics return 'w' (32-bit) even though their semantic type is INT
+        if (upper == "SGN" || upper == "FIX" || upper == "CINT" || upper == "INT" ||
+            upper == "RAND" || upper == "ASC" || upper == "INSTR" ||
+            upper == "LEN" || upper == "CSRLIN" || upper == "POS") {
+            // Check if argument is double - if so, runtime returns w
+            if (funcExpr->arguments.size() > 0) {
+                VariableType argType = inferExpressionType(funcExpr->arguments[0].get());
+                if (argType == VariableType::DOUBLE || argType == VariableType::FLOAT) {
+                    return "w";
+                }
+            } else {
+                // No arguments or special case
+                return "w";
+            }
+        }
+        
+        // ABS and MIN/MAX return the same type as their arguments
+        if (upper == "ABS" && funcExpr->arguments.size() == 1) {
+            return getActualQBEType(funcExpr->arguments[0].get());
+        }
+        
+        if ((upper == "MIN" || upper == "MAX") && funcExpr->arguments.size() == 2) {
+            std::string leftType = getActualQBEType(funcExpr->arguments[0].get());
+            std::string rightType = getActualQBEType(funcExpr->arguments[1].get());
+            // If either is 'l' or 'd', promote to that type
+            if (leftType == "d" || rightType == "d") return "d";
+            if (leftType == "l" || rightType == "l") return "l";
+            return "w";
+        }
+    }
+    
+    // For other expressions, use the semantic type
+    VariableType semType = inferExpressionType(expr);
+    return getQBEType(semType);
+}
+
 std::string QBECodeGenerator::getQBEMemOpD(const TypeDescriptor& typeDesc) {
     // Use the TypeDescriptor's built-in QBE memory operation suffix (for stores)
     return typeDesc.toQBEMemOp();
@@ -369,11 +449,30 @@ std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
     
     // Check if we're in a function and if this is a parameter
     if (m_inFunction && m_cfg) {
+        // First check DEF FN parameters (these have priority for DEF FN functions)
+        if (!m_defFnParams.empty()) {
+            // Check all variations of the variable name
+            if (m_defFnParams.count(varName) > 0) {
+                return m_defFnParams.at(varName);
+            }
+            if (m_defFnParams.count(safeName) > 0) {
+                return m_defFnParams.at(safeName);
+            }
+        }
+        
         // Check if varName is a parameter of the current function
+        // Need to check multiple variations because parameter names might be normalized
+        std::string plainName = stripTypeSuffix(varName);
+        std::string safePlainName = stripTypeSuffix(safeName);
+        
         for (const auto& param : m_cfg->parameters) {
-            if (param == varName || param == safeName) {
-                // This is a parameter - use it directly without var_ prefix
-                return "%" + safeName;
+            std::string paramPlain = stripTypeSuffix(param);
+            
+            // Match if: exact match, safe match, or plain name matches
+            if (param == varName || param == safeName || 
+                paramPlain == plainName || paramPlain == safePlainName) {
+                // This is a parameter - use the original parameter name from function signature
+                return "%" + param;
             }
         }
         
@@ -717,13 +816,20 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             // Integer functions return INT (LEN, ASC, INSTR return 64-bit or 32-bit ints)
             if (upper == "LEN" || upper == "ASC" || upper == "INSTR" || upper == "STRTYPE" || 
                 upper == "RAND" || upper == "FIX" || upper == "CINT" || upper == "SGN" ||
-                upper == "MIN" || upper == "MAX" || upper == "CSRLIN" || upper == "POS") {
+                upper == "MIN" || upper == "MAX" || upper == "CSRLIN" || upper == "POS" ||
+                upper == "INT") {
                 return VariableType::INT;
+            }
+            
+            // ABS returns the same type as its argument
+            if (upper == "ABS" && funcExpr->arguments.size() == 1) {
+                VariableType argType = inferExpressionType(funcExpr->arguments[0].get());
+                return argType;
             }
             
             // Math functions return DOUBLE
             if (upper == "VAL" || upper == "RND" || upper == "SIN" || upper == "COS" || 
-                upper == "TAN" || upper == "SQRT" || upper == "ABS" || upper == "INT") {
+                upper == "TAN" || upper == "SQRT") {
                 return VariableType::DOUBLE;
             }
             
@@ -765,16 +871,24 @@ std::string QBECodeGenerator::promoteToType(const std::string& value,
     
     // Promote INT to DOUBLE (w or l -> d)
     if (fromType == VariableType::INT && toType == VariableType::DOUBLE) {
-        // Need to check if value is 'w' or 'l' type
-        // For now, assume it's coming from the expression which knows its QBE type
-        return emitIntToDouble(value);
+        // Pass the QBE type so emitIntToDouble can handle w vs l properly
+        return emitIntToDouble(value, fromQBE);
     }
     
     // Promote INT to FLOAT (w or l -> s)
     if (fromType == VariableType::INT && toType == VariableType::FLOAT) {
         std::string temp = allocTemp("s");
-        emit("    " + temp + " =s sltof " + value + "\n");
-        m_stats.instructionsGenerated++;
+        if (fromQBE == "w") {
+            // Word to float: first extend to long, then convert
+            std::string longTemp = allocTemp("l");
+            emit("    " + longTemp + " =l extsw " + value + "\n");
+            emit("    " + temp + " =s sltof " + longTemp + "\n");
+            m_stats.instructionsGenerated += 2;
+        } else {
+            // Long to float: direct conversion
+            emit("    " + temp + " =s sltof " + value + "\n");
+            m_stats.instructionsGenerated++;
+        }
         return temp;
     }
     

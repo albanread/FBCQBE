@@ -40,6 +40,7 @@ void Lexer::initializeKeywords() {
         s_keywords["ELSEIF"] = TokenType::ELSEIF;
         s_keywords["ENDIF"] = TokenType::ENDIF;
         s_keywords["FOR"] = TokenType::FOR;
+        s_keywords["EACH"] = TokenType::EACH;
         s_keywords["TO"] = TokenType::TO;
         s_keywords["STEP"] = TokenType::STEP;
         s_keywords["IN"] = TokenType::IN;

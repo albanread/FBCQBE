@@ -213,9 +213,9 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
         return emitStringConcat(leftTemp, rightTemp);
     }
     
-    // Bitwise and MOD operations REQUIRE integers
-    bool requiresInteger = (op == TokenType::AND || op == TokenType::OR || 
-                           op == TokenType::XOR || op == TokenType::MOD);
+    // MOD operation REQUIRES integers
+    // AND/OR/XOR work on both booleans (w) and integers (l), so don't force type
+    bool requiresInteger = (op == TokenType::MOD);
     
     // Determine operation type
     VariableType opType;
@@ -264,8 +264,8 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
             break;
             
         case TokenType::MOD:
-            // MOD is integer-only operation
-            emit("    " + resultTemp + " =w rem " + leftTemp + ", " + rightTemp + "\n");
+            // MOD is integer-only operation (64-bit)
+            emit("    " + resultTemp + " =l rem " + leftTemp + ", " + rightTemp + "\n");
             break;
             
         // Comparison operators (return integer 0 or 1)
@@ -300,21 +300,48 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
             
         case TokenType::GREATER_EQUAL:
             resultTemp = allocTemp("w");
-            emit("    " + resultTemp + " =w csge" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
+            // For integers use 'csge', for floats use 'cge'
+            emit("    " + resultTemp + " =w c" + (typeSuffix == "l" ? "s" : "") + "ge" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
             break;
             
-        // Logical/Bitwise operators (integer-only)
+        // Logical/Bitwise operators - work on both w (comparisons) and l (integers)
         case TokenType::AND:
-            emit("    " + resultTemp + " =w and " + leftTemp + ", " + rightTemp + "\n");
-            break;
-            
         case TokenType::OR:
-            emit("    " + resultTemp + " =w or " + leftTemp + ", " + rightTemp + "\n");
-            break;
+        case TokenType::XOR: {
+            // Get actual QBE types of operands (w for comparisons, l for integers)
+            std::string leftQBEType = getActualQBEType(expr->left.get());
+            std::string rightQBEType = getActualQBEType(expr->right.get());
             
-        case TokenType::XOR:
-            emit("    " + resultTemp + " =w xor " + leftTemp + ", " + rightTemp + "\n");
+            // Determine operation type - promote w to l if mixed
+            std::string opQBEType;
+            if (leftQBEType == "l" || rightQBEType == "l") {
+                opQBEType = "l";  // Use l if either operand is l
+                // Extend w operands to l if needed
+                if (leftQBEType == "w") {
+                    std::string extendedLeft = allocTemp("l");
+                    emit("    " + extendedLeft + " =l extsw " + leftTemp + "\n");
+                    m_stats.instructionsGenerated++;
+                    leftTemp = extendedLeft;
+                }
+                if (rightQBEType == "w") {
+                    std::string extendedRight = allocTemp("l");
+                    emit("    " + extendedRight + " =l extsw " + rightTemp + "\n");
+                    m_stats.instructionsGenerated++;
+                    rightTemp = extendedRight;
+                }
+            } else {
+                opQBEType = "w";  // Both are w, use w
+            }
+            
+            // Allocate result temp with correct type
+            resultTemp = allocTemp(opQBEType);
+            
+            // Emit the operation with correct type
+            const char* opName = (op == TokenType::AND) ? "and" : 
+                                 (op == TokenType::OR) ? "or" : "xor";
+            emit("    " + resultTemp + " =" + opQBEType + " " + opName + " " + leftTemp + ", " + rightTemp + "\n");
             break;
+        }
             
         default:
             emitComment("Unknown operator: " + std::to_string(static_cast<int>(op)));
@@ -768,14 +795,39 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         VariableType argType = inferExpressionType(expr->arguments[0].get());
         
         if (argType == VariableType::INT) {
-            // For integers: if negative, negate
+            // For integers: if negative, negate using conditional branches
+            // Check actual QBE type (w or l)
+            std::string argQBEType = getActualQBEType(expr->arguments[0].get());
+            if (argQBEType != "w" && argQBEType != "l") {
+                argQBEType = "l";  // Default to long for INT
+            }
+            
             std::string isNeg = allocTemp("w");
-            emit("    " + isNeg + " =w csltw " + argTemp + ", 0\n");
-            std::string negVal = allocTemp("w");
-            emit("    " + negVal + " =w neg " + argTemp + "\n");
-            std::string result = allocTemp("w");
-            emit("    " + result + " =w sel " + isNeg + ", " + negVal + ", " + argTemp + "\n");
-            m_stats.instructionsGenerated += 3;
+            if (argQBEType == "l") {
+                emit("    " + isNeg + " =w csltl " + argTemp + ", 0\n");
+            } else {
+                emit("    " + isNeg + " =w csltw " + argTemp + ", 0\n");
+            }
+            
+            std::string negVal = allocTemp(argQBEType);
+            emit("    " + negVal + " =" + argQBEType + " neg " + argTemp + "\n");
+            
+            // Use conditional branch pattern
+            std::string thenLabel = allocLabel();
+            std::string elseLabel = allocLabel();
+            std::string endLabel = allocLabel();
+            std::string result = allocTemp(argQBEType);
+            
+            emit("    jnz " + isNeg + ", @" + thenLabel + ", @" + elseLabel + "\n");
+            emit("@" + thenLabel + "\n");
+            emit("    " + result + " =" + argQBEType + " copy " + negVal + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + elseLabel + "\n");
+            emit("    " + result + " =" + argQBEType + " copy " + argTemp + "\n");
+            emit("@" + endLabel + "\n");
+            
+            m_stats.instructionsGenerated += 8;
+            m_stats.labelsGenerated += 3;
             return result;
         } else {
             // For doubles: use runtime function (fabs)
@@ -813,13 +865,31 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
             std::string posOne = allocTemp("w");
             emit("    " + posOne + " =w copy 1\n");
             
-            // Select: if negative return -1, else if positive return 1, else return 0
+            // Use conditional branches: if negative return -1, else if positive return 1, else return 0
+            std::string negLabel = allocLabel();
+            std::string posLabel = allocLabel();
+            std::string zeroLabel = allocLabel();
+            std::string endLabel = allocLabel();
             std::string result = allocTemp("w");
-            emit("    " + result + " =w sel " + isNeg + ", " + negOne + ", " + zero + "\n");
+            
+            emit("    jnz " + isNeg + ", @" + negLabel + ", @" + posLabel + "\n");
+            emit("@" + negLabel + "\n");
+            emit("    " + result + " =w copy " + negOne + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + posLabel + "\n");
             std::string finalResult = allocTemp("w");
-            emit("    " + finalResult + " =w sel " + isPos + ", " + posOne + ", " + result + "\n");
-            m_stats.instructionsGenerated += 8;
-            return finalResult;
+            emit("    jnz " + isPos + ", @" + zeroLabel + ", @" + endLabel + "\n");
+            emit("@" + zeroLabel + "\n");
+            emit("    " + result + " =w copy " + posOne + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + endLabel + "\n");
+            if (finalResult.empty()) {
+                emit("    " + result + " =w copy " + zero + "\n");
+            }
+            
+            m_stats.instructionsGenerated += 13;
+            m_stats.labelsGenerated += 4;
+            return result;
         } else {
             // For doubles: use runtime function
         }
@@ -858,20 +928,46 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         }
         
         if (leftType == VariableType::INT || (leftType == rightType && leftType == VariableType::INT)) {
-            // Integer minimum
+            // Integer minimum using conditional branches
             std::string isLess = allocTemp("w");
             emit("    " + isLess + " =w csltw " + leftTemp + ", " + rightTemp + "\n");
+            
+            std::string thenLabel = allocLabel();
+            std::string elseLabel = allocLabel();
+            std::string endLabel = allocLabel();
             std::string result = allocTemp("w");
-            emit("    " + result + " =w sel " + isLess + ", " + leftTemp + ", " + rightTemp + "\n");
-            m_stats.instructionsGenerated += 2;
+            
+            emit("    jnz " + isLess + ", @" + thenLabel + ", @" + elseLabel + "\n");
+            emit("@" + thenLabel + "\n");
+            emit("    " + result + " =w copy " + leftTemp + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + elseLabel + "\n");
+            emit("    " + result + " =w copy " + rightTemp + "\n");
+            emit("@" + endLabel + "\n");
+            
+            m_stats.instructionsGenerated += 8;
+            m_stats.labelsGenerated += 3;
             return result;
         } else {
-            // Double minimum
+            // Double minimum using conditional branches
             std::string isLess = allocTemp("w");
             emit("    " + isLess + " =w cltd " + leftTemp + ", " + rightTemp + "\n");
+            
+            std::string thenLabel = allocLabel();
+            std::string elseLabel = allocLabel();
+            std::string endLabel = allocLabel();
             std::string result = allocTemp("d");
-            emit("    " + result + " =d sel " + isLess + ", " + leftTemp + ", " + rightTemp + "\n");
-            m_stats.instructionsGenerated += 2;
+            
+            emit("    jnz " + isLess + ", @" + thenLabel + ", @" + elseLabel + "\n");
+            emit("@" + thenLabel + "\n");
+            emit("    " + result + " =d copy " + leftTemp + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + elseLabel + "\n");
+            emit("    " + result + " =d copy " + rightTemp + "\n");
+            emit("@" + endLabel + "\n");
+            
+            m_stats.instructionsGenerated += 8;
+            m_stats.labelsGenerated += 3;
             return result;
         }
     }
@@ -909,20 +1005,46 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         }
         
         if (leftType == VariableType::INT || (leftType == rightType && leftType == VariableType::INT)) {
-            // Integer maximum
+            // Integer maximum using conditional branches
             std::string isGreater = allocTemp("w");
             emit("    " + isGreater + " =w csgtw " + leftTemp + ", " + rightTemp + "\n");
+            
+            std::string thenLabel = allocLabel();
+            std::string elseLabel = allocLabel();
+            std::string endLabel = allocLabel();
             std::string result = allocTemp("w");
-            emit("    " + result + " =w sel " + isGreater + ", " + leftTemp + ", " + rightTemp + "\n");
-            m_stats.instructionsGenerated += 2;
+            
+            emit("    jnz " + isGreater + ", @" + thenLabel + ", @" + elseLabel + "\n");
+            emit("@" + thenLabel + "\n");
+            emit("    " + result + " =w copy " + leftTemp + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + elseLabel + "\n");
+            emit("    " + result + " =w copy " + rightTemp + "\n");
+            emit("@" + endLabel + "\n");
+            
+            m_stats.instructionsGenerated += 8;
+            m_stats.labelsGenerated += 3;
             return result;
         } else {
-            // Double maximum
+            // Double maximum using conditional branches
             std::string isGreater = allocTemp("w");
             emit("    " + isGreater + " =w cgtd " + leftTemp + ", " + rightTemp + "\n");
+            
+            std::string thenLabel = allocLabel();
+            std::string elseLabel = allocLabel();
+            std::string endLabel = allocLabel();
             std::string result = allocTemp("d");
-            emit("    " + result + " =d sel " + isGreater + ", " + leftTemp + ", " + rightTemp + "\n");
-            m_stats.instructionsGenerated += 2;
+            
+            emit("    jnz " + isGreater + ", @" + thenLabel + ", @" + elseLabel + "\n");
+            emit("@" + thenLabel + "\n");
+            emit("    " + result + " =d copy " + leftTemp + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + elseLabel + "\n");
+            emit("    " + result + " =d copy " + rightTemp + "\n");
+            emit("@" + endLabel + "\n");
+            
+            m_stats.instructionsGenerated += 8;
+            m_stats.labelsGenerated += 3;
             return result;
         }
     }

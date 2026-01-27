@@ -519,7 +519,65 @@ void QBECodeGenerator::emitFunction(const std::string& functionName) {
     if (isDefFn && m_cfg->defStatement && m_cfg->defStatement->body) {
         emitComment("DEF FN body - single expression");
         
-        // Evaluate the expression
+        // DEF FN is just a named expression with parameters
+        // Register ALL possible name variations for parameters so they can be found
+        // Parameters from the DefStatement are the original names (e.g., "N%", "X$")
+        m_defFnParams.clear();  // Clear any previous DEF FN parameters
+        
+        for (size_t i = 0; i < m_cfg->defStatement->parameters.size(); ++i) {
+            std::string originalParam = m_cfg->defStatement->parameters[i];
+            std::string qbeParam = "%" + originalParam;
+            
+            // Strip the BASIC type suffix to get base name
+            std::string baseName = originalParam;
+            if (!baseName.empty()) {
+                char lastChar = baseName.back();
+                if (lastChar == '%' || lastChar == '$' || lastChar == '#' || lastChar == '!') {
+                    baseName.pop_back();
+                }
+            }
+            
+            // Register ALL possible lookup variations in the DEF FN params map:
+            // 1. Original name with suffix (e.g., "N%")
+            m_defFnParams[originalParam] = qbeParam;
+            
+            // 2. Base name without suffix (e.g., "N")
+            if (baseName != originalParam) {
+                m_defFnParams[baseName] = qbeParam;
+            }
+            
+            // 3. Normalized name with type suffix (e.g., "N_INT", "N_DOUBLE")
+            // The semantic analyzer might normalize variable names in expressions
+            if (i < m_cfg->parameterTypes.size()) {
+                VariableType paramType = m_cfg->parameterTypes[i];
+                std::string normalizedSuffix = "";
+                switch (paramType) {
+                    case VariableType::INT: normalizedSuffix = "_INT"; break;
+                    case VariableType::DOUBLE: normalizedSuffix = "_DOUBLE"; break;
+                    case VariableType::FLOAT: normalizedSuffix = "_FLOAT"; break;
+                    case VariableType::STRING: normalizedSuffix = "_STRING"; break;
+                    default: normalizedSuffix = "_DOUBLE"; break;  // Default fallback
+                }
+                if (!normalizedSuffix.empty()) {
+                    std::string normalizedName = baseName + normalizedSuffix;
+                    m_defFnParams[normalizedName] = qbeParam;
+                }
+            }
+            
+            // 4. Sanitized version (type suffix chars replaced with _)
+            std::string sanitized = originalParam;
+            for (size_t j = 0; j < sanitized.length(); ++j) {
+                char c = sanitized[j];
+                if (c == '%' || c == '$' || c == '#' || c == '!') {
+                    sanitized[j] = '_';
+                }
+            }
+            if (sanitized != originalParam) {
+                m_defFnParams[sanitized] = qbeParam;
+            }
+        }
+        
+        // Evaluate the expression - parameters will be resolved via m_localVariables
         std::string resultTemp = emitExpression(m_cfg->defStatement->body.get());
         
         // Return the result
@@ -793,68 +851,110 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
         // We need the SELECT CASE expression value and the CASE value(s)
         // This requires passing context from the SELECT block through the CFG
         // For now, we'll handle this in emitCase by storing the select value globally
-        if (m_currentCaseClauseIndex < m_caseClauseExpressions.size() && 
-            m_currentCaseClauseIndex < m_caseClauseIsCaseIs.size() &&
-            m_currentCaseClauseIndex < m_caseClauseIsOperators.size()) {
+        // Look up which SELECT CASE this test block belongs to
+        auto selectCaseIt = m_programCFG->mainCFG->selectCaseInfo.find(block->id);
+        if (selectCaseIt != m_programCFG->mainCFG->selectCaseInfo.end()) {
+            const auto& selectInfo = selectCaseIt->second;
+            const CaseStatement* caseStmt = selectInfo.caseStatement;
             
-            const auto& expressions = m_caseClauseExpressions[m_currentCaseClauseIndex];
-            bool isCaseIs = m_caseClauseIsCaseIs[m_currentCaseClauseIndex];
-            TokenType op = m_caseClauseIsOperators[m_currentCaseClauseIndex];
+            // Find which test block index this is
+            size_t testIndex = 0;
+            for (size_t i = 0; i < selectInfo.testBlocks.size(); i++) {
+                if (selectInfo.testBlocks[i] == block->id) {
+                    testIndex = i;
+                    break;
+                }
+            }
             
-            if (isCaseIs && expressions.size() == 1) {
-                // CASE IS condition - evaluate right expression and compare
-                std::string rightTemp = emitExpression(expressions[0]);
-                std::string cmpTemp = allocTemp("w");
-                std::string opStr;
-                if (m_selectCaseType == "d") {
-                    std::string selectD = allocTemp("d");
-                    emit("    " + selectD + " =d sitod " + m_selectCaseValue + "\n");
-                    m_stats.instructionsGenerated++;
-                    opStr = getComparisonOpDouble(op);
-                    emit("    " + cmpTemp + " =w " + opStr + " " + selectD + ", " + rightTemp + "\n");
-                } else {
-                    // Convert to word
-                    std::string rightWord = rightTemp;
-                    std::string temp = allocTemp("w");
-                    emit("    " + temp + " =w dtosi " + rightTemp + "\n");
-                    m_stats.instructionsGenerated++;
-                    rightWord = temp;
-                    opStr = getComparisonOp(op);
-                    emit("    " + cmpTemp + " =w " + opStr + " " + m_selectCaseValue + ", " + rightWord + "\n");
-                }
+            if (testIndex >= caseStmt->whenClauses.size()) {
+                emitComment("ERROR: Test block index out of range");
+                m_lastCondition = allocTemp("w");
+                emit("    " + m_lastCondition + " =w copy 0\n");
                 m_stats.instructionsGenerated++;
-                m_lastCondition = cmpTemp;
-            } else if (!isCaseIs && expressions.size() == 1) {
-                // Single value comparison - evaluate expression and compare
-                std::string valueTemp = emitExpression(expressions[0]);
-                std::string cmpTemp = allocTemp("w");
-                if (m_selectCaseType == "d") {
-                    std::string selectD = allocTemp("d");
-                    emit("    " + selectD + " =d sitod " + m_selectCaseValue + "\n");
-                    m_stats.instructionsGenerated++;
-                    std::string opStr = "ceqd"; // equal for double
-                    emit("    " + cmpTemp + " =w " + opStr + " " + selectD + ", " + valueTemp + "\n");
-                } else {
-                    std::string valueWord = valueTemp;
-                    std::string temp = allocTemp("w");
-                    emit("    " + temp + " =w dtosi " + valueTemp + "\n");
-                    m_stats.instructionsGenerated++;
-                    valueWord = temp;
-                    emit("    " + cmpTemp + " =w ceqw " + m_selectCaseValue + ", " + valueWord + "\n");
-                }
-                m_stats.instructionsGenerated++;
-                m_lastCondition = cmpTemp;
-            } else if (!isCaseIs && expressions.size() > 1) {
-                // Multiple values - OR them together
-                std::vector<std::string> comparisons;
-                for (const auto& expr : expressions) {
-                    std::string valueTemp = emitExpression(expr);
-                    std::string cmpTemp = allocTemp("w");
-                    if (m_selectCaseType == "d") {
+            } else {
+                const auto& clause = caseStmt->whenClauses[testIndex];
+                
+                // Evaluate the SELECT CASE expression to get the value to compare
+                std::string selectValue = emitExpression(caseStmt->caseExpression.get());
+                VariableType selectType = inferExpressionType(caseStmt->caseExpression.get());
+                std::string selectQBEType = getQBEType(selectType);
+            
+                if (clause.isRange) {
+                    // CASE x TO y range - check if value is between start and end (inclusive)
+                    std::string startTemp = emitExpression(clause.rangeStart.get());
+                    std::string endTemp = emitExpression(clause.rangeEnd.get());
+                    
+                    // Check: selectValue >= start AND selectValue <= end
+                    std::string cmpGE = allocTemp("w");
+                    std::string cmpLE = allocTemp("w");
+                    
+                    if (selectQBEType == "d") {
                         std::string selectD = allocTemp("d");
-                        emit("    " + selectD + " =d sitod " + m_selectCaseValue + "\n");
+                        emit("    " + selectD + " =d sltof " + selectValue + "\n");
                         m_stats.instructionsGenerated++;
-                        std::string opStr = "ceqd";
+                        emit("    " + cmpGE + " =w cged " + selectD + ", " + startTemp + "\n");
+                        m_stats.instructionsGenerated++;
+                        emit("    " + cmpLE + " =w cled " + selectD + ", " + endTemp + "\n");
+                        m_stats.instructionsGenerated++;
+                    } else {
+                        // Convert start and end to word if needed
+                        std::string startWord = startTemp;
+                        std::string endWord = endTemp;
+                        if (selectQBEType == "w" || selectQBEType == "l") {
+                            // Need to convert double to int
+                            std::string tempStart = allocTemp("w");
+                            emit("    " + tempStart + " =w dtosi " + startTemp + "\n");
+                            m_stats.instructionsGenerated++;
+                            startWord = tempStart;
+                            
+                            std::string tempEnd = allocTemp("w");
+                            emit("    " + tempEnd + " =w dtosi " + endTemp + "\n");
+                            m_stats.instructionsGenerated++;
+                            endWord = tempEnd;
+                        }
+                        emit("    " + cmpGE + " =w csgew " + selectValue + ", " + startWord + "\n");
+                        m_stats.instructionsGenerated++;
+                        emit("    " + cmpLE + " =w cslew " + selectValue + ", " + endWord + "\n");
+                        m_stats.instructionsGenerated++;
+                    }
+                    
+                    // AND the two comparisons together
+                    std::string andTemp = allocTemp("w");
+                    emit("    " + andTemp + " =w and " + cmpGE + ", " + cmpLE + "\n");
+                    m_stats.instructionsGenerated++;
+                    m_lastCondition = andTemp;
+                } else if (clause.isCaseIs) {
+                    // CASE IS condition - evaluate right expression and compare
+                    std::string rightTemp = emitExpression(clause.caseIsRightExpr.get());
+                    std::string cmpTemp = allocTemp("w");
+                    std::string opStr;
+                    if (selectQBEType == "d") {
+                        std::string selectD = allocTemp("d");
+                        emit("    " + selectD + " =d sltof " + selectValue + "\n");
+                        m_stats.instructionsGenerated++;
+                        opStr = getComparisonOpDouble(clause.caseIsOperator);
+                        emit("    " + cmpTemp + " =w " + opStr + " " + selectD + ", " + rightTemp + "\n");
+                    } else {
+                        // Convert to word
+                        std::string rightWord = rightTemp;
+                        std::string temp = allocTemp("w");
+                        emit("    " + temp + " =w dtosi " + rightTemp + "\n");
+                        m_stats.instructionsGenerated++;
+                        rightWord = temp;
+                        opStr = getComparisonOp(clause.caseIsOperator);
+                        emit("    " + cmpTemp + " =w " + opStr + " " + selectValue + ", " + rightWord + "\n");
+                    }
+                    m_stats.instructionsGenerated++;
+                    m_lastCondition = cmpTemp;
+                } else if (clause.values.size() == 1) {
+                    // Single value comparison
+                    std::string valueTemp = emitExpression(clause.values[0].get());
+                    std::string cmpTemp = allocTemp("w");
+                    if (selectQBEType == "d") {
+                        std::string selectD = allocTemp("d");
+                        emit("    " + selectD + " =d sltof " + selectValue + "\n");
+                        m_stats.instructionsGenerated++;
+                        std::string opStr = "ceqd"; // equal for double
                         emit("    " + cmpTemp + " =w " + opStr + " " + selectD + ", " + valueTemp + "\n");
                     } else {
                         std::string valueWord = valueTemp;
@@ -862,31 +962,66 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
                         emit("    " + temp + " =w dtosi " + valueTemp + "\n");
                         m_stats.instructionsGenerated++;
                         valueWord = temp;
-                        emit("    " + cmpTemp + " =w ceqw " + m_selectCaseValue + ", " + valueWord + "\n");
+                        emit("    " + cmpTemp + " =w ceqw " + selectValue + ", " + valueWord + "\n");
                     }
                     m_stats.instructionsGenerated++;
-                    comparisons.push_back(cmpTemp);
-                }
-                
-                // OR all comparisons
-                std::string orTemp = comparisons[0];
-                for (size_t i = 1; i < comparisons.size(); i++) {
-                    std::string newOr = allocTemp("w");
-                    emit("    " + newOr + " =w or " + orTemp + ", " + comparisons[i] + "\n");
+                    m_lastCondition = cmpTemp;
+                } else if (clause.values.size() > 1) {
+                    // Multiple values - OR them together
+                    std::vector<std::string> comparisons;
+                    for (const auto& valueExpr : clause.values) {
+                        std::string valueTemp = emitExpression(valueExpr.get());
+                        std::string cmpTemp = allocTemp("w");
+                        if (selectQBEType == "d") {
+                            std::string selectD = allocTemp("d");
+                            emit("    " + selectD + " =d sltof " + selectValue + "\n");
+                            m_stats.instructionsGenerated++;
+                            std::string opStr = "ceqd";
+                            emit("    " + cmpTemp + " =w " + opStr + " " + selectD + ", " + valueTemp + "\n");
+                        } else {
+                            std::string valueWord = valueTemp;
+                            std::string temp = allocTemp("w");
+                            emit("    " + temp + " =w dtosi " + valueTemp + "\n");
+                            m_stats.instructionsGenerated++;
+                            valueWord = temp;
+                            emit("    " + cmpTemp + " =w ceqw " + selectValue + ", " + valueWord + "\n");
+                        }
+                        m_stats.instructionsGenerated++;
+                        comparisons.push_back(cmpTemp);
+                    }
+                    
+                    // OR all comparisons
+                    std::string orTemp = comparisons[0];
+                    for (size_t i = 1; i < comparisons.size(); i++) {
+                        std::string newOr = allocTemp("w");
+                        emit("    " + newOr + " =w or " + orTemp + ", " + comparisons[i] + "\n");
+                        m_stats.instructionsGenerated++;
+                        orTemp = newOr;
+                    }
+                    m_lastCondition = orTemp;
+                } else {
+                    // Invalid case
+                    emitComment("ERROR: Empty CASE clause");
+                    m_lastCondition = allocTemp("w");
+                    emit("    " + m_lastCondition + " =w copy 0\n");
                     m_stats.instructionsGenerated++;
-                    orTemp = newOr;
                 }
-                m_lastCondition = orTemp;
-            } else {
-                // Invalid case
-                emitComment("ERROR: Invalid CASE clause configuration");
-                m_lastCondition = allocTemp("w");
-                emit("    " + m_lastCondition + " =w copy 0\n");
-                m_stats.instructionsGenerated++;
             }
-            
-            m_currentCaseClauseIndex++;
         }
+    }
+    
+    // Check if this is a DO loop header block and push loop context
+    auto doStructIt = m_cfg->doLoopStructure.find(block->id);
+    if (doStructIt != m_cfg->doLoopStructure.end()) {
+        const auto& doBlocks = doStructIt->second;
+        std::string exitLabel = getBlockLabel(doBlocks.exitBlock);
+        pushLoop(exitLabel, "", "DO", "");
+    }
+    
+    // Check if this is an "After DO" exit block and pop loop context
+    if (block->label.find("After DO") != std::string::npos && block->isLoopExit) {
+        // Pop the DO loop context
+        popLoop();
     }
     
     // Emit all statements in the block

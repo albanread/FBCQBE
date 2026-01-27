@@ -330,6 +330,7 @@ bool SemanticAnalyzer::analyze(Program& program, const CompilerOptions& options)
 // =============================================================================
 
 void SemanticAnalyzer::pass1_collectDeclarations(Program& program) {
+    collectForEachVariables(program);  // Prescan FOR EACH to mark variables as ADAPTIVE - MUST BE FIRST!
     collectLineNumbers(program);
     collectLabels(program);
     // NOTE: collectOptionStatements removed - options are now collected by parser
@@ -1088,6 +1089,14 @@ void SemanticAnalyzer::processDefStatement(const DefStatement& stmt) {
     // Infer return type from function name
     sym.returnType = inferTypeFromName(stmt.functionName);
     
+    // Infer parameter types from parameter names
+    for (const auto& paramName : stmt.parameters) {
+        VariableType paramType = inferTypeFromName(paramName);
+        sym.parameterTypes.push_back(paramType);
+        sym.parameterTypeNames.push_back("");  // No user-defined types for DEF FN
+        sym.parameterIsByRef.push_back(false);  // DEF FN parameters are always by value
+    }
+    
     m_symbolTable.functions[stmt.functionName] = sym;
 }
 
@@ -1157,6 +1166,21 @@ void SemanticAnalyzer::processDataStatement(const DataStatement& stmt, int lineN
     }
 }
 
+void SemanticAnalyzer::collectForEachVariables(Program& program) {
+    // Collect FOR EACH variables so we can prevent them from being added to symbol table
+    for (const auto& line : program.lines) {
+        for (const auto& stmt : line->statements) {
+            if (stmt->getType() == ASTNodeType::STMT_FOR_IN) {
+                const ForInStatement* forInStmt = static_cast<const ForInStatement*>(stmt.get());
+                m_forEachVariables.insert(forInStmt->variable);
+                if (!forInStmt->indexVariable.empty()) {
+                    m_forEachVariables.insert(forInStmt->indexVariable);
+                }
+            }
+        }
+    }
+}
+
 // =============================================================================
 // Pass 2: Validation
 // =============================================================================
@@ -1217,7 +1241,7 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
             validateForStatement(static_cast<const ForStatement&>(stmt));
             break;
         case ASTNodeType::STMT_FOR_IN:
-            validateForInStatement(static_cast<const ForInStatement&>(stmt));
+            validateForInStatement(static_cast<ForInStatement&>(const_cast<Statement&>(stmt)));
             break;
         case ASTNodeType::STMT_NEXT:
             validateNextStatement(static_cast<const NextStatement&>(stmt));
@@ -1679,18 +1703,14 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
     // Register the variable as INTEGER type in symbol table
     if (m_currentFunctionScope.inFunction) {
         // In function: use local variable
-        m_symbolTable.variables[plainVarName] = VariableInfo{
-            VariableType::INT,
-            TypeDescriptor(BaseType::INTEGER),
-            stmt.location
-        };
+        VariableSymbol varSym(plainVarName, TypeDescriptor(BaseType::INTEGER), true);
+        varSym.firstUse = stmt.location;
+        m_symbolTable.variables[plainVarName] = varSym;
     } else {
         // Global: use global variable
-        m_symbolTable.variables[plainVarName] = VariableInfo{
-            VariableType::INT,
-            TypeDescriptor(BaseType::INTEGER),
-            stmt.location
-        };
+        VariableSymbol varSym(plainVarName, TypeDescriptor(BaseType::INTEGER), true);
+        varSym.firstUse = stmt.location;
+        m_symbolTable.variables[plainVarName] = varSym;
     }
     
     // Validate expressions
@@ -1717,33 +1737,17 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
     m_forStack.push(ctx);
 }
 
-void SemanticAnalyzer::validateForInStatement(const ForInStatement& stmt) {
-    // Declare/use loop variable
-    if (m_currentFunctionScope.inFunction) {
-        validateVariableInFunction(stmt.variable, stmt.location);
-    } else {
-        useVariable(stmt.variable, stmt.location);
-    }
-    
-    // Declare/use optional index variable
-    if (!stmt.indexVariable.empty()) {
-        if (m_currentFunctionScope.inFunction) {
-            validateVariableInFunction(stmt.indexVariable, stmt.location);
-        } else {
-            useVariable(stmt.indexVariable, stmt.location);
-        }
-    }
-    
-    // Validate array expression
+void SemanticAnalyzer::validateForInStatement(ForInStatement& stmt) {
+    // Validate the array expression
     validateExpression(*stmt.array);
     
-    // Type check - array expression should be an array access
-    VariableType arrayType = inferExpressionType(*stmt.array);
+    // Infer and store the element type in the AST node (cast to int for storage)
+    stmt.inferredType = static_cast<int>(inferExpressionType(*stmt.array));
     
-    // The array should be a valid array reference
-    // For now, we'll allow any type but could add stricter checking later
+    // Note: We do NOT add the FOR EACH variable to the symbol table
+    // It will be declared directly in codegen with the correct type
     
-    // Push to control flow stack (reuse ForContext for simplicity)
+    // Push to control flow stack
     ForContext ctx;
     ctx.variable = stmt.variable;
     ctx.location = stmt.location;
@@ -2165,14 +2169,23 @@ void SemanticAnalyzer::validateExpression(const Expression& expr) {
 }
 
 void SemanticAnalyzer::validateReturnStatement(const ReturnStatement& stmt) {
-    // Check if we're in a function or subroutine
+    // RETURN can be used in two contexts:
+    // 1. GOSUB/RETURN at program level (no return value)
+    // 2. Inside FUNCTION/SUB (with or without value depending on type)
+    
+    // If we're not in a function/sub, this is a GOSUB RETURN
     if (!m_currentFunctionScope.inFunction) {
-        error(SemanticErrorType::TYPE_MISMATCH,
-              "RETURN statement outside of FUNCTION or SUB",
-              stmt.location);
+        // GOSUB RETURN must not have a return value
+        if (stmt.returnValue) {
+            error(SemanticErrorType::TYPE_MISMATCH,
+                  "RETURN from GOSUB cannot return a value",
+                  stmt.location);
+        }
+        // Otherwise, this is a valid GOSUB RETURN
         return;
     }
     
+    // We're inside a FUNCTION or SUB
     if (m_currentFunctionScope.isSub) {
         // In a SUB - should not have a return value
         if (stmt.returnValue) {
@@ -2838,6 +2851,16 @@ int SemanticAnalyzer::resolveLabelToId(const std::string& name, const SourceLoca
 }
 
 void SemanticAnalyzer::useVariable(const std::string& name, const SourceLocation& loc) {
+    // TEST: Block variable "n" completely to verify this is where it's being added
+    if (name == "n") {
+        return;
+    }
+    
+    // Don't create symbol table entry for FOR EACH variables
+    if (m_forEachVariables.count(name) > 0) {
+        return;
+    }
+    
     auto* sym = lookupVariable(name);
     if (!sym) {
         // Implicitly declare

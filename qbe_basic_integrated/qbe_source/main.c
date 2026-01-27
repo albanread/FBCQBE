@@ -242,8 +242,8 @@ main(int ac, char *av[])
 			is_basic = is_basic_file(f);
 			
 			/* Set up output file based on file type and flags */
-			if (is_basic && output_file && !compile_only) {
-				/* BASIC file with -o but not -c: compile to executable */
+			if (is_basic && output_file && !compile_only && !il_only) {
+				/* BASIC file with -o but not -c and not -i: compile to executable */
 				snprintf(temp_asm, sizeof(temp_asm), "/tmp/qbe_basic_%d.s", getpid());
 				outf = fopen(temp_asm, "w");
 				if (!outf) {
@@ -251,7 +251,7 @@ main(int ac, char *av[])
 					exit(1);
 				}
 			} else if (output_file && strcmp(output_file, "-") != 0) {
-				/* Regular output to file (assembly) */
+				/* Regular output to file (assembly or IL) */
 				outf = fopen(output_file, "w");
 				if (!outf) {
 					fprintf(stderr, "cannot open '%s'\n", output_file);

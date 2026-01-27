@@ -502,8 +502,32 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
             std::string convertedValue = promoteToType(valueTemp, exprType, varType);
             emit("    " + varRef + " =" + qbeType + " copy " + convertedValue + "\n");
         } else {
-            // Types match, just copy
-            emit("    " + varRef + " =" + qbeType + " copy " + valueTemp + "\n");
+            // Semantic types match, but check if QBE types differ (e.g., w vs l for INT)
+            std::string exprQBEType = getActualQBEType(stmt->value.get());
+            
+            if (exprQBEType != qbeType) {
+                // Need to convert between QBE types
+                std::string convertedValue = valueTemp;
+                
+                if (exprQBEType == "w" && qbeType == "l") {
+                    // Word to long (sign extend)
+                    std::string extendedTemp = allocTemp("l");
+                    emit("    " + extendedTemp + " =l extsw " + valueTemp + "\n");
+                    convertedValue = extendedTemp;
+                    m_stats.instructionsGenerated++;
+                } else if (exprQBEType == "l" && qbeType == "w") {
+                    // Long to word (truncate)
+                    std::string truncTemp = allocTemp("w");
+                    emit("    " + truncTemp + " =w copy " + valueTemp + "\n");
+                    convertedValue = truncTemp;
+                    m_stats.instructionsGenerated++;
+                }
+                
+                emit("    " + varRef + " =" + qbeType + " copy " + convertedValue + "\n");
+            } else {
+                // QBE types match, just copy
+                emit("    " + varRef + " =" + qbeType + " copy " + valueTemp + "\n");
+            }
         }
         m_stats.instructionsGenerated++;
     } else {
@@ -553,14 +577,32 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
             } else if ((valueQBE == "w" || valueQBE == "l") && elemQBE == "d") {
                 // Integer to double conversion
                 std::string convertedTemp = allocTemp("d");
-                emit("    " + convertedTemp + " =d sltof " + valueTemp + "\n");
-                m_stats.instructionsGenerated++;
+                if (valueQBE == "w") {
+                    // Word to double: first extend to long, then convert
+                    std::string longTemp = allocTemp("l");
+                    emit("    " + longTemp + " =l extsw " + valueTemp + "\n");
+                    emit("    " + convertedTemp + " =d sltof " + longTemp + "\n");
+                    m_stats.instructionsGenerated += 2;
+                } else {
+                    // Long to double: direct conversion
+                    emit("    " + convertedTemp + " =d sltof " + valueTemp + "\n");
+                    m_stats.instructionsGenerated++;
+                }
                 valueTemp = convertedTemp;
             } else if ((valueQBE == "w" || valueQBE == "l") && elemQBE == "s") {
                 // Integer to single (float) conversion
                 std::string convertedTemp = allocTemp("s");
-                emit("    " + convertedTemp + " =s sltof " + valueTemp + "\n");
-                m_stats.instructionsGenerated++;
+                if (valueQBE == "w") {
+                    // Word to float: first extend to long, then convert
+                    std::string longTemp = allocTemp("l");
+                    emit("    " + longTemp + " =l extsw " + valueTemp + "\n");
+                    emit("    " + convertedTemp + " =s sltof " + longTemp + "\n");
+                    m_stats.instructionsGenerated += 2;
+                } else {
+                    // Long to float: direct conversion
+                    emit("    " + convertedTemp + " =s sltof " + valueTemp + "\n");
+                    m_stats.instructionsGenerated++;
+                }
                 valueTemp = convertedTemp;
             } else if (valueQBE == "s" && elemQBE == "d") {
                 // Single to double conversion
@@ -1281,7 +1323,9 @@ void QBECodeGenerator::emitReturn(const ReturnStatement* stmt) {
             
             // Get the return type
             std::string qbeType = "w";
-            if (m_cfg && m_cfg->returnType == VariableType::DOUBLE) {
+            if (m_cfg && m_cfg->returnType == VariableType::INT) {
+                qbeType = "l";
+            } else if (m_cfg && m_cfg->returnType == VariableType::DOUBLE) {
                 qbeType = "d";
             } else if (m_cfg && m_cfg->returnType == VariableType::FLOAT) {
                 qbeType = "d";
@@ -1289,8 +1333,48 @@ void QBECodeGenerator::emitReturn(const ReturnStatement* stmt) {
                 qbeType = "l";
             }
             
+            // Get the actual type of the expression
+            std::string exprType = getActualQBEType(stmt->returnValue.get());
+            
+            // Convert if types don't match
+            std::string finalValue = valueTemp;
+            if (exprType != qbeType) {
+                std::string convertedTemp = allocTemp(qbeType);
+                
+                // Convert between types
+                if (qbeType == "l" && exprType == "d") {
+                    // Double to long (integer)
+                    emit("    " + convertedTemp + " =l dtosi " + valueTemp + "\n");
+                } else if (qbeType == "l" && exprType == "w") {
+                    // Word to long (sign extend)
+                    emit("    " + convertedTemp + " =l extsw " + valueTemp + "\n");
+                } else if (qbeType == "d" && exprType == "l") {
+                    // Long to double
+                    emit("    " + convertedTemp + " =d sltof " + valueTemp + "\n");
+                } else if (qbeType == "d" && exprType == "w") {
+                    // Word to double (sign extend to long first, then convert)
+                    std::string extendedTemp = allocTemp("l");
+                    emit("    " + extendedTemp + " =l extsw " + valueTemp + "\n");
+                    emit("    " + convertedTemp + " =d sltof " + extendedTemp + "\n");
+                } else if (qbeType == "w" && exprType == "l") {
+                    // Long to word (truncate)
+                    emit("    " + convertedTemp + " =w copy " + valueTemp + "\n");
+                } else if (qbeType == "w" && exprType == "d") {
+                    // Double to word (convert to long first, then truncate)
+                    std::string longTemp = allocTemp("l");
+                    emit("    " + longTemp + " =l dtosi " + valueTemp + "\n");
+                    emit("    " + convertedTemp + " =w copy " + longTemp + "\n");
+                } else {
+                    // Same type or unsupported conversion, just copy
+                    emit("    " + convertedTemp + " =" + qbeType + " copy " + valueTemp + "\n");
+                }
+                
+                m_stats.instructionsGenerated++;
+                finalValue = convertedTemp;
+            }
+            
             // Assign to return variable
-            emit("    " + returnVar + " =" + qbeType + " copy " + valueTemp + "\n");
+            emit("    " + returnVar + " =" + qbeType + " copy " + finalValue + "\n");
             m_stats.instructionsGenerated++;
         }
         
@@ -1868,59 +1952,8 @@ void QBECodeGenerator::emitRedim(const RedimStatement* stmt) {
 void QBECodeGenerator::emitCase(const CaseStatement* stmt) {
     if (!stmt || !stmt->caseExpression) return;
     
-    emitComment("SELECT CASE - evaluate expression");
-    
-    // Evaluate the SELECT CASE expression once and store it
-    std::string selectTemp = emitExpression(stmt->caseExpression.get());
-    m_selectCaseValue = selectTemp;
-    
-    // Determine the type of the select expression
-    if (stmt->caseExpression->getType() == ASTNodeType::EXPR_VARIABLE) {
-        const VariableExpression* varExpr = static_cast<const VariableExpression*>(stmt->caseExpression.get());
-        std::string varName = varExpr->name;
-        std::transform(varName.begin(), varName.end(), varName.begin(), ::tolower);
-        auto it = m_varTypes.find(varName);
-        if (it != m_varTypes.end()) {
-            m_selectCaseType = it->second;
-        } else {
-            m_selectCaseType = "d"; // default to double
-        }
-    } else {
-        // For literals or expressions, assume double
-        m_selectCaseType = "d";
-    }
-    
-    // Store the CASE values and types for test blocks to use
-    m_caseClauseValues.clear();
-    m_caseClauseExpressions.clear();
-    m_caseClauseIsCaseIs.clear();
-    m_caseClauseIsOperators.clear();
-    m_currentCaseClauseIndex = 0;
-    
-    for (const auto& clause : stmt->whenClauses) {
-        if (clause.isCaseIs) {
-            // For CASE IS, store operator and right expression
-            m_caseClauseExpressions.push_back({});  // Empty expressions for CASE IS
-            m_caseClauseValues.push_back({});  // Empty values for CASE IS
-            m_caseClauseIsCaseIs.push_back(true);
-            m_caseClauseIsOperators.push_back(clause.caseIsOperator);
-            // Store the right expression to evaluate later
-            m_caseClauseExpressions.back().push_back(clause.caseIsRightExpr.get());
-        } else {
-            // For regular CASE, store the expressions
-            std::vector<const Expression*> exprs;
-            std::vector<std::string> values;
-            for (const auto& valueExpr : clause.values) {
-                exprs.push_back(valueExpr.get());
-                // Don't evaluate here, will evaluate in test block
-            }
-            m_caseClauseExpressions.push_back(exprs);
-            m_caseClauseValues.push_back(values);
-            m_caseClauseIsCaseIs.push_back(false);
-            m_caseClauseIsOperators.push_back(TokenType::UNKNOWN);
-        }
-    }
-    
+    // SELECT CASE statement - the comparison logic is handled in test blocks
+    // which get their information directly from the CFG
     emitComment("SELECT CASE - test blocks will handle comparisons");
 }
 

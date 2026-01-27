@@ -2024,14 +2024,45 @@ StatementPtr Parser::parseSelectCaseStatement() {
                 clause.caseIsRightExpr = std::move(rightExpr);
                 stmt->whenClauses.push_back(std::move(clause));
             } else {
-                // Parse comma-separated values for CASE (traditional syntax)
-                std::vector<ExpressionPtr> values;
+                // Parse comma-separated values or ranges for CASE (traditional syntax)
+                // Note: Each range gets its own clause, but regular values in a list share one clause
+                // Examples:
+                //   CASE 1, 2, 3        -> one clause with 3 values
+                //   CASE 1 TO 10        -> one range clause
+                //   CASE 1, 5 TO 10, 15 -> value clause [1], range clause [5-10], value clause [15]
+                
+                std::vector<ExpressionPtr> regularValues;
+                
                 do {
                     ExpressionPtr value = parseExpression();
-                    values.push_back(std::move(value));
+                    
+                    // Check for range syntax: CASE x TO y
+                    if (current().type == TokenType::TO) {
+                        // Flush any accumulated regular values first
+                        if (!regularValues.empty()) {
+                            stmt->addWhenClause(std::move(regularValues), false);
+                            regularValues.clear();
+                        }
+                        
+                        advance(); // consume TO
+                        ExpressionPtr endValue = parseExpression();
+                        
+                        // Create a range clause
+                        CaseStatement::WhenClause rangeClause;
+                        rangeClause.isRange = true;
+                        rangeClause.rangeStart = std::move(value);
+                        rangeClause.rangeEnd = std::move(endValue);
+                        stmt->whenClauses.push_back(std::move(rangeClause));
+                    } else {
+                        // Regular value - accumulate it
+                        regularValues.push_back(std::move(value));
+                    }
                 } while (match(TokenType::COMMA));
-
-                stmt->addWhenClause(std::move(values), false);  // false for regular CASE
+                
+                // Flush any remaining regular values
+                if (!regularValues.empty()) {
+                    stmt->addWhenClause(std::move(regularValues), false);
+                }
             }
 
             // Optional colon or newline after condition
@@ -2208,6 +2239,51 @@ StatementPtr Parser::parseSelectCaseStatement() {
 StatementPtr Parser::parseForStatement() {
     advance(); // consume FOR
 
+    // Check for VB-style FOR EACH...IN syntax
+    if (current().type == TokenType::EACH) {
+        advance(); // consume EACH
+
+        if (current().type != TokenType::IDENTIFIER) {
+            error("Expected variable name after FOR EACH");
+            return nullptr;
+        }
+
+        std::string varName = current().value;
+        advance(); // consume identifier
+
+        // Skip any type suffix token (%, &, !, #, @, ^)
+        if (current().type == TokenType::TYPE_INT || current().type == TokenType::TYPE_FLOAT ||
+            current().type == TokenType::TYPE_DOUBLE || current().type == TokenType::TYPE_STRING ||
+            current().type == TokenType::TYPE_BYTE || current().type == TokenType::TYPE_SHORT) {
+            advance(); // skip suffix
+        }
+
+        // Optional AS datatype (VB-style type declaration)
+        if (current().type == TokenType::AS) {
+            advance(); // consume AS
+            // Skip the type keyword - we'll use suffix or default type
+            if (current().type == TokenType::KEYWORD_INTEGER ||
+                current().type == TokenType::KEYWORD_DOUBLE ||
+                current().type == TokenType::KEYWORD_SINGLE ||
+                current().type == TokenType::KEYWORD_STRING ||
+                current().type == TokenType::KEYWORD_LONG ||
+                current().type == TokenType::KEYWORD_BYTE ||
+                current().type == TokenType::KEYWORD_SHORT) {
+                advance(); // consume type keyword
+            }
+        }
+
+        // Require IN keyword
+        consume(TokenType::IN, "Expected IN after variable in FOR EACH statement");
+
+        // Parse the array/collection expression
+        auto stmt = std::make_unique<ForInStatement>(varName);
+        stmt->array = parseExpression();
+
+        return stmt;
+    }
+
+    // Traditional FOR loop - requires identifier
     if (current().type != TokenType::IDENTIFIER) {
         error("Expected variable name in FOR statement");
         return nullptr;
@@ -2215,19 +2291,19 @@ StatementPtr Parser::parseForStatement() {
 
     // FOR loop variables are plain names - no suffix mangling
     // Just get the raw identifier text
-    std::string varName = current().text;
+    std::string varName = current().value;
     advance(); // consume identifier
-    
+
     // Skip any type suffix token (%, &, !, #, @, ^)
-    if (current().type == TokenType::PERCENT || current().type == TokenType::AMPERSAND ||
-        current().type == TokenType::EXCLAMATION || current().type == TokenType::HASH ||
-        current().type == TokenType::AT || current().type == TokenType::CARET) {
+    if (current().type == TokenType::TYPE_INT || current().type == TokenType::TYPE_FLOAT ||
+        current().type == TokenType::TYPE_DOUBLE || current().type == TokenType::TYPE_STRING ||
+        current().type == TokenType::TYPE_BYTE || current().type == TokenType::TYPE_SHORT) {
         advance(); // skip suffix
     }
 
-    // Check if this is FOR...IN or traditional FOR...TO
+    // Check if this is FOR...IN (without EACH) or traditional FOR...TO
     if (current().type == TokenType::IN) {
-        // FOR...IN syntax: FOR var IN array
+        // FOR...IN syntax: FOR var IN array (alternative syntax)
         advance(); // consume IN
 
         auto stmt = std::make_unique<ForInStatement>(varName);
@@ -2243,13 +2319,13 @@ StatementPtr Parser::parseForStatement() {
             return nullptr;
         }
 
-        std::string indexVarName = current().text;
+        std::string indexVarName = current().value;
         advance(); // consume identifier
         
         // Skip any type suffix token
         if (current().type == TokenType::PERCENT || current().type == TokenType::AMPERSAND ||
             current().type == TokenType::EXCLAMATION || current().type == TokenType::HASH ||
-            current().type == TokenType::AT || current().type == TokenType::CARET) {
+            current().type == TokenType::AT_SUFFIX || current().type == TokenType::CARET) {
             advance(); // skip suffix
         }
 
@@ -2287,13 +2363,13 @@ StatementPtr Parser::parseNextStatement() {
 
     // Optional variable name - plain name, no suffix mangling
     if (current().type == TokenType::IDENTIFIER) {
-        stmt->variable = current().text;
+        stmt->variable = current().value;
         advance(); // consume identifier
         
         // Skip any type suffix token
         if (current().type == TokenType::PERCENT || current().type == TokenType::AMPERSAND ||
             current().type == TokenType::EXCLAMATION || current().type == TokenType::HASH ||
-            current().type == TokenType::AT || current().type == TokenType::CARET) {
+            current().type == TokenType::AT_SUFFIX || current().type == TokenType::CARET) {
             advance(); // skip suffix
         }
     }

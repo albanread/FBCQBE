@@ -239,10 +239,22 @@ std::string QBECodeGenerator::emitStringToDouble(const std::string& value) {
     return result;
 }
 
-std::string QBECodeGenerator::emitIntToDouble(const std::string& value) {
+std::string QBECodeGenerator::emitIntToDouble(const std::string& value, const std::string& valueQBEType) {
     std::string result = allocTemp("d");
-    emit("    " + result + " =d sltof " + value + "\n");  // INT is now 64-bit long
-    m_stats.instructionsGenerated++;
+    
+    // QBE requires sltof to operate on 'l' (long) type
+    // If we have a 'w' (word), we must first extend it to 'l'
+    if (valueQBEType == "w") {
+        std::string longTemp = allocTemp("l");
+        emit("    " + longTemp + " =l extsw " + value + "\n");
+        emit("    " + result + " =d sltof " + longTemp + "\n");
+        m_stats.instructionsGenerated += 2;
+    } else {
+        // Already 'l' type, convert directly
+        emit("    " + result + " =d sltof " + value + "\n");
+        m_stats.instructionsGenerated++;
+    }
+    
     return result;
 }
 
