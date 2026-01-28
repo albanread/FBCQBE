@@ -794,12 +794,26 @@ void CFGBuilder::processDefStatement(const DefStatement& stmt, BasicBlock* curre
     funcCFG->parameters = stmt.parameters;
     funcCFG->defStatement = &stmt;  // Store pointer to statement for codegen
     
-    // Infer return type from function name
-    funcCFG->returnType = inferTypeFromName(stmt.functionName);
+    // Get return type and parameter types from semantic analyzer symbol table
+    // The semantic analyzer has already inferred these types correctly
+    const FunctionSymbol* funcSymbol = nullptr;
+    if (m_symbols) {
+        auto it = m_symbols->functions.find(stmt.functionName);
+        if (it != m_symbols->functions.end()) {
+            funcSymbol = &it->second;
+        }
+    }
     
-    // For DEF FN, parameter types are inferred from parameter names
-    for (const auto& param : stmt.parameters) {
-        funcCFG->parameterTypes.push_back(inferTypeFromName(param));
+    if (funcSymbol) {
+        // Use types from semantic analyzer (already validated)
+        funcCFG->returnType = funcSymbol->returnType;
+        funcCFG->parameterTypes = funcSymbol->parameterTypes;
+    } else {
+        // Fallback if semantic analyzer didn't process this (shouldn't happen)
+        funcCFG->returnType = inferTypeFromName(stmt.functionName);
+        for (size_t i = 0; i < stmt.parameters.size(); ++i) {
+            funcCFG->parameterTypes.push_back(inferTypeFromName(stmt.parameters[i]));
+        }
     }
     
     // Save current CFG context

@@ -3451,8 +3451,9 @@ StatementPtr Parser::parseDefStatement() {
         return nullptr;
     }
 
-    std::string funcName = current().value;
-    advance();
+    // Parse function name with suffix handling (Square% -> Square_INT)
+    TokenType funcSuffix = TokenType::UNKNOWN;
+    std::string funcName = parseVariableName(funcSuffix);
 
     auto stmt = std::make_unique<DefStatement>(funcName);
 
@@ -3465,8 +3466,10 @@ StatementPtr Parser::parseDefStatement() {
                 error("Expected parameter name in DEF FN");
                 break;
             }
-            stmt->addParameter(current().value);
-            advance();
+            // Use parseVariableName to get mangled parameter name (N% -> N_INT)
+            TokenType paramSuffix = TokenType::UNKNOWN;
+            std::string paramName = parseVariableName(paramSuffix);
+            stmt->addParameter(paramName, paramSuffix);
         } while (match(TokenType::COMMA));
     }
 
@@ -4437,8 +4440,9 @@ ExpressionPtr Parser::parsePrimary() {
             return std::make_unique<NumberExpression>(0);
         }
 
-        std::string funcName = current().value;
-        advance();
+        // Parse function name with suffix handling (Square% -> Square_INT)
+        TokenType funcSuffix = TokenType::UNKNOWN;
+        std::string funcName = parseVariableName(funcSuffix);
 
         auto call = std::make_unique<FunctionCallExpression>(funcName, true);
 

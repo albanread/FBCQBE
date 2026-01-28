@@ -504,13 +504,15 @@ void QBECodeGenerator::emitFunction(const std::string& functionName) {
                 paramType = "d";
             } else if (vt == VariableType::STRING) {
                 paramType = "l";  // String pointer
+            } else if (vt == VariableType::INT) {
+                paramType = "l";  // INT is 64-bit long
             }
         }
         
         paramList += paramType + " %" + m_cfg->parameters[i];
     }
     
-    // Emit function signature
+    // Emit function signature (function name already mangled by parser)
     emit("export function " + qbeReturnType + " $" + functionName + "(" + paramList + ") {\n");
     emit("@start\n");
     m_stats.labelsGenerated++;

@@ -1149,6 +1149,11 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         std::string upper = funcName;
         for (char& c : upper) c = std::toupper(c);
         
+        // Handle mangled string function names (e.g., STR_STRING -> STR$, CHR_STRING -> CHR$)
+        if (upper.length() > 7 && upper.substr(upper.length() - 7) == "_STRING") {
+            upper = upper.substr(0, upper.length() - 7) + "$";
+        }
+        
         static const std::unordered_set<std::string> longReturn = {
             "LEN", "ASC", "INSTR", "INSTRREV", "TALLY"
         };
@@ -1631,6 +1636,11 @@ std::string QBECodeGenerator::mapToRuntimeFunction(const std::string& basicFunc)
     std::string upper = basicFunc;
     for (char& c : upper) {
         c = std::toupper(c);
+    }
+    
+    // Handle mangled string function names (e.g., STR_STRING -> STR$, CHR_STRING -> CHR$)
+    if (upper.length() > 7 && upper.substr(upper.length() - 7) == "_STRING") {
+        upper = upper.substr(0, upper.length() - 7) + "$";
     }
     
     // Special cases that don't follow uppercase pattern

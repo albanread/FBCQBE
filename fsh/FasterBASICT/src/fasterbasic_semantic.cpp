@@ -1089,12 +1089,30 @@ void SemanticAnalyzer::processDefStatement(const DefStatement& stmt) {
     // Infer return type from function name
     sym.returnType = inferTypeFromName(stmt.functionName);
     
-    // Infer parameter types from parameter names
-    for (const auto& paramName : stmt.parameters) {
-        VariableType paramType = inferTypeFromName(paramName);
+    // Infer parameter types from parameter names AND suffixes
+    for (size_t i = 0; i < stmt.parameters.size(); ++i) {
+        const std::string& paramName = stmt.parameters[i];
+        
+        // Use the stored suffix if available, otherwise fall back to name inference
+        VariableType paramType;
+        if (i < stmt.parameterSuffixes.size() && stmt.parameterSuffixes[i] != TokenType::UNKNOWN) {
+            paramType = inferTypeFromSuffix(stmt.parameterSuffixes[i]);
+        } else {
+            paramType = inferTypeFromName(paramName);
+        }
+        
         sym.parameterTypes.push_back(paramType);
         sym.parameterTypeNames.push_back("");  // No user-defined types for DEF FN
         sym.parameterIsByRef.push_back(false);  // DEF FN parameters are always by value
+        
+        // Add parameter as a variable in the symbol table so it can be looked up
+        VariableSymbol paramVar;
+        paramVar.name = paramName;
+        paramVar.type = paramType;
+        paramVar.isDeclared = true;  // Parameters are declared
+        paramVar.functionScope = stmt.functionName;  // Scope to this function
+        paramVar.firstUse = stmt.location;
+        m_symbolTable.variables[paramName] = paramVar;
     }
     
     m_symbolTable.functions[stmt.functionName] = sym;
@@ -2556,8 +2574,12 @@ VariableType SemanticAnalyzer::inferFunctionCallType(const FunctionCallExpressio
         std::string upperName = expr.name;
         std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
 
-        // Any built-in ending with $ returns a string/Unicode
+        // Any built-in ending with $ or _STRING suffix returns a string/Unicode
         if (!upperName.empty() && upperName.back() == '$') {
+            return m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
+        }
+        // Check for mangled string function names (e.g., STR_STRING, CHR_STRING)
+        if (upperName.length() > 7 && upperName.substr(upperName.length() - 7) == "_STRING") {
             return m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
         }
         

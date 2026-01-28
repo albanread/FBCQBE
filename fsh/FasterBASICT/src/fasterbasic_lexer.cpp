@@ -435,12 +435,33 @@ Token Lexer::scanString() {
     
     while (!isAtEnd() && currentChar() != '"' && currentChar() != '\n') {
         char c = currentChar();
-        str += advance();
         
-        // Check if this byte is non-ASCII (high bit set)
-        // In UTF-8, any byte with value >= 128 (0x80) is part of a multi-byte sequence
-        if (static_cast<unsigned char>(c) >= 128) {
-            hasNonASCII = true;
+        // Handle escape sequences
+        if (c == '\\' && peekChar() != '\0') {
+            advance();  // consume backslash
+            char next = currentChar();
+            advance();  // consume escaped character
+            
+            switch (next) {
+                case '"':  str += '"'; break;
+                case '\\': str += '\\'; break;
+                case 'n':  str += '\n'; break;
+                case 't':  str += '\t'; break;
+                case 'r':  str += '\r'; break;
+                case '0':  str += '\0'; break;
+                default:
+                    // Unknown escape - just include the character
+                    str += next;
+                    break;
+            }
+        } else {
+            str += advance();
+            
+            // Check if this byte is non-ASCII (high bit set)
+            // In UTF-8, any byte with value >= 128 (0x80) is part of a multi-byte sequence
+            if (static_cast<unsigned char>(c) >= 128) {
+                hasNonASCII = true;
+            }
         }
     }
     

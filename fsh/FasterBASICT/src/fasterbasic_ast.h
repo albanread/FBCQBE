@@ -2352,12 +2352,14 @@ class DefStatement : public Statement {
 public:
     std::string functionName;
     std::vector<std::string> parameters;
+    std::vector<TokenType> parameterSuffixes;  // Track original type suffixes for type inference
     ExpressionPtr body;
 
     DefStatement(const std::string& name) : functionName(name) {}
 
-    void addParameter(const std::string& param) {
+    void addParameter(const std::string& param, TokenType suffix = TokenType::UNKNOWN) {
         parameters.push_back(param);
+        parameterSuffixes.push_back(suffix);
     }
 
     ASTNodeType getType() const override { return ASTNodeType::STMT_DEF; }

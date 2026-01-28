@@ -355,10 +355,24 @@ VariableType QBECodeGenerator::getVariableType(const std::string& varName) {
         return m_cfg->returnType;
     }
     
-    // Check if this is a function parameter
+    // Check if this is a function parameter - try multiple name variations
     if (m_inFunction && m_cfg) {
+        // Try exact match first
         for (size_t i = 0; i < m_cfg->parameters.size(); ++i) {
             if (m_cfg->parameters[i] == varName) {
+                // Found the parameter - return its type
+                if (i < m_cfg->parameterTypes.size()) {
+                    return m_cfg->parameterTypes[i];
+                }
+                break;
+            }
+        }
+        
+        // Try matching base names (without suffix)
+        std::string varBase = stripTypeSuffix(varName);
+        for (size_t i = 0; i < m_cfg->parameters.size(); ++i) {
+            std::string paramBase = stripTypeSuffix(m_cfg->parameters[i]);
+            if (paramBase == varBase) {
                 // Found the parameter - return its type
                 if (i < m_cfg->parameterTypes.size()) {
                     return m_cfg->parameterTypes[i];
@@ -800,8 +814,12 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             std::string upper = funcExpr->name;
             for (char& c : upper) c = std::toupper(c);
 
-            // Any builtin with trailing $ returns a pointer
+            // Any builtin with trailing $ or _STRING suffix returns a pointer
             if (!upper.empty() && upper.back() == '$') {
+                return VariableType::STRING;
+            }
+            // Check for mangled string function names (e.g., STR_STRING, CHR_STRING)
+            if (upper.length() > 7 && upper.substr(upper.length() - 7) == "_STRING") {
                 return VariableType::STRING;
             }
             
