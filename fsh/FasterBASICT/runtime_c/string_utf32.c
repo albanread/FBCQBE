@@ -1090,8 +1090,8 @@ StringDescriptor* string_reverse(const StringDescriptor* str) {
         int64_t sep_len = sep ? sep->length : 0;
 
         // Compute element count
-        int64_t count = (arrayDesc->upperBound >= arrayDesc->lowerBound)
-            ? (arrayDesc->upperBound - arrayDesc->lowerBound + 1)
+        int64_t count = (arrayDesc->upperBound1 >= arrayDesc->lowerBound1)
+            ? (arrayDesc->upperBound1 - arrayDesc->lowerBound1 + 1)
             : 0;
 
         if (count <= 0 || !arrayDesc->data) {
@@ -1158,7 +1158,7 @@ StringDescriptor* string_reverse(const StringDescriptor* str) {
     static ArrayDescriptor* alloc_split_desc(int64_t upperBound, size_t elemSize) {
         ArrayDescriptor* desc = (ArrayDescriptor*)malloc(sizeof(ArrayDescriptor));
         if (!desc) return NULL;
-        if (array_descriptor_init(desc, 0, upperBound, (int64_t)elemSize, 1, 0, '$') != 0) {
+        if (array_descriptor_init(desc, 0, upperBound, (int64_t)elemSize, 0, '$') != 0) {
             free(desc);
             return NULL;
         }

@@ -1470,11 +1470,13 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
             dimTemps.push_back(emitExpression(dimExpr.get()));
         }
         
-        // For now, only support 1D arrays
-        if (dimTemps.size() != 1) {
-            emitComment("ERROR: Multi-dimensional arrays not yet supported with descriptors");
+        // Support 1D and 2D arrays
+        if (dimTemps.size() > 2) {
+            emitComment("ERROR: Arrays with more than 2 dimensions not yet supported");
             continue;
         }
+        
+        bool is2D = (dimTemps.size() == 2);
         
         // Determine element size and type suffix using TypeDescriptor
         size_t elementSize;
@@ -1533,12 +1535,22 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
             }
         }
         
-        std::string dimTemp = dimTemps[0];
+        std::string dimTemp1 = dimTemps[0];
         
-        // Convert dimension to INT if needed
-        VariableType dimType = inferExpressionType(arrayDecl.dimensions[0].get());
-        if (dimType != VariableType::INT) {
-            dimTemp = promoteToType(dimTemp, dimType, VariableType::INT);
+        // Convert dimension 1 to INT if needed
+        VariableType dimType1 = inferExpressionType(arrayDecl.dimensions[0].get());
+        if (dimType1 != VariableType::INT) {
+            dimTemp1 = promoteToType(dimTemp1, dimType1, VariableType::INT);
+        }
+        
+        std::string dimTemp2;
+        if (is2D) {
+            dimTemp2 = dimTemps[1];
+            // Convert dimension 2 to INT if needed
+            VariableType dimType2 = inferExpressionType(arrayDecl.dimensions[1].get());
+            if (dimType2 != VariableType::INT) {
+                dimTemp2 = promoteToType(dimTemp2, dimType2, VariableType::INT);
+            }
         }
         
         // Get array descriptor address (assuming descriptor is stored with array reference)
@@ -1549,22 +1561,48 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
         // We'll use 0-based for simplicity (lowerBound=0, upperBound=N)
         int64_t lowerBound = 0; // TODO: respect OPTION BASE
         
-        // upperBound = dimTemp (N)
-        std::string upperBoundTemp = dimTemp;
+        // upperBound1 = dimTemp1 (N)
+        std::string upperBoundTemp1 = dimTemp1;
         
-        // count = upperBound - lowerBound + 1 = N + 1
-        std::string countTemp = allocTemp("w");
-        emit("    " + countTemp + " =w add " + upperBoundTemp + ", 1\n");
+        // count1 = upperBound1 - lowerBound + 1 = N + 1
+        std::string countTemp1 = allocTemp("w");
+        emit("    " + countTemp1 + " =w add " + upperBoundTemp1 + ", 1\n");
         m_stats.instructionsGenerated++;
         
         // Convert to long for size calculations
-        std::string countLong = allocTemp("l");
-        emit("    " + countLong + " =l extsw " + countTemp + "\n");
+        std::string countLong1 = allocTemp("l");
+        emit("    " + countLong1 + " =l extsw " + countTemp1 + "\n");
         m_stats.instructionsGenerated++;
         
-        // totalBytes = count * elementSize
+        std::string totalCount;
+        std::string upperBoundTemp2;
+        std::string countLong2;
+        
+        if (is2D) {
+            // upperBound2 = dimTemp2 (M)
+            upperBoundTemp2 = dimTemp2;
+            
+            // count2 = upperBound2 - lowerBound + 1 = M + 1
+            std::string countTemp2 = allocTemp("w");
+            emit("    " + countTemp2 + " =w add " + upperBoundTemp2 + ", 1\n");
+            m_stats.instructionsGenerated++;
+            
+            // Convert to long for size calculations
+            countLong2 = allocTemp("l");
+            emit("    " + countLong2 + " =l extsw " + countTemp2 + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // totalCount = count1 * count2
+            totalCount = allocTemp("l");
+            emit("    " + totalCount + " =l mul " + countLong1 + ", " + countLong2 + "\n");
+            m_stats.instructionsGenerated++;
+        } else {
+            totalCount = countLong1;
+        }
+        
+        // totalBytes = totalCount * elementSize
         std::string totalBytes = allocTemp("l");
-        emit("    " + totalBytes + " =l mul " + countLong + ", " + std::to_string(elementSize) + "\n");
+        emit("    " + totalBytes + " =l mul " + totalCount + ", " + std::to_string(elementSize) + "\n");
         m_stats.instructionsGenerated++;
         
         // Allocate array data
@@ -1577,58 +1615,92 @@ void QBECodeGenerator::emitDim(const DimStatement* stmt) {
         m_stats.instructionsGenerated++;
         
         // Initialize descriptor fields
-        // ArrayDescriptor layout:
+        // ArrayDescriptor layout (updated for 2D support - 64 bytes total):
         //   offset 0:  data pointer (8 bytes)
-        //   offset 8:  lowerBound (8 bytes)
-        //   offset 16: upperBound (8 bytes)
-        //   offset 24: elementSize (8 bytes)
-        //   offset 32: dimensions (4 bytes)
-        //   offset 36: base (4 bytes)
-        //   offset 40: typeSuffix (1 byte)
+        //   offset 8:  lowerBound1 (8 bytes)
+        //   offset 16: upperBound1 (8 bytes)
+        //   offset 24: lowerBound2 (8 bytes) - 0 for 1D arrays
+        //   offset 32: upperBound2 (8 bytes) - 0 for 1D arrays
+        //   offset 40: elementSize (8 bytes)
+        //   offset 48: dimensions (4 bytes)
+        //   offset 52: base (4 bytes)
+        //   offset 56: typeSuffix (1 byte)
         
         // Store data pointer at offset 0
         emit("    storel " + dataPtr + ", " + descPtr + "\n");
         m_stats.instructionsGenerated++;
         
-        // Store lowerBound at offset 8
-        std::string lowerBoundAddr = allocTemp("l");
-        emit("    " + lowerBoundAddr + " =l add " + descPtr + ", 8\n");
-        emit("    storel " + std::to_string(lowerBound) + ", " + lowerBoundAddr + "\n");
+        // Store lowerBound1 at offset 8
+        std::string lowerBound1Addr = allocTemp("l");
+        emit("    " + lowerBound1Addr + " =l add " + descPtr + ", 8\n");
+        emit("    storel " + std::to_string(lowerBound) + ", " + lowerBound1Addr + "\n");
         m_stats.instructionsGenerated += 2;
         
-        // Store upperBound at offset 16
-        std::string upperBoundAddr = allocTemp("l");
-        emit("    " + upperBoundAddr + " =l add " + descPtr + ", 16\n");
-        std::string upperBoundLong = allocTemp("l");
-        emit("    " + upperBoundLong + " =l extsw " + upperBoundTemp + "\n");
-        emit("    storel " + upperBoundLong + ", " + upperBoundAddr + "\n");
+        // Store upperBound1 at offset 16
+        std::string upperBound1Addr = allocTemp("l");
+        emit("    " + upperBound1Addr + " =l add " + descPtr + ", 16\n");
+        std::string upperBoundLong1 = allocTemp("l");
+        emit("    " + upperBoundLong1 + " =l extsw " + upperBoundTemp1 + "\n");
+        emit("    storel " + upperBoundLong1 + ", " + upperBound1Addr + "\n");
         m_stats.instructionsGenerated += 3;
         
-        // Store elementSize at offset 24
+        if (is2D) {
+            // Store lowerBound2 at offset 24
+            std::string lowerBound2Addr = allocTemp("l");
+            emit("    " + lowerBound2Addr + " =l add " + descPtr + ", 24\n");
+            emit("    storel " + std::to_string(lowerBound) + ", " + lowerBound2Addr + "\n");
+            m_stats.instructionsGenerated += 2;
+            
+            // Store upperBound2 at offset 32
+            std::string upperBound2Addr = allocTemp("l");
+            emit("    " + upperBound2Addr + " =l add " + descPtr + ", 32\n");
+            std::string upperBoundLong2 = allocTemp("l");
+            emit("    " + upperBoundLong2 + " =l extsw " + upperBoundTemp2 + "\n");
+            emit("    storel " + upperBoundLong2 + ", " + upperBound2Addr + "\n");
+            m_stats.instructionsGenerated += 3;
+        } else {
+            // Store 0 for lowerBound2 at offset 24
+            std::string lowerBound2Addr = allocTemp("l");
+            emit("    " + lowerBound2Addr + " =l add " + descPtr + ", 24\n");
+            emit("    storel 0, " + lowerBound2Addr + "\n");
+            m_stats.instructionsGenerated += 2;
+            
+            // Store 0 for upperBound2 at offset 32
+            std::string upperBound2Addr = allocTemp("l");
+            emit("    " + upperBound2Addr + " =l add " + descPtr + ", 32\n");
+            emit("    storel 0, " + upperBound2Addr + "\n");
+            m_stats.instructionsGenerated += 2;
+        }
+        
+        // Store elementSize at offset 40
         std::string elemSizeAddr = allocTemp("l");
-        emit("    " + elemSizeAddr + " =l add " + descPtr + ", 24\n");
+        emit("    " + elemSizeAddr + " =l add " + descPtr + ", 40\n");
         emit("    storel " + std::to_string(elementSize) + ", " + elemSizeAddr + "\n");
         m_stats.instructionsGenerated += 2;
         
-        // Store dimensions at offset 32
+        // Store dimensions at offset 48
         std::string dimCountAddr = allocTemp("l");
-        emit("    " + dimCountAddr + " =l add " + descPtr + ", 32\n");
-        emit("    storew 1, " + dimCountAddr + "\n"); // 1 dimension
+        emit("    " + dimCountAddr + " =l add " + descPtr + ", 48\n");
+        emit("    storew " + std::to_string(is2D ? 2 : 1) + ", " + dimCountAddr + "\n");
         m_stats.instructionsGenerated += 2;
 
-        // Store base at offset 36 (currently always 0 until OPTION BASE is threaded through)
+        // Store base at offset 52 (currently always 0 until OPTION BASE is threaded through)
         std::string baseAddr = allocTemp("l");
-        emit("    " + baseAddr + " =l add " + descPtr + ", 36\n");
+        emit("    " + baseAddr + " =l add " + descPtr + ", 52\n");
         emit("    storew 0, " + baseAddr + "\n");
         m_stats.instructionsGenerated += 2;
 
-        // Store type suffix at offset 40
+        // Store type suffix at offset 56
         std::string typeAddr = allocTemp("l");
-        emit("    " + typeAddr + " =l add " + descPtr + ", 40\n");
+        emit("    " + typeAddr + " =l add " + descPtr + ", 56\n");
         emit("    storeb " + std::to_string(static_cast<int>(typeSuffixChar)) + ", " + typeAddr + "\n");
         m_stats.instructionsGenerated += 2;
         
-        emitComment("Array " + arrayName + " descriptor initialized (element size: " + std::to_string(elementSize) + " bytes)");
+        if (is2D) {
+            emitComment("2D Array " + arrayName + " descriptor initialized (element size: " + std::to_string(elementSize) + " bytes)");
+        } else {
+            emitComment("1D Array " + arrayName + " descriptor initialized (element size: " + std::to_string(elementSize) + " bytes)");
+        }
         
         // If in function, track for cleanup
         if (isLocalArray) {
@@ -2210,10 +2282,13 @@ void QBECodeGenerator::emitRead(const ReadStatement* stmt) {
             emit("    " + varRef + " =l copy " + strPtr + "\n");
             m_stats.instructionsGenerated += 2;
         } else if (varType == VariableType::INT) {
+            // Runtime returns 32-bit int, but INT variables are 64-bit
             std::string intVal = allocTemp("w");
             emit("    " + intVal + " =w call $basic_read_int()\n");
-            emit("    " + varRef + " =w copy " + intVal + "\n");
-            m_stats.instructionsGenerated += 2;
+            std::string extVal = allocTemp("l");
+            emit("    " + extVal + " =l extsw " + intVal + "\n");
+            emit("    " + varRef + " =l copy " + extVal + "\n");
+            m_stats.instructionsGenerated += 3;
         } else if (varType == VariableType::DOUBLE || varType == VariableType::FLOAT) {
             std::string dblVal = allocTemp("d");
             emit("    " + dblVal + " =d call $basic_read_double()\n");

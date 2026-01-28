@@ -2372,7 +2372,7 @@ VariableType SemanticAnalyzer::inferUnaryExpressionType(const UnaryExpression& e
     VariableType exprType = inferExpressionType(*expr.expr);
     
     if (expr.op == TokenType::NOT) {
-        return VariableType::FLOAT;
+        return VariableType::INT;  // NOT is bitwise, always returns integer
     }
     
     // Unary + or -
@@ -2900,6 +2900,12 @@ void SemanticAnalyzer::useArray(const std::string& name, size_t dimensionCount,
         return;
     }
     
+    // Check if this is a builtin function, not an array
+    if (isBuiltinFunction(name)) {
+        // It's a builtin function, not an array - skip array validation
+        return;
+    }
+    
     auto* sym = lookupArray(name);
     if (!sym) {
         if (m_requireExplicitDim) {
@@ -3109,6 +3115,10 @@ void SemanticAnalyzer::initializeBuiltinFunctions() {
     m_builtinFunctions["EXP"] = 1;
     m_builtinFunctions["POW"] = 2;    // Takes 2 arguments: base, exponent
     m_builtinFunctions["ATAN2"] = 2;  // Takes 2 arguments: y, x
+    m_builtinFunctions["MIN"] = 2;    // Takes 2 arguments: returns minimum
+    m_builtinFunctions["MAX"] = 2;    // Takes 2 arguments: returns maximum
+    m_builtinFunctions["FIX"] = 1;    // Takes 1 argument: truncates to integer
+    m_builtinFunctions["CINT"] = 1;   // Takes 1 argument: rounds to integer
     
     // RND takes 0 or 1 argument
     m_builtinFunctions["RND"] = -1;  // -1 = variable arg count

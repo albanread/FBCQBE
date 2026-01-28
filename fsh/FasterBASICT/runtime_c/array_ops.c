@@ -492,6 +492,4 @@ for (int32_t i = 0; i < array->dimensions; i++) {
     
 // Redim to size 0 without preserve
 array_redim(array, new_bounds, false);
-    
-free(new_bounds);
 }

@@ -339,8 +339,8 @@ void QBECodeGenerator::emitMainFunction() {
             std::string arrayRef = "%arr_" + name;
             m_arrays[name] = m_arrays.size();
             
-            // Allocate descriptor on stack (40 bytes, 8-byte aligned)
-            emit("    " + arrayRef + " =l alloc8 40\n");
+            // Allocate descriptor on stack (64 bytes, 8-byte aligned)
+            emit("    " + arrayRef + " =l alloc8 64\n");
             m_stats.instructionsGenerated++;
             
             // Initialize descriptor to null/zero state

@@ -214,19 +214,16 @@ std::string QBECodeGenerator::getActualQBEType(const Expression* expr) {
         for (char& c : upper) c = std::toupper(c);
         
         // These intrinsics return 'w' (32-bit) even though their semantic type is INT
+        // They always return 'w' regardless of argument types
         if (upper == "SGN" || upper == "FIX" || upper == "CINT" || upper == "INT" ||
             upper == "RAND" || upper == "ASC" || upper == "INSTR" ||
-            upper == "LEN" || upper == "CSRLIN" || upper == "POS") {
-            // Check if argument is double - if so, runtime returns w
-            if (funcExpr->arguments.size() > 0) {
-                VariableType argType = inferExpressionType(funcExpr->arguments[0].get());
-                if (argType == VariableType::DOUBLE || argType == VariableType::FLOAT) {
-                    return "w";
-                }
-            } else {
-                // No arguments or special case
-                return "w";
-            }
+            upper == "CSRLIN" || upper == "POS") {
+            return "w";
+        }
+        
+        // LEN returns 'l' (64-bit) for string length
+        if (upper == "LEN") {
+            return "l";
         }
         
         // ABS and MIN/MAX return the same type as their arguments
@@ -241,6 +238,31 @@ std::string QBECodeGenerator::getActualQBEType(const Expression* expr) {
             if (leftType == "d" || rightType == "d") return "d";
             if (leftType == "l" || rightType == "l") return "l";
             return "w";
+        }
+    }
+    
+    // For array access expressions, check the actual loaded type
+    // INT arrays are loaded as 'w' (32-bit), but variables use 'l' (64-bit)
+    if (nodeType == ASTNodeType::EXPR_ARRAY_ACCESS) {
+        const ArrayAccessExpression* arrayExpr = static_cast<const ArrayAccessExpression*>(expr);
+        
+        // Get the element type from symbol table
+        if (m_symbols && m_symbols->arrays.find(arrayExpr->name) != m_symbols->arrays.end()) {
+            const auto& arraySym = m_symbols->arrays.at(arrayExpr->name);
+            
+            // Use TypeDescriptor if available
+            if (arraySym.elementTypeDesc.baseType != BaseType::UNKNOWN) {
+                return arraySym.elementTypeDesc.toQBEType();
+            }
+            
+            // Fall back to legacy type
+            if (arraySym.type == VariableType::INT) {
+                return "w";  // INT arrays load as word (32-bit)
+            } else if (arraySym.type == VariableType::DOUBLE || arraySym.type == VariableType::FLOAT) {
+                return "d";  // Floating point
+            } else if (arraySym.type == VariableType::STRING) {
+                return "l";  // String pointers
+            }
         }
     }
     
@@ -874,12 +896,14 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
 
 std::string QBECodeGenerator::promoteToType(const std::string& value, 
                                            VariableType fromType, 
-                                           VariableType toType) {
+                                           VariableType toType,
+                                           const std::string& actualQBEType) {
     // If types match, no promotion needed
     if (fromType == toType) return value;
     
     // Get QBE types to check for actual representation
-    std::string fromQBE = getQBEType(fromType);
+    // Use actualQBEType if provided (for INT types where actual may be w or l)
+    std::string fromQBE = actualQBEType.empty() ? getQBEType(fromType) : actualQBEType;
     std::string toQBE = getQBEType(toType);
     
     // If QBE types match, no conversion needed (e.g., INT->INT both map to 'l' or 'w')
@@ -889,8 +913,19 @@ std::string QBECodeGenerator::promoteToType(const std::string& value,
     
     // Promote INT to DOUBLE (w or l -> d)
     if (fromType == VariableType::INT && toType == VariableType::DOUBLE) {
-        // Pass the QBE type so emitIntToDouble can handle w vs l properly
-        return emitIntToDouble(value, fromQBE);
+        std::string temp = allocTemp("d");
+        if (fromQBE == "w") {
+            // Word to double: first extend to long, then convert
+            std::string longTemp = allocTemp("l");
+            emit("    " + longTemp + " =l extsw " + value + "\n");
+            emit("    " + temp + " =d sltof " + longTemp + "\n");
+            m_stats.instructionsGenerated += 2;
+        } else {
+            // Long to double: direct conversion
+            emit("    " + temp + " =d sltof " + value + "\n");
+            m_stats.instructionsGenerated++;
+        }
+        return temp;
     }
     
     // Promote INT to FLOAT (w or l -> s)
@@ -928,7 +963,11 @@ std::string QBECodeGenerator::promoteToType(const std::string& value,
     
     // Demote DOUBLE to INT (d -> w or l)
     if (fromType == VariableType::DOUBLE && toType == VariableType::INT) {
-        return emitDoubleToInt(value);
+        // Convert double to long (default INT representation)
+        std::string temp = allocTemp("l");
+        emit("    " + temp + " =l dtosi " + value + "\n");
+        m_stats.instructionsGenerated++;
+        return temp;
     }
     
     // Demote FLOAT to INT (s -> w or l)
@@ -939,22 +978,22 @@ std::string QBECodeGenerator::promoteToType(const std::string& value,
         return temp;
     }
     
-    // String conversions
-    if (fromType == VariableType::INT && toType == VariableType::STRING) {
-        return emitIntToString(value);
-    }
-    
-    if (fromType == VariableType::DOUBLE && toType == VariableType::STRING) {
-        return emitDoubleToString(value);
-    }
-    
-    if (fromType == VariableType::STRING && toType == VariableType::INT) {
-        return emitStringToInt(value);
-    }
-    
-    if (fromType == VariableType::STRING && toType == VariableType::DOUBLE) {
-        return emitStringToDouble(value);
-    }
+    // String conversions (handled by runtime functions, not implemented here yet)
+    // if (fromType == VariableType::INT && toType == VariableType::STRING) {
+    //     return emitIntToString(value);
+    // }
+    // 
+    // if (fromType == VariableType::DOUBLE && toType == VariableType::STRING) {
+    //     return emitDoubleToString(value);
+    // }
+    // 
+    // if (fromType == VariableType::STRING && toType == VariableType::INT) {
+    //     return emitStringToInt(value);
+    // }
+    // 
+    // if (fromType == VariableType::STRING && toType == VariableType::DOUBLE) {
+    //     return emitStringToDouble(value);
+    // }
     
     // No conversion needed/available
     return value;

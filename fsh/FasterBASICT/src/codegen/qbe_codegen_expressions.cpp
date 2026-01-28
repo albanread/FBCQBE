@@ -213,9 +213,54 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
         return emitStringConcat(leftTemp, rightTemp);
     }
     
-    // MOD operation REQUIRES integers
+    // Special handling for string comparison operators
+    bool isComparison = (op == TokenType::EQUAL || op == TokenType::NOT_EQUAL ||
+                         op == TokenType::LESS_THAN || op == TokenType::LESS_EQUAL ||
+                         op == TokenType::GREATER_THAN || op == TokenType::GREATER_EQUAL);
+    
+    if (isComparison && leftType == VariableType::STRING && rightType == VariableType::STRING) {
+        // Call string_compare runtime function
+        std::string cmpResult = allocTemp("w");
+        emit("    " + cmpResult + " =w call $string_compare(l " + leftTemp + ", l " + rightTemp + ")\n");
+        m_stats.instructionsGenerated++;
+        
+        // Convert comparison result to boolean based on operator
+        std::string resultTemp = allocTemp("w");
+        std::string zero = allocTemp("w");
+        emit("    " + zero + " =w copy 0\n");
+        m_stats.instructionsGenerated++;
+        
+        switch (op) {
+            case TokenType::EQUAL:
+                emit("    " + resultTemp + " =w ceqw " + cmpResult + ", " + zero + "\n");
+                break;
+            case TokenType::NOT_EQUAL:
+                emit("    " + resultTemp + " =w cnew " + cmpResult + ", " + zero + "\n");
+                break;
+            case TokenType::LESS_THAN:
+                emit("    " + resultTemp + " =w csltw " + cmpResult + ", " + zero + "\n");
+                break;
+            case TokenType::LESS_EQUAL:
+                emit("    " + resultTemp + " =w cslew " + cmpResult + ", " + zero + "\n");
+                break;
+            case TokenType::GREATER_THAN:
+                emit("    " + resultTemp + " =w csgtw " + cmpResult + ", " + zero + "\n");
+                break;
+            case TokenType::GREATER_EQUAL:
+                emit("    " + resultTemp + " =w csgew " + cmpResult + ", " + zero + "\n");
+                break;
+            default:
+                emit("    " + resultTemp + " =w copy 0\n");
+                break;
+        }
+        m_stats.instructionsGenerated++;
+        
+        return resultTemp;
+    }
+    
+    // MOD and INT_DIVIDE operations REQUIRE integers
     // AND/OR/XOR work on both booleans (w) and integers (l), so don't force type
-    bool requiresInteger = (op == TokenType::MOD);
+    bool requiresInteger = (op == TokenType::MOD || op == TokenType::INT_DIVIDE);
     
     // Determine operation type
     VariableType opType;
@@ -232,16 +277,40 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
     }
     
     // Promote operands to operation type
+    // For INT types, we need to check the actual QBE type (w vs l)
     if (leftType != opType) {
-        leftTemp = promoteToType(leftTemp, leftType, opType);
+        std::string leftActualQBE = (leftType == VariableType::INT) ? getActualQBEType(expr->left.get()) : "";
+        leftTemp = promoteToType(leftTemp, leftType, opType, leftActualQBE);
     }
     if (rightType != opType) {
-        rightTemp = promoteToType(rightTemp, rightType, opType);
+        std::string rightActualQBE = (rightType == VariableType::INT) ? getActualQBEType(expr->right.get()) : "";
+        rightTemp = promoteToType(rightTemp, rightType, opType, rightActualQBE);
     }
     
     // Get QBE type suffix
     std::string qbeType = getQBEType(opType);
     std::string typeSuffix = (opType == VariableType::INT) ? "l" : "d";  // INT is now 64-bit long
+    
+    // For INT operations, ensure both operands are actually 'l' (not 'w')
+    // Array elements may be loaded as 'w' even though their semantic type is INT
+    if (opType == VariableType::INT) {
+        std::string leftQBEType = getActualQBEType(expr->left.get());
+        std::string rightQBEType = getActualQBEType(expr->right.get());
+        
+        // Extend word operands to longs if needed
+        if (leftQBEType == "w") {
+            std::string extendedLeft = allocTemp("l");
+            emit("    " + extendedLeft + " =l extsw " + leftTemp + "\n");
+            m_stats.instructionsGenerated++;
+            leftTemp = extendedLeft;
+        }
+        if (rightQBEType == "w") {
+            std::string extendedRight = allocTemp("l");
+            emit("    " + extendedRight + " =l extsw " + rightTemp + "\n");
+            m_stats.instructionsGenerated++;
+            rightTemp = extendedRight;
+        }
+    }
     
     std::string resultTemp = allocTemp(qbeType);
     
@@ -262,6 +331,41 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
         case TokenType::DIVIDE:
             emit("    " + resultTemp + " =" + typeSuffix + " div " + leftTemp + ", " + rightTemp + "\n");
             break;
+            
+        case TokenType::INT_DIVIDE:
+            // Integer division: operands already promoted to integer (l) by requiresInteger flag
+            emit("    " + resultTemp + " =l div " + leftTemp + ", " + rightTemp + "\n");
+            break;
+            
+        case TokenType::POWER: {
+            // Exponentiation: call C pow() function
+            // Convert operands to double if needed
+            std::string leftDouble = leftTemp;
+            std::string rightDouble = rightTemp;
+            
+            if (typeSuffix == "l") {
+                leftDouble = allocTemp("d");
+                emit("    " + leftDouble + " =d swtof " + leftTemp + "\n");
+                m_stats.instructionsGenerated++;
+                rightDouble = allocTemp("d");
+                emit("    " + rightDouble + " =d swtof " + rightTemp + "\n");
+                m_stats.instructionsGenerated++;
+            }
+            
+            // Call pow(left, right) - always returns double
+            std::string powResult = allocTemp("d");
+            emit("    " + powResult + " =d call $pow(d " + leftDouble + ", d " + rightDouble + ")\n");
+            
+            // Convert back to integer if original operands were integers
+            if (typeSuffix == "l") {
+                resultTemp = allocTemp("l");
+                emit("    " + resultTemp + " =l dtosi " + powResult + "\n");
+                m_stats.instructionsGenerated++;
+            } else {
+                resultTemp = powResult;
+            }
+            break;
+        }
             
         case TokenType::MOD:
             // MOD is integer-only operation (64-bit)
@@ -385,16 +489,31 @@ std::string QBECodeGenerator::emitUnaryOp(const UnaryExpression* expr) {
             }
             break;
             
-        case TokenType::NOT:
-            // Logical NOT: operand == 0 ? 1 : 0
-            // Always returns integer
-            resultTemp = allocTemp("w");
-            if (operandType == VariableType::INT) {
-                emit("    " + resultTemp + " =w ceqw " + operandTemp + ", 0\n");
-            } else {
-                emit("    " + resultTemp + " =w ceqd " + operandTemp + ", d_0.0\n");
+        case TokenType::NOT: {
+            // Bitwise NOT: flip all bits - always returns integer
+            // In BASIC, NOT is bitwise, not logical
+            
+            // Number literals are emitted as doubles, so we need to convert them
+            // Check if operand is a double/float and convert to integer
+            // INT operands should already be in 'l' format
+            std::string notOperand = operandTemp;
+            if (operandType == VariableType::DOUBLE || operandType == VariableType::FLOAT) {
+                // Convert double/float to integer for bitwise operation
+                notOperand = allocTemp("l");
+                emit("    " + notOperand + " =l dtosi " + operandTemp + "\n");
+                m_stats.instructionsGenerated++;
+            } else if (operandType != VariableType::INT) {
+                // If not INT/DOUBLE/FLOAT, treat as integer but ensure it's 'l' type
+                // This handles any edge cases
+                notOperand = operandTemp;
             }
-            break;
+            
+            // Perform bitwise NOT using XOR with -1
+            std::string notResult = allocTemp("l");
+            emit("    " + notResult + " =l xor " + notOperand + ", -1\n");
+            m_stats.instructionsGenerated++;
+            return notResult;  // Return directly, always returns integer
+        }
             
         case TokenType::PLUS:
             // Unary plus: just copy
@@ -1122,10 +1241,12 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
             convertedArgTypes.push_back(getQBEType(paramType));
         }
     } else {
-        // For runtime functions, just use the argument types as-is
+        // For runtime functions, use the actual QBE type of each argument temp
         for (size_t i = 0; i < argTemps.size(); ++i) {
             convertedArgTemps.push_back(argTemps[i]);
-            convertedArgTypes.push_back(getQBEType(argTypes[i]));
+            // Get the actual QBE type from the expression, not the semantic type
+            std::string actualType = getActualQBEType(expr->arguments[i].get());
+            convertedArgTypes.push_back(actualType);
         }
     }
     
@@ -1154,8 +1275,12 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
             upper = upper.substr(0, upper.length() - 7) + "$";
         }
         
+        static const std::unordered_set<std::string> wordReturn = {
+            "ASC"  // Returns uint32_t (character code)
+        };
+
         static const std::unordered_set<std::string> longReturn = {
-            "LEN", "ASC", "INSTR", "INSTRREV", "TALLY"
+            "LEN", "INSTR", "INSTRREV", "TALLY"
         };
 
         static const std::unordered_set<std::string> stringReturn = {
@@ -1181,8 +1306,10 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         if (!upper.empty() && upper.back() == '$') {
             callReturnType = "l";
         }
-        if (longReturn.count(upper)) {
-            callReturnType = "l";  // int64_t or uint32_t -> long
+        if (wordReturn.count(upper)) {
+            callReturnType = "w";  // uint32_t -> word
+        } else if (longReturn.count(upper)) {
+            callReturnType = "l";  // int64_t -> long
         } else if (stringReturn.count(upper)) {
             callReturnType = "l";  // StringDescriptor* -> long pointer
         } else if (doubleReturn.count(upper)) {
@@ -1309,87 +1436,188 @@ std::string QBECodeGenerator::emitArrayAccessExpr(const ArrayAccessExpression* e
         indexTemps.push_back(indexTemp);
     }
     
-    // For now, only support 1D arrays
-    if (indexTemps.size() != 1) {
-        emitComment("ERROR: Multi-dimensional arrays not yet supported");
+    // Support 1D and 2D arrays
+    if (indexTemps.size() > 2) {
+        emitComment("ERROR: Arrays with more than 2 dimensions not supported");
+        // Call runtime error function and halt execution
+        emit("    call $basic_error_multidim_arrays()\n");
+        m_stats.instructionsGenerated++;
+        // Return a dummy value (won't be reached after error)
         std::string temp = allocTemp("l");
         emit("    " + temp + " =l copy 0\n");
         m_stats.instructionsGenerated++;
         return temp;
     }
     
-    std::string indexTemp = indexTemps[0];
+    bool is2D = (indexTemps.size() == 2);
+    std::string indexTemp1 = indexTemps[0];
+    std::string indexTemp2 = is2D ? indexTemps[1] : "";
     
     // Get array descriptor pointer
     std::string descPtr = getArrayRef(expr->name);
     
     emitComment("Array access " + expr->name + " with bounds check");
     
-    // Load lowerBound from descriptor (offset 8)
-    std::string lowerBoundAddr = allocTemp("l");
-    emit("    " + lowerBoundAddr + " =l add " + descPtr + ", 8\n");
-    std::string lowerBound = allocTemp("l");
-    emit("    " + lowerBound + " =l loadl " + lowerBoundAddr + "\n");
+    // Load lowerBound1 from descriptor (offset 8)
+    std::string lowerBound1Addr = allocTemp("l");
+    emit("    " + lowerBound1Addr + " =l add " + descPtr + ", 8\n");
+    std::string lowerBound1 = allocTemp("l");
+    emit("    " + lowerBound1 + " =l loadl " + lowerBound1Addr + "\n");
     m_stats.instructionsGenerated += 2;
     
-    // Load upperBound from descriptor (offset 16)
-    std::string upperBoundAddr = allocTemp("l");
-    emit("    " + upperBoundAddr + " =l add " + descPtr + ", 16\n");
-    std::string upperBound = allocTemp("l");
-    emit("    " + upperBound + " =l loadl " + upperBoundAddr + "\n");
+    // Load upperBound1 from descriptor (offset 16)
+    std::string upperBound1Addr = allocTemp("l");
+    emit("    " + upperBound1Addr + " =l add " + descPtr + ", 16\n");
+    std::string upperBound1 = allocTemp("l");
+    emit("    " + upperBound1 + " =l loadl " + upperBound1Addr + "\n");
     m_stats.instructionsGenerated += 2;
     
-    // Convert index to long for comparison
-    std::string indexLong = allocTemp("l");
-    emit("    " + indexLong + " =l extsw " + indexTemp + "\n");
+    // Convert index1 to long for comparison
+    std::string indexLong1 = allocTemp("l");
+    emit("    " + indexLong1 + " =l extsw " + indexTemp1 + "\n");
     m_stats.instructionsGenerated++;
     
-    // Bounds check: index >= lowerBound
-    std::string checkLower = allocTemp("w");
-    emit("    " + checkLower + " =w csge" + "l " + indexLong + ", " + lowerBound + "\n");
+    // Bounds check: index1 >= lowerBound1
+    std::string checkLower1 = allocTemp("w");
+    emit("    " + checkLower1 + " =w csgel " + indexLong1 + ", " + lowerBound1 + "\n");
     m_stats.instructionsGenerated++;
     
-    // Bounds check: index <= upperBound
-    std::string checkUpper = allocTemp("w");
-    emit("    " + checkUpper + " =w csle" + "l " + indexLong + ", " + upperBound + "\n");
+    // Bounds check: index1 <= upperBound1
+    std::string checkUpper1 = allocTemp("w");
+    emit("    " + checkUpper1 + " =w cslel " + indexLong1 + ", " + upperBound1 + "\n");
     m_stats.instructionsGenerated++;
     
-    // Combined check: both must be true
-    std::string checkBoth = allocTemp("w");
-    emit("    " + checkBoth + " =w and " + checkLower + ", " + checkUpper + "\n");
+    // Combined check for dimension 1
+    std::string checkBoth1 = allocTemp("w");
+    emit("    " + checkBoth1 + " =w and " + checkLower1 + ", " + checkUpper1 + "\n");
     m_stats.instructionsGenerated++;
+    
+    std::string checkBothFinal;
+    std::string indexLong2, lowerBound2, upperBound2;
+    
+    if (is2D) {
+        // Load lowerBound2 from descriptor (offset 24)
+        std::string lowerBound2Addr = allocTemp("l");
+        emit("    " + lowerBound2Addr + " =l add " + descPtr + ", 24\n");
+        lowerBound2 = allocTemp("l");
+        emit("    " + lowerBound2 + " =l loadl " + lowerBound2Addr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Load upperBound2 from descriptor (offset 32)
+        std::string upperBound2Addr = allocTemp("l");
+        emit("    " + upperBound2Addr + " =l add " + descPtr + ", 32\n");
+        upperBound2 = allocTemp("l");
+        emit("    " + upperBound2 + " =l loadl " + upperBound2Addr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Convert index2 to long for comparison
+        indexLong2 = allocTemp("l");
+        emit("    " + indexLong2 + " =l extsw " + indexTemp2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Bounds check: index2 >= lowerBound2
+        std::string checkLower2 = allocTemp("w");
+        emit("    " + checkLower2 + " =w csgel " + indexLong2 + ", " + lowerBound2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Bounds check: index2 <= upperBound2
+        std::string checkUpper2 = allocTemp("w");
+        emit("    " + checkUpper2 + " =w cslel " + indexLong2 + ", " + upperBound2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Combined check for dimension 2
+        std::string checkBoth2 = allocTemp("w");
+        emit("    " + checkBoth2 + " =w and " + checkLower2 + ", " + checkUpper2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Final check: both dimensions must be in bounds
+        checkBothFinal = allocTemp("w");
+        emit("    " + checkBothFinal + " =w and " + checkBoth1 + ", " + checkBoth2 + "\n");
+        m_stats.instructionsGenerated++;
+    } else {
+        checkBothFinal = checkBoth1;
+    }
     
     // Branch: if out of bounds, call error handler
     std::string boundsOkLabel = allocLabel();
     std::string boundsErrLabel = allocLabel();
     
-    emit("    jnz " + checkBoth + ", @" + boundsOkLabel + ", @" + boundsErrLabel + "\n");
+    emit("    jnz " + checkBothFinal + ", @" + boundsOkLabel + ", @" + boundsErrLabel + "\n");
     m_stats.instructionsGenerated++;
     
     // Bounds error block
     emit("@" + boundsErrLabel + "\n");
-    emit("    call $basic_array_bounds_error(l " + indexLong + ", l " + lowerBound + ", l " + upperBound + ")\n");
+    if (is2D) {
+        emit("    call $basic_array_bounds_error_2d(l " + indexLong1 + ", l " + lowerBound1 + ", l " + upperBound1 + ", l " + indexLong2 + ", l " + lowerBound2 + ", l " + upperBound2 + ")\n");
+    } else {
+        emit("    call $basic_array_bounds_error(l " + indexLong1 + ", l " + lowerBound1 + ", l " + upperBound1 + ")\n");
+    }
     m_stats.instructionsGenerated++;
     
     // Bounds OK block
     emit("@" + boundsOkLabel + "\n");
     
-    // Calculate offset: (index - lowerBound) * elementSize
-    std::string adjustedIndex = allocTemp("l");
-    emit("    " + adjustedIndex + " =l sub " + indexLong + ", " + lowerBound + "\n");
-    m_stats.instructionsGenerated++;
+    // Calculate offset
+    std::string byteOffset;
     
-    // Load elementSize from descriptor (offset 24)
-    std::string elemSizeAddr = allocTemp("l");
-    emit("    " + elemSizeAddr + " =l add " + descPtr + ", 24\n");
-    std::string elemSize = allocTemp("l");
-    emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
-    m_stats.instructionsGenerated += 2;
-    
-    // Calculate byte offset
-    std::string byteOffset = allocTemp("l");
-    emit("    " + byteOffset + " =l mul " + adjustedIndex + ", " + elemSize + "\n");
-    m_stats.instructionsGenerated++;
+    if (is2D) {
+        // 2D array: offset = ((index1 - lowerBound1) * dim2_size + (index2 - lowerBound2)) * elementSize
+        // Calculate dim2_size = upperBound2 - lowerBound2 + 1
+        std::string dim2Size = allocTemp("l");
+        emit("    " + dim2Size + " =l sub " + upperBound2 + ", " + lowerBound2 + "\n");
+        std::string dim2SizePlusOne = allocTemp("l");
+        emit("    " + dim2SizePlusOne + " =l add " + dim2Size + ", 1\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // adjustedIndex1 = index1 - lowerBound1
+        std::string adjustedIndex1 = allocTemp("l");
+        emit("    " + adjustedIndex1 + " =l sub " + indexLong1 + ", " + lowerBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // adjustedIndex2 = index2 - lowerBound2
+        std::string adjustedIndex2 = allocTemp("l");
+        emit("    " + adjustedIndex2 + " =l sub " + indexLong2 + ", " + lowerBound2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // rowOffset = adjustedIndex1 * dim2_size
+        std::string rowOffset = allocTemp("l");
+        emit("    " + rowOffset + " =l mul " + adjustedIndex1 + ", " + dim2SizePlusOne + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // linearIndex = rowOffset + adjustedIndex2
+        std::string linearIndex = allocTemp("l");
+        emit("    " + linearIndex + " =l add " + rowOffset + ", " + adjustedIndex2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Load elementSize from descriptor (offset 40)
+        std::string elemSizeAddr = allocTemp("l");
+        emit("    " + elemSizeAddr + " =l add " + descPtr + ", 40\n");
+        std::string elemSize = allocTemp("l");
+        emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // byteOffset = linearIndex * elementSize
+        byteOffset = allocTemp("l");
+        emit("    " + byteOffset + " =l mul " + linearIndex + ", " + elemSize + "\n");
+        m_stats.instructionsGenerated++;
+    } else {
+        // 1D array: offset = (index - lowerBound) * elementSize
+        std::string adjustedIndex = allocTemp("l");
+        emit("    " + adjustedIndex + " =l sub " + indexLong1 + ", " + lowerBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Load elementSize from descriptor (offset 40)
+        std::string elemSizeAddr = allocTemp("l");
+        emit("    " + elemSizeAddr + " =l add " + descPtr + ", 40\n");
+        std::string elemSize = allocTemp("l");
+        emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Calculate byte offset
+        byteOffset = allocTemp("l");
+        emit("    " + byteOffset + " =l mul " + adjustedIndex + ", " + elemSize + "\n");
+        m_stats.instructionsGenerated++;
+    }
     
     // Load data pointer from descriptor (offset 0)
     std::string dataPtr = allocTemp("l");
@@ -1438,21 +1666,38 @@ std::string QBECodeGenerator::emitArrayAccessExpr(const ArrayAccessExpression* e
 // Helper to get array element pointer without loading (for lvalue assignment)
 std::string QBECodeGenerator::emitArrayElementPtr(const std::string& arrayName, 
                                                     const std::vector<std::unique_ptr<Expression>>& indices) {
-    if (indices.size() != 1) {
-        emitComment("ERROR: Multi-dimensional arrays not yet supported");
+    if (indices.size() > 2) {
+        emitComment("ERROR: Arrays with more than 2 dimensions not supported");
+        // Call runtime error function and halt execution
+        emit("    call $basic_error_multidim_arrays()\n");
+        m_stats.instructionsGenerated++;
+        // Return a dummy value (won't be reached after error)
         std::string temp = allocTemp("l");
         emit("    " + temp + " =l copy 0\n");
         m_stats.instructionsGenerated++;
         return temp;
     }
     
-    // Evaluate index
-    std::string indexTemp = emitExpression(indices[0].get());
-    VariableType indexType = inferExpressionType(indices[0].get());
+    bool is2D = (indices.size() == 2);
+    
+    // Evaluate indices
+    std::string indexTemp1 = emitExpression(indices[0].get());
+    VariableType indexType1 = inferExpressionType(indices[0].get());
     
     // Convert to integer if needed
-    if (indexType != VariableType::INT) {
-        indexTemp = promoteToType(indexTemp, indexType, VariableType::INT);
+    if (indexType1 != VariableType::INT) {
+        indexTemp1 = promoteToType(indexTemp1, indexType1, VariableType::INT);
+    }
+    
+    std::string indexTemp2;
+    if (is2D) {
+        indexTemp2 = emitExpression(indices[1].get());
+        VariableType indexType2 = inferExpressionType(indices[1].get());
+        
+        // Convert to integer if needed
+        if (indexType2 != VariableType::INT) {
+            indexTemp2 = promoteToType(indexTemp2, indexType2, VariableType::INT);
+        }
     }
     
     // Get array descriptor pointer
@@ -1460,71 +1705,167 @@ std::string QBECodeGenerator::emitArrayElementPtr(const std::string& arrayName,
     
     emitComment("Get array element pointer for " + arrayName);
     
-    // Load lowerBound from descriptor (offset 8)
-    std::string lowerBoundAddr = allocTemp("l");
-    emit("    " + lowerBoundAddr + " =l add " + descPtr + ", 8\n");
-    std::string lowerBound = allocTemp("l");
-    emit("    " + lowerBound + " =l loadl " + lowerBoundAddr + "\n");
+    // Same bounds checking and offset calculation as emitArrayAccessExpr
+    // Load lowerBound1 from descriptor (offset 8)
+    std::string lowerBound1Addr = allocTemp("l");
+    emit("    " + lowerBound1Addr + " =l add " + descPtr + ", 8\n");
+    std::string lowerBound1 = allocTemp("l");
+    emit("    " + lowerBound1 + " =l loadl " + lowerBound1Addr + "\n");
     m_stats.instructionsGenerated += 2;
     
-    // Load upperBound from descriptor (offset 16)
-    std::string upperBoundAddr = allocTemp("l");
-    emit("    " + upperBoundAddr + " =l add " + descPtr + ", 16\n");
-    std::string upperBound = allocTemp("l");
-    emit("    " + upperBound + " =l loadl " + upperBoundAddr + "\n");
+    // Load upperBound1 from descriptor (offset 16)
+    std::string upperBound1Addr = allocTemp("l");
+    emit("    " + upperBound1Addr + " =l add " + descPtr + ", 16\n");
+    std::string upperBound1 = allocTemp("l");
+    emit("    " + upperBound1 + " =l loadl " + upperBound1Addr + "\n");
     m_stats.instructionsGenerated += 2;
     
-    // Convert index to long for comparison
-    std::string indexLong = allocTemp("l");
-    emit("    " + indexLong + " =l extsw " + indexTemp + "\n");
+    // Convert index1 to long for comparison
+    std::string indexLong1 = allocTemp("l");
+    emit("    " + indexLong1 + " =l extsw " + indexTemp1 + "\n");
     m_stats.instructionsGenerated++;
     
-    // Bounds check: index >= lowerBound
-    std::string checkLower = allocTemp("w");
-    emit("    " + checkLower + " =w csge" + "l " + indexLong + ", " + lowerBound + "\n");
+    // Bounds check: index1 >= lowerBound1
+    std::string checkLower1 = allocTemp("w");
+    emit("    " + checkLower1 + " =w csgel " + indexLong1 + ", " + lowerBound1 + "\n");
     m_stats.instructionsGenerated++;
     
-    // Bounds check: index <= upperBound
-    std::string checkUpper = allocTemp("w");
-    emit("    " + checkUpper + " =w csle" + "l " + indexLong + ", " + upperBound + "\n");
+    // Bounds check: index1 <= upperBound1
+    std::string checkUpper1 = allocTemp("w");
+    emit("    " + checkUpper1 + " =w cslel " + indexLong1 + ", " + upperBound1 + "\n");
     m_stats.instructionsGenerated++;
     
-    // Combined check
-    std::string checkBoth = allocTemp("w");
-    emit("    " + checkBoth + " =w and " + checkLower + ", " + checkUpper + "\n");
+    // Combined check for dimension 1
+    std::string checkBoth1 = allocTemp("w");
+    emit("    " + checkBoth1 + " =w and " + checkLower1 + ", " + checkUpper1 + "\n");
     m_stats.instructionsGenerated++;
     
-    // Branch for bounds check
+    std::string checkBothFinal;
+    std::string indexLong2, lowerBound2, upperBound2;
+    
+    if (is2D) {
+        // Load lowerBound2 from descriptor (offset 24)
+        std::string lowerBound2Addr = allocTemp("l");
+        emit("    " + lowerBound2Addr + " =l add " + descPtr + ", 24\n");
+        lowerBound2 = allocTemp("l");
+        emit("    " + lowerBound2 + " =l loadl " + lowerBound2Addr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Load upperBound2 from descriptor (offset 32)
+        std::string upperBound2Addr = allocTemp("l");
+        emit("    " + upperBound2Addr + " =l add " + descPtr + ", 32\n");
+        upperBound2 = allocTemp("l");
+        emit("    " + upperBound2 + " =l loadl " + upperBound2Addr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Convert index2 to long for comparison
+        indexLong2 = allocTemp("l");
+        emit("    " + indexLong2 + " =l extsw " + indexTemp2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Bounds check: index2 >= lowerBound2
+        std::string checkLower2 = allocTemp("w");
+        emit("    " + checkLower2 + " =w csgel " + indexLong2 + ", " + lowerBound2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Bounds check: index2 <= upperBound2
+        std::string checkUpper2 = allocTemp("w");
+        emit("    " + checkUpper2 + " =w cslel " + indexLong2 + ", " + upperBound2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Combined check for dimension 2
+        std::string checkBoth2 = allocTemp("w");
+        emit("    " + checkBoth2 + " =w and " + checkLower2 + ", " + checkUpper2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Final check: both dimensions must be in bounds
+        checkBothFinal = allocTemp("w");
+        emit("    " + checkBothFinal + " =w and " + checkBoth1 + ", " + checkBoth2 + "\n");
+        m_stats.instructionsGenerated++;
+    } else {
+        checkBothFinal = checkBoth1;
+    }
+    
+    // Branch: if out of bounds, call error handler
     std::string boundsOkLabel = allocLabel();
     std::string boundsErrLabel = allocLabel();
     
-    emit("    jnz " + checkBoth + ", @" + boundsOkLabel + ", @" + boundsErrLabel + "\n");
+    emit("    jnz " + checkBothFinal + ", @" + boundsOkLabel + ", @" + boundsErrLabel + "\n");
     m_stats.instructionsGenerated++;
     
     // Bounds error block
     emit("@" + boundsErrLabel + "\n");
-    emit("    call $basic_array_bounds_error(l " + indexLong + ", l " + lowerBound + ", l " + upperBound + ")\n");
+    if (is2D) {
+        emit("    call $basic_array_bounds_error_2d(l " + indexLong1 + ", l " + lowerBound1 + ", l " + upperBound1 + ", l " + indexLong2 + ", l " + lowerBound2 + ", l " + upperBound2 + ")\n");
+    } else {
+        emit("    call $basic_array_bounds_error(l " + indexLong1 + ", l " + lowerBound1 + ", l " + upperBound1 + ")\n");
+    }
     m_stats.instructionsGenerated++;
     
     // Bounds OK block
     emit("@" + boundsOkLabel + "\n");
     
-    // Calculate offset: (index - lowerBound) * elementSize
-    std::string adjustedIndex = allocTemp("l");
-    emit("    " + adjustedIndex + " =l sub " + indexLong + ", " + lowerBound + "\n");
-    m_stats.instructionsGenerated++;
+    // Calculate offset
+    std::string byteOffset;
     
-    // Load elementSize from descriptor (offset 24)
-    std::string elemSizeAddr = allocTemp("l");
-    emit("    " + elemSizeAddr + " =l add " + descPtr + ", 24\n");
-    std::string elemSize = allocTemp("l");
-    emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
-    m_stats.instructionsGenerated += 2;
-    
-    // Calculate byte offset
-    std::string byteOffset = allocTemp("l");
-    emit("    " + byteOffset + " =l mul " + adjustedIndex + ", " + elemSize + "\n");
-    m_stats.instructionsGenerated++;
+    if (is2D) {
+        // 2D array: offset = ((index1 - lowerBound1) * dim2_size + (index2 - lowerBound2)) * elementSize
+        // Calculate dim2_size = upperBound2 - lowerBound2 + 1
+        std::string dim2Size = allocTemp("l");
+        emit("    " + dim2Size + " =l sub " + upperBound2 + ", " + lowerBound2 + "\n");
+        std::string dim2SizePlusOne = allocTemp("l");
+        emit("    " + dim2SizePlusOne + " =l add " + dim2Size + ", 1\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // adjustedIndex1 = index1 - lowerBound1
+        std::string adjustedIndex1 = allocTemp("l");
+        emit("    " + adjustedIndex1 + " =l sub " + indexLong1 + ", " + lowerBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // adjustedIndex2 = index2 - lowerBound2
+        std::string adjustedIndex2 = allocTemp("l");
+        emit("    " + adjustedIndex2 + " =l sub " + indexLong2 + ", " + lowerBound2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // rowOffset = adjustedIndex1 * dim2_size
+        std::string rowOffset = allocTemp("l");
+        emit("    " + rowOffset + " =l mul " + adjustedIndex1 + ", " + dim2SizePlusOne + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // linearIndex = rowOffset + adjustedIndex2
+        std::string linearIndex = allocTemp("l");
+        emit("    " + linearIndex + " =l add " + rowOffset + ", " + adjustedIndex2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Load elementSize from descriptor (offset 40)
+        std::string elemSizeAddr = allocTemp("l");
+        emit("    " + elemSizeAddr + " =l add " + descPtr + ", 40\n");
+        std::string elemSize = allocTemp("l");
+        emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // byteOffset = linearIndex * elementSize
+        byteOffset = allocTemp("l");
+        emit("    " + byteOffset + " =l mul " + linearIndex + ", " + elemSize + "\n");
+        m_stats.instructionsGenerated++;
+    } else {
+        // 1D array: offset = (index - lowerBound) * elementSize
+        std::string adjustedIndex = allocTemp("l");
+        emit("    " + adjustedIndex + " =l sub " + indexLong1 + ", " + lowerBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Load elementSize from descriptor (offset 40)
+        std::string elemSizeAddr = allocTemp("l");
+        emit("    " + elemSizeAddr + " =l add " + descPtr + ", 40\n");
+        std::string elemSize = allocTemp("l");
+        emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Calculate byte offset
+        byteOffset = allocTemp("l");
+        emit("    " + byteOffset + " =l mul " + adjustedIndex + ", " + elemSize + "\n");
+        m_stats.instructionsGenerated++;
+    }
     
     // Load data pointer from descriptor (offset 0)
     std::string dataPtr = allocTemp("l");

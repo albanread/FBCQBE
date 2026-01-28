@@ -390,7 +390,7 @@ private:
     
     // Type inference and promotion
     VariableType inferExpressionType(const Expression* expr);
-    std::string promoteToType(const std::string& value, VariableType fromType, VariableType toType);
+    std::string promoteToType(const std::string& value, VariableType fromType, VariableType toType, const std::string& actualQBEType = "");
     
     // Utility functions
     std::string toUpper(const std::string& str);

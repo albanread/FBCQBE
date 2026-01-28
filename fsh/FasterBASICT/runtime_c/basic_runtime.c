@@ -251,3 +251,17 @@ void _basic_unregister_file(BasicFile* file) {
         }
     }
 }
+void basic_array_bounds_error_2d(int64_t index1, int64_t lower1, int64_t upper1,
+                                  int64_t index2, int64_t lower2, int64_t upper2) {
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "Array subscript out of bounds: indices [%lld, %lld] not in [%lld:%lld, %lld:%lld]",
+             (long long)index1, (long long)index2,
+             (long long)lower1, (long long)upper1,
+             (long long)lower2, (long long)upper2);
+    basic_error_msg(msg);
+}
+
+void basic_error_multidim_arrays() {
+    basic_error_msg("Multi-dimensional arrays (>2D) not yet supported");
+}
