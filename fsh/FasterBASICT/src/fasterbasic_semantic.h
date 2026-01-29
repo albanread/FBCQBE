@@ -974,6 +974,10 @@ private:
     void validateTimerStopStatement(const TimerStopStatement& stmt);
     void validateTimerIntervalStatement(const TimerIntervalStatement& stmt);
 
+    // Exception handling statement validation
+    void validateTryCatchStatement(const TryCatchStatement& stmt);
+    void validateThrowStatement(const ThrowStatement& stmt);
+
     // Expression validation and type inference
     VariableType inferExpressionType(const Expression& expr);
     VariableType inferBinaryExpressionType(const BinaryExpression& expr);

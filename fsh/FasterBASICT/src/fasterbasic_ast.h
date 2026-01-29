@@ -80,6 +80,8 @@ enum class ASTNodeType {
     STMT_DO,
     STMT_LOOP,
     STMT_END,
+    STMT_TRY_CATCH,
+    STMT_THROW,
     STMT_DIM,
     STMT_REDIM,
     STMT_ERASE,
@@ -1799,6 +1801,75 @@ public:
 
     std::string toString(int indent = 0) const override {
         return makeIndent(indent) + "END\n";
+    }
+};
+
+// TRY/CATCH/FINALLY statement
+class TryCatchStatement : public Statement {
+public:
+    std::vector<StatementPtr> tryBlock;
+    
+    struct CatchClause {
+        std::vector<int32_t> errorCodes;  // Error codes to catch (empty = catch all)
+        std::vector<StatementPtr> block;
+        
+        CatchClause() = default;
+    };
+    std::vector<CatchClause> catchClauses;
+    
+    std::vector<StatementPtr> finallyBlock;
+    bool hasFinally;
+    
+    TryCatchStatement() : hasFinally(false) {}
+    
+    ASTNodeType getType() const override { return ASTNodeType::STMT_TRY_CATCH; }
+    
+    std::string toString(int indent = 0) const override {
+        std::string result = makeIndent(indent) + "TRY\n";
+        for (const auto& stmt : tryBlock) {
+            result += stmt->toString(indent + 2);
+        }
+        for (const auto& clause : catchClauses) {
+            result += makeIndent(indent) + "CATCH";
+            if (!clause.errorCodes.empty()) {
+                result += " ";
+                for (size_t i = 0; i < clause.errorCodes.size(); i++) {
+                    if (i > 0) result += ", ";
+                    result += std::to_string(clause.errorCodes[i]);
+                }
+            }
+            result += "\n";
+            for (const auto& stmt : clause.block) {
+                result += stmt->toString(indent + 2);
+            }
+        }
+        if (hasFinally) {
+            result += makeIndent(indent) + "FINALLY\n";
+            for (const auto& stmt : finallyBlock) {
+                result += stmt->toString(indent + 2);
+            }
+        }
+        result += makeIndent(indent) + "END TRY\n";
+        return result;
+    }
+};
+
+// THROW statement
+class ThrowStatement : public Statement {
+public:
+    ExpressionPtr errorCode;
+    
+    ThrowStatement() = default;
+    
+    ASTNodeType getType() const override { return ASTNodeType::STMT_THROW; }
+    
+    std::string toString(int indent = 0) const override {
+        std::string result = makeIndent(indent) + "THROW ";
+        if (errorCode) {
+            result += errorCode->toString(0);
+        }
+        result += "\n";
+        return result;
     }
 };
 

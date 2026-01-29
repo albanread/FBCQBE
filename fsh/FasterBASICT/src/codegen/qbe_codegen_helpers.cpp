@@ -207,6 +207,16 @@ std::string QBECodeGenerator::getActualQBEType(const Expression* expr) {
         }
     }
     
+    // For unary expressions, handle NOT operator
+    if (nodeType == ASTNodeType::EXPR_UNARY) {
+        const UnaryExpression* unaryExpr = static_cast<const UnaryExpression*>(expr);
+        if (unaryExpr->op == TokenType::NOT) {
+            return "w";  // NOT always returns 'w' (32-bit) like other integer intrinsics
+        }
+        // For unary + or -, return the type of the operand
+        return getActualQBEType(unaryExpr->expr.get());
+    }
+    
     // For function calls, check if it's an intrinsic that returns 'w' instead of 'l'
     if (nodeType == ASTNodeType::EXPR_FUNCTION_CALL) {
         const FunctionCallExpression* funcExpr = static_cast<const FunctionCallExpression*>(expr);
@@ -857,7 +867,7 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             if (upper == "LEN" || upper == "ASC" || upper == "INSTR" || upper == "STRTYPE" || 
                 upper == "RAND" || upper == "FIX" || upper == "CINT" || upper == "SGN" ||
                 upper == "MIN" || upper == "MAX" || upper == "CSRLIN" || upper == "POS" ||
-                upper == "INT") {
+                upper == "INT" || upper == "ERR" || upper == "ERL") {
                 return VariableType::INT;
             }
             
@@ -887,6 +897,18 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             
             // Default to DOUBLE if not found
             return VariableType::DOUBLE;
+        }
+        
+        case ASTNodeType::EXPR_UNARY: {
+            const UnaryExpression* unaryExpr = static_cast<const UnaryExpression*>(expr);
+            
+            // NOT always returns INT
+            if (unaryExpr->op == TokenType::NOT) {
+                return VariableType::INT;
+            }
+            
+            // Unary + and - preserve the type of the operand
+            return inferExpressionType(unaryExpr->expr.get());
         }
         
         default:

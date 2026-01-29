@@ -492,27 +492,39 @@ std::string QBECodeGenerator::emitUnaryOp(const UnaryExpression* expr) {
         case TokenType::NOT: {
             // Bitwise NOT: flip all bits - always returns integer
             // In BASIC, NOT is bitwise, not logical
+            // Like SGN/ABS/CINT, coerce argument to integer and return 'w' type
             
-            // Number literals are emitted as doubles, so we need to convert them
-            // Check if operand is a double/float and convert to integer
-            // INT operands should already be in 'l' format
             std::string notOperand = operandTemp;
+            std::string actualQBEType = getActualQBEType(expr->expr.get());
+            
+            // Coerce to 32-bit integer if needed
             if (operandType == VariableType::DOUBLE || operandType == VariableType::FLOAT) {
-                // Convert double/float to integer for bitwise operation
-                notOperand = allocTemp("l");
-                emit("    " + notOperand + " =l dtosi " + operandTemp + "\n");
+                // Convert double/float to 32-bit integer for bitwise operation
+                notOperand = allocTemp("w");
+                emit("    " + notOperand + " =w dtosi " + operandTemp + "\n");
                 m_stats.instructionsGenerated++;
-            } else if (operandType != VariableType::INT) {
-                // If not INT/DOUBLE/FLOAT, treat as integer but ensure it's 'l' type
-                // This handles any edge cases
-                notOperand = operandTemp;
+            } else if (operandType == VariableType::INT) {
+                // If it's already INT but stored as 'l' (64-bit), truncate to 'w' (32-bit)
+                // QBE allows 'copy' to truncate from l to w
+                if (actualQBEType == "l") {
+                    std::string truncated = allocTemp("w");
+                    emit("    " + truncated + " =w copy " + notOperand + "\n");
+                    notOperand = truncated;
+                    m_stats.instructionsGenerated++;
+                }
+                // else already 'w', use as-is
+            } else {
+                // String or other type - treat as integer 0
+                notOperand = allocTemp("w");
+                emit("    " + notOperand + " =w copy 0\n");
+                m_stats.instructionsGenerated++;
             }
             
-            // Perform bitwise NOT using XOR with -1
-            std::string notResult = allocTemp("l");
-            emit("    " + notResult + " =l xor " + notOperand + ", -1\n");
+            // Perform bitwise NOT using XOR with -1 on 32-bit value
+            std::string notResult = allocTemp("w");
+            emit("    " + notResult + " =w xor " + notOperand + ", -1\n");
             m_stats.instructionsGenerated++;
-            return notResult;  // Return directly, always returns integer
+            return notResult;  // Return 'w' type, consistent with other integer intrinsics
         }
             
         case TokenType::PLUS:
@@ -2083,6 +2095,10 @@ std::string QBECodeGenerator::mapToRuntimeFunction(const std::string& basicFunc)
     if (upper == "OCT$") return "OCT_STRING";
     if (upper == "JOIN$") return "string_join";
     if (upper == "SPLIT$") return "string_split";
+    
+    // Exception handling functions
+    if (upper == "ERR") return "basic_err";
+    if (upper == "ERL") return "basic_erl";
     
     // Default: prefix with basic_
     return "basic_" + upper;

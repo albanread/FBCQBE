@@ -63,6 +63,14 @@ void Lexer::initializeKeywords() {
         s_keywords["OTHERWISE"] = TokenType::OTHERWISE;
         s_keywords["ENDCASE"] = TokenType::ENDCASE;
     
+        // Exception Handling
+        s_keywords["TRY"] = TokenType::TRY;
+        s_keywords["CATCH"] = TokenType::CATCH;
+        s_keywords["FINALLY"] = TokenType::FINALLY;
+        s_keywords["THROW"] = TokenType::THROW;
+        s_keywords["ERR"] = TokenType::ERR;
+        s_keywords["ERL"] = TokenType::ERL;
+    
         // Functions and Procedures
         s_keywords["SUB"] = TokenType::SUB;
         s_keywords["FUNCTION"] = TokenType::FUNCTION;

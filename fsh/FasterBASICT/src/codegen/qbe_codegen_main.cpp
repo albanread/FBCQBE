@@ -709,6 +709,7 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
     // Store current block for statement handlers
     m_currentBlock = block;
     m_lastStatementWasTerminator = false;
+    bool isTrySetupBlock = false;
     
     // Emit block label
     std::string label = getBlockLabel(block->id);
@@ -835,6 +836,134 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
             
             // Store condition for CFG to emit conditional branch
             m_lastCondition = condTemp;
+        }
+    }
+    
+    // Check if this is a TRY setup block (contains TryCatchStatement)
+    for (const Statement* stmt : block->statements) {
+        if (stmt && stmt->getType() == ASTNodeType::STMT_TRY_CATCH) {
+            isTrySetupBlock = true;
+            break;
+        }
+    }
+    
+    if (isTrySetupBlock) {
+        emitComment("TRY setup - push exception context and setjmp");
+        
+        // Find the TRY/CATCH structure that owns this setup block
+        for (const auto& tryPair : m_cfg->tryCatchStructure) {
+            const auto& tryBlocks = tryPair.second;
+            if (tryBlocks.tryBlock == block->id) {
+                // Push exception context onto runtime stack and get pointer back
+                int hasFinally = tryBlocks.hasFinally ? 1 : 0;
+                std::string ctxPtr = allocTemp("l");
+                emit("    " + ctxPtr + " =l call $basic_exception_push(w " + std::to_string(hasFinally) + ")\n");
+                m_stats.instructionsGenerated++;
+                
+                // CRITICAL: Call setjmp DIRECTLY, not through a wrapper!
+                // Calling through a wrapper creates a stack frame that longjmp can't restore to.
+                // setjmp must be called from the stack frame we want to return to.
+                // Get address of jump_buffer (first field in ExceptionContext, offset 0)
+                std::string jmpBufPtr = ctxPtr;  // jump_buffer is at offset 0
+                
+                // Call setjmp directly with the jump buffer address
+                std::string setjmpResult = allocTemp("w");
+                emit("    " + setjmpResult + " =w call $setjmp(l " + jmpBufPtr + ")\n");
+                m_stats.instructionsGenerated++;
+                
+                // CRITICAL: Branch immediately after setjmp, before any other code
+                // setjmp returns 0 on normal call, non-zero on exception
+                std::string dispatchLabel = getBlockLabel(tryBlocks.dispatchBlock);
+                std::string tryBodyLabel = getBlockLabel(tryBlocks.tryBodyBlock);
+                
+                emitComment("Branch: if exception (non-zero) goto dispatch, else goto try body");
+                emit("    jnz " + setjmpResult + ", @" + dispatchLabel + ", @" + tryBodyLabel + "\n");
+                m_stats.instructionsGenerated++;
+                
+                // Mark that we've emitted a terminator so the rest of the block is skipped
+                m_lastStatementWasTerminator = true;
+                break;
+            }
+        }
+    }
+    
+    // Check if this is an exception dispatch block
+    else if (block->statements.empty() && !block->label.empty() && 
+        block->label.find("Exception Dispatch") != std::string::npos) {
+        
+        emitComment("Exception dispatch - check error code and route to CATCH");
+        
+        // Find the TRY/CATCH structure that owns this dispatch block
+        for (const auto& tryPair : m_cfg->tryCatchStructure) {
+            const auto& tryBlocks = tryPair.second;
+            if (tryBlocks.dispatchBlock == block->id) {
+                // Get current error code from runtime
+                std::string errCode = allocTemp("w");
+                emit("    " + errCode + " =w call $basic_err()\n");
+                m_stats.instructionsGenerated++;
+                
+                // For each CATCH clause, check if error code matches
+                const TryCatchStatement* tryStmt = tryBlocks.tryStatement;
+                bool emittedBranch = false;
+                
+                for (size_t i = 0; i < tryStmt->catchClauses.size(); i++) {
+                    const auto& clause = tryStmt->catchClauses[i];
+                    
+                    if (clause.errorCodes.empty()) {
+                        // Catch-all - always matches
+                        emitComment("CATCH (all) - matches any error");
+                        std::string catchLabel = getBlockLabel(tryBlocks.catchBlocks[i]);
+                        emit("    jmp @" + catchLabel + "\n");
+                        m_stats.instructionsGenerated++;
+                        emittedBranch = true;
+                        break;
+                    } else {
+                        // Check if error code matches any in this CATCH clause
+                        std::vector<std::string> matches;
+                        for (int32_t code : clause.errorCodes) {
+                            std::string match = allocTemp("w");
+                            emit("    " + match + " =w ceqw " + errCode + ", " + std::to_string(code) + "\n");
+                            m_stats.instructionsGenerated++;
+                            matches.push_back(match);
+                        }
+                        
+                        // OR all matches together
+                        std::string anyMatch = matches[0];
+                        for (size_t j = 1; j < matches.size(); j++) {
+                            std::string orTemp = allocTemp("w");
+                            emit("    " + orTemp + " =w or " + anyMatch + ", " + matches[j] + "\n");
+                            m_stats.instructionsGenerated++;
+                            anyMatch = orTemp;
+                        }
+                        
+                        // Emit conditional branch to this CATCH block
+                        std::string catchLabel = getBlockLabel(tryBlocks.catchBlocks[i]);
+                        
+                        // If this is the last CATCH clause, emit direct branch
+                        if (i + 1 >= tryStmt->catchClauses.size()) {
+                            // Last CATCH - branch to catch if match, else re-throw
+                            emitComment("Jump to CATCH if error matches, else re-throw");
+                            emit("    jnz " + anyMatch + ", @" + catchLabel + ", @rethrow_" + std::to_string(block->id) + "\n");
+                            m_stats.instructionsGenerated++;
+                            emit("\n@rethrow_" + std::to_string(block->id) + "\n");
+                            emitComment("No CATCH matched - re-throw exception");
+                            emit("    call $basic_rethrow()\n");
+                            m_stats.instructionsGenerated++;
+                            emittedBranch = true;
+                        } else {
+                            // Not last - branch to catch if match, else continue to next check
+                            emitComment("Jump to CATCH if error matches");
+                            emit("    jnz " + anyMatch + ", @" + catchLabel + ", @check_catch_" + std::to_string(i+1) + "_" + std::to_string(block->id) + "\n");
+                            m_stats.instructionsGenerated++;
+                            emit("\n@check_catch_" + std::to_string(i+1) + "_" + std::to_string(block->id) + "\n");
+                        }
+                    }
+                }
+                
+                // Prevent successor emission since we handled branching
+                m_lastStatementWasTerminator = emittedBranch;
+                break;
+            }
         }
     }
     
@@ -1026,21 +1155,71 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
         popLoop();
     }
     
-    // Emit all statements in the block
-    for (const Statement* stmt : block->statements) {
-        if (stmt) {
-            // Add line number comment if available
-            if (m_config.emitComments) {
-                int lineNum = block->getLineNumber(stmt);
-                if (lineNum > 0) {
-                    emitComment("Line " + std::to_string(lineNum));
+    // Check if this block needs special post-statement handling for exceptions
+    bool isCatchBlock = false;
+    bool isFinallyBlock = false;
+    bool isTryBodyBlock = false;
+    int tryExitBlock = -1;
+    int finallyBlock = -1;
+    
+    for (const auto& tryPair : m_cfg->tryCatchStructure) {
+        const auto& tryBlocks = tryPair.second;
+        
+        // Check if this is a CATCH block
+        for (size_t i = 0; i < tryBlocks.catchBlocks.size(); i++) {
+            if (tryBlocks.catchBlocks[i] == block->id) {
+                isCatchBlock = true;
+                tryExitBlock = tryBlocks.exitBlock;
+                if (tryBlocks.hasFinally) {
+                    finallyBlock = tryBlocks.finallyBlock;
                 }
-            }
-            emitStatement(stmt);
-            if (m_lastStatementWasTerminator) {
                 break;
             }
         }
+        
+        // Check if this is a FINALLY block
+        if (tryBlocks.hasFinally && tryBlocks.finallyBlock == block->id) {
+            isFinallyBlock = true;
+            tryExitBlock = tryBlocks.exitBlock;
+        }
+        
+        // Check if this is a TRY body block
+        if (tryBlocks.tryBodyBlock == block->id) {
+            isTryBodyBlock = true;
+            tryExitBlock = tryBlocks.exitBlock;
+            if (tryBlocks.hasFinally) {
+                finallyBlock = tryBlocks.finallyBlock;
+            }
+            break;
+        }
+    }
+    
+    // Emit all statements in the block
+    // UNLESS this is a TRY setup block that already emitted its terminator
+    if (!isTrySetupBlock || !m_lastStatementWasTerminator) {
+        for (const Statement* stmt : block->statements) {
+            if (stmt) {
+                // Add line number comment if available
+                if (m_config.emitComments) {
+                    int lineNum = block->getLineNumber(stmt);
+                    if (lineNum > 0) {
+                        emitComment("Line " + std::to_string(lineNum));
+                    }
+                }
+                emitStatement(stmt);
+                if (m_lastStatementWasTerminator) {
+                    break;
+                }
+            }
+        }
+    }
+    
+    // If this is the end of a TRY body, CATCH, or FINALLY block, emit exception cleanup
+    if (isFinallyBlock && !m_lastStatementWasTerminator) {
+        // After FINALLY, pop exception context
+        emitComment("Pop exception context");
+        emit("    call $basic_exception_pop()\n");
+        m_stats.instructionsGenerated++;
     }
     
     // Emit control flow based on successors

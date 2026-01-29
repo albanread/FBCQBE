@@ -1219,6 +1219,12 @@ void SemanticAnalyzer::validateProgramLine(const ProgramLine& line) {
 
 void SemanticAnalyzer::validateStatement(const Statement& stmt) {
     switch (stmt.getType()) {
+        case ASTNodeType::STMT_TRY_CATCH:
+            validateTryCatchStatement(static_cast<const TryCatchStatement&>(stmt));
+            break;
+        case ASTNodeType::STMT_THROW:
+            validateThrowStatement(static_cast<const ThrowStatement&>(stmt));
+            break;
         case ASTNodeType::STMT_PRINT:
             validatePrintStatement(static_cast<const PrintStatement&>(stmt));
             break;
@@ -2271,6 +2277,108 @@ void SemanticAnalyzer::validateReturnStatement(const ReturnStatement& stmt) {
     }
 }
 
+void SemanticAnalyzer::validateTryCatchStatement(const TryCatchStatement& stmt) {
+    // Validate TRY/CATCH/FINALLY structure
+    
+    // Rule 1: Must have at least one CATCH clause or a FINALLY block
+    if (stmt.catchClauses.empty() && !stmt.hasFinally) {
+        error(SemanticErrorType::CONTROL_FLOW_MISMATCH,
+              "TRY statement must have at least one CATCH clause or a FINALLY block",
+              stmt.location);
+        return;
+    }
+    
+    // Rule 2: Validate each CATCH clause
+    bool hasCatchAll = false;
+    for (size_t i = 0; i < stmt.catchClauses.size(); i++) {
+        const auto& clause = stmt.catchClauses[i];
+        
+        // Check for catch-all (empty error codes)
+        if (clause.errorCodes.empty()) {
+            hasCatchAll = true;
+            
+            // Catch-all must be the last CATCH clause
+            if (i != stmt.catchClauses.size() - 1) {
+                error(SemanticErrorType::CONTROL_FLOW_MISMATCH,
+                      "Catch-all CATCH clause (with no error codes) must be the last CATCH clause",
+                      stmt.location);
+            }
+        }
+        
+        // Validate error codes are positive integers
+        for (int32_t code : clause.errorCodes) {
+            if (code <= 0) {
+                error(SemanticErrorType::TYPE_MISMATCH,
+                      "Error code must be a positive integer, got " + std::to_string(code),
+                      stmt.location);
+            }
+        }
+        
+        // Check for duplicate error codes within this CATCH
+        std::set<int32_t> seenCodes;
+        for (int32_t code : clause.errorCodes) {
+            if (seenCodes.count(code)) {
+                error(SemanticErrorType::CONTROL_FLOW_MISMATCH,
+                      "Duplicate error code " + std::to_string(code) + " in CATCH clause",
+                      stmt.location);
+            }
+            seenCodes.insert(code);
+        }
+        
+        // Validate statements in CATCH block
+        for (const auto& catchStmt : clause.block) {
+            validateStatement(*catchStmt);
+        }
+    }
+    
+    // Rule 3: Validate TRY block statements
+    for (const auto& tryStmt : stmt.tryBlock) {
+        validateStatement(*tryStmt);
+    }
+    
+    // Rule 4: Validate FINALLY block statements (if present)
+    if (stmt.hasFinally) {
+        for (const auto& finallyStmt : stmt.finallyBlock) {
+            validateStatement(*finallyStmt);
+        }
+    }
+}
+
+void SemanticAnalyzer::validateThrowStatement(const ThrowStatement& stmt) {
+    // THROW must have an error code expression
+    if (!stmt.errorCode) {
+        error(SemanticErrorType::TYPE_MISMATCH,
+              "THROW statement requires an error code expression",
+              stmt.location);
+        return;
+    }
+    
+    // Validate the error code expression
+    validateExpression(*stmt.errorCode);
+    
+    // Infer the type of the error code expression
+    VariableType codeType = inferExpressionType(*stmt.errorCode);
+    
+    // Error code must be numeric (will be converted to integer at runtime)
+    if (!isNumericType(codeType)) {
+        error(SemanticErrorType::TYPE_MISMATCH,
+              "THROW error code must be numeric, got " + std::string(typeToString(codeType)),
+              stmt.location);
+    }
+    
+    // Warning: If the error code is a constant, validate it's positive
+    if (isConstantExpression(*stmt.errorCode)) {
+        auto constVal = evaluateConstantExpression(*stmt.errorCode);
+        if (isConstantNumeric(constVal)) {
+            int64_t code = getConstantAsInt(constVal);
+            if (code <= 0) {
+                warning("THROW error code should be positive, got " + std::to_string(code),
+                       stmt.location);
+            }
+        }
+    }
+}
+
 VariableType SemanticAnalyzer::inferExpressionType(const Expression& expr) {
     switch (expr.getType()) {
         case ASTNodeType::EXPR_NUMBER:
@@ -3169,6 +3277,10 @@ void SemanticAnalyzer::initializeBuiltinFunctions() {
     m_builtinFunctions["INKEY_STRING"] = 0;  // Parser converts INKEY$ to INKEY_STRING
     m_builtinFunctions["CSRLIN"] = 0;    // Returns INT (current cursor row)
     m_builtinFunctions["POS"] = 1;       // (dummy) Returns INT (current cursor column)
+    
+    // Exception handling functions
+    m_builtinFunctions["ERR"] = 0;       // Returns INT (current error code)
+    m_builtinFunctions["ERL"] = 0;       // Returns INT (current error line)
     
     // Array bounds functions
     m_builtinFunctions["LBOUND"] = -1;  // (array) or (array, dimension) Returns INT

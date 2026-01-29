@@ -67,6 +67,14 @@ enum class TokenType {
     OTHERWISE,       // OTHERWISE
     ENDCASE,         // ENDCASE
     
+    // Keywords - Exception Handling
+    TRY,             // TRY (begin exception handling block)
+    CATCH,           // CATCH (catch exceptions by error code)
+    FINALLY,         // FINALLY (always executed cleanup block)
+    THROW,           // THROW (throw exception with error code)
+    ERR,             // ERR (get current error code)
+    ERL,             // ERL (get error line number)
+    
     // Keywords - Compiler Directives
     OPTION,          // OPTION
     BITWISE,         // BITWISE (for OPTION BITWISE)
@@ -374,6 +382,12 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::IS: return "IS";
         case TokenType::OTHERWISE: return "OTHERWISE";
         case TokenType::ENDCASE: return "ENDCASE";
+        case TokenType::TRY: return "TRY";
+        case TokenType::CATCH: return "CATCH";
+        case TokenType::FINALLY: return "FINALLY";
+        case TokenType::THROW: return "THROW";
+        case TokenType::ERR: return "ERR";
+        case TokenType::ERL: return "ERL";
         case TokenType::OPTION: return "OPTION";
         case TokenType::BITWISE: return "BITWISE";
         case TokenType::LOGICAL: return "LOGICAL";

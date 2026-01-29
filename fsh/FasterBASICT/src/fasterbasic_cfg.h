@@ -256,6 +256,19 @@ public:
     };
     std::map<int, DoLoopBlocks> doLoopStructure;  // headerBlock → DoLoopBlocks
     
+    // TRY/CATCH/FINALLY structure tracking
+    struct TryCatchBlocks {
+        int tryBlock;              // Block that sets up exception context (setjmp)
+        int tryBodyBlock;          // First block of TRY body statements
+        int dispatchBlock;         // Block that dispatches to appropriate CATCH
+        std::vector<int> catchBlocks;  // One block per CATCH clause
+        int finallyBlock;          // FINALLY block (-1 if none)
+        int exitBlock;             // Block after END TRY
+        bool hasFinally;           // Whether FINALLY is present
+        const TryCatchStatement* tryStatement;  // Pointer to AST node
+    };
+    std::map<int, TryCatchBlocks> tryCatchStructure;  // tryBlock → TryCatchBlocks
+    
     // Mapping from loop constructs
     std::map<int, int> forLoopHeaders;      // FOR statement → block ID (deprecated, use forLoopStructure)
     std::map<int, int> whileLoopHeaders;    // WHILE statement → block ID
@@ -520,6 +533,7 @@ private:
     void processOnGotoStatement(const OnGotoStatement& stmt, BasicBlock* currentBlock);
     void processOnGosubStatement(const OnGosubStatement& stmt, BasicBlock* currentBlock);
     void processLabelStatement(const LabelStatement& stmt, BasicBlock* currentBlock);
+    void processTryCatchStatement(const TryCatchStatement& stmt, BasicBlock* currentBlock);
     
     // Helper functions
     VariableType inferTypeFromName(const std::string& name);
@@ -565,6 +579,19 @@ private:
         const CaseStatement* caseStatement;  // Pointer to AST node
     };
     std::vector<SelectCaseContext> m_selectCaseStack;
+    
+    // TRY/CATCH tracking
+    struct TryCatchContext {
+        int tryBlock;              // Block that sets up exception context
+        int tryBodyBlock;          // First block of TRY body
+        int dispatchBlock;         // Exception dispatcher block
+        std::vector<int> catchBlocks;  // CATCH handler blocks
+        int finallyBlock;          // FINALLY block (-1 if none)
+        int exitBlock;             // Block after END TRY
+        bool hasFinally;           // Whether FINALLY is present
+        const TryCatchStatement* tryStatement;
+    };
+    std::vector<TryCatchContext> m_tryCatchStack;
     
     // Configuration
     bool m_createExitBlock;

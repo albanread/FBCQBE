@@ -240,6 +240,8 @@ private:
     void emitCase(const CaseStatement* stmt);
     void emitLocal(const LocalStatement* stmt);
     void emitShared(const SharedStatement* stmt);
+    void emitTryCatch(const TryCatchStatement* stmt);
+    void emitThrow(const ThrowStatement* stmt);
     
     // Terminal I/O
     void emitCls(const SimpleStatement* stmt);

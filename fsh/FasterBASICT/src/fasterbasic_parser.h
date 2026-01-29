@@ -240,6 +240,8 @@ private:
     StatementPtr parseDoStatement();
     StatementPtr parseLoopStatement();
     StatementPtr parseEndStatement();
+    StatementPtr parseTryStatement();
+    StatementPtr parseThrowStatement();
     StatementPtr parseDimStatement();
     StatementPtr parseRedimStatement();
     StatementPtr parseEraseStatement();

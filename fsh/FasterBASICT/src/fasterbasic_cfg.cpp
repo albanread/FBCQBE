@@ -260,6 +260,10 @@ void CFGBuilder::processStatement(const Statement& stmt, BasicBlock* currentBloc
     }
     
     switch (type) {
+        case ASTNodeType::STMT_TRY_CATCH:
+            processTryCatchStatement(static_cast<const TryCatchStatement&>(stmt), currentBlock);
+            break;
+            
         case ASTNodeType::STMT_LABEL:
             processLabelStatement(static_cast<const LabelStatement&>(stmt), currentBlock);
             break;
@@ -307,6 +311,11 @@ void CFGBuilder::processStatement(const Statement& stmt, BasicBlock* currentBloc
             
         case ASTNodeType::STMT_CASE:
             processCaseStatement(static_cast<const CaseStatement&>(stmt), currentBlock);
+            break;
+        
+        case ASTNodeType::STMT_THROW:
+            // THROW is a terminator (throws exception and doesn't return normally)
+            currentBlock->isTerminator = true;
             break;
             
         case ASTNodeType::STMT_FUNCTION:
@@ -627,6 +636,110 @@ void CFGBuilder::processCaseStatement(const CaseStatement& stmt, BasicBlock* cur
     ctx.exitBlock = exitBlock->id;
     ctx.caseStatement = &stmt;
     m_selectCaseStack.push_back(ctx);
+    
+    // Continue with exit block
+    m_currentBlock = exitBlock;
+}
+
+void CFGBuilder::processTryCatchStatement(const TryCatchStatement& stmt, BasicBlock* currentBlock) {
+    // TRY/CATCH/FINALLY creates an exception handling structure
+    // Structure:
+    //   - TRY block (current): Sets up exception context (setjmp)
+    //   - TRY body block: Executes TRY statements
+    //   - Dispatch block: Checks error code and routes to appropriate CATCH
+    //   - CATCH blocks: One per CATCH clause
+    //   - FINALLY block: Optional, executes cleanup code
+    //   - Exit block: Continue after END TRY
+    
+    // The TRY statement (setup) stays in current block
+    int trySetupBlockId = currentBlock->id;
+    
+    // Create TRY body block
+    BasicBlock* tryBodyBlock = createNewBlock("TRY Body");
+    int tryBodyBlockId = tryBodyBlock->id;
+    
+    // Process TRY block statements
+    m_currentBlock = tryBodyBlock;
+    for (const auto& tryStmt : stmt.tryBlock) {
+        if (tryStmt) {
+            processStatement(*tryStmt, m_currentBlock, 0);
+        }
+    }
+    
+    // Create exception dispatch block
+    BasicBlock* dispatchBlock = createNewBlock("Exception Dispatch");
+    int dispatchBlockId = dispatchBlock->id;
+    
+    // Create CATCH blocks
+    std::vector<int> catchBlockIds;
+    for (size_t i = 0; i < stmt.catchClauses.size(); i++) {
+        const auto& clause = stmt.catchClauses[i];
+        
+        std::string catchLabel = "CATCH";
+        if (!clause.errorCodes.empty()) {
+            catchLabel += " ";
+            for (size_t j = 0; j < clause.errorCodes.size(); j++) {
+                if (j > 0) catchLabel += ",";
+                catchLabel += std::to_string(clause.errorCodes[j]);
+            }
+        } else {
+            catchLabel += " (all)";
+        }
+        
+        BasicBlock* catchBlock = createNewBlock(catchLabel);
+        catchBlockIds.push_back(catchBlock->id);
+        
+        // Process CATCH block statements
+        m_currentBlock = catchBlock;
+        for (const auto& catchStmt : clause.block) {
+            if (catchStmt) {
+                processStatement(*catchStmt, m_currentBlock, 0);
+            }
+        }
+    }
+    
+    // Create FINALLY block if present
+    int finallyBlockId = -1;
+    if (stmt.hasFinally) {
+        BasicBlock* finallyBlock = createNewBlock("FINALLY");
+        finallyBlockId = finallyBlock->id;
+        
+        // Process FINALLY block statements
+        m_currentBlock = finallyBlock;
+        for (const auto& finallyStmt : stmt.finallyBlock) {
+            if (finallyStmt) {
+                processStatement(*finallyStmt, m_currentBlock, 0);
+            }
+        }
+    }
+    
+    // Create exit block
+    BasicBlock* exitBlock = createNewBlock("After TRY");
+    int exitBlockId = exitBlock->id;
+    
+    // Store TRY/CATCH structure info for buildEdges phase
+    TryCatchContext ctx;
+    ctx.tryBlock = trySetupBlockId;
+    ctx.tryBodyBlock = tryBodyBlockId;
+    ctx.dispatchBlock = dispatchBlockId;
+    ctx.catchBlocks = catchBlockIds;
+    ctx.finallyBlock = finallyBlockId;
+    ctx.exitBlock = exitBlockId;
+    ctx.hasFinally = stmt.hasFinally;
+    ctx.tryStatement = &stmt;
+    m_tryCatchStack.push_back(ctx);
+    
+    // Also store in the CFG for later reference
+    ControlFlowGraph::TryCatchBlocks cfgBlocks;
+    cfgBlocks.tryBlock = trySetupBlockId;
+    cfgBlocks.tryBodyBlock = tryBodyBlockId;
+    cfgBlocks.dispatchBlock = dispatchBlockId;
+    cfgBlocks.catchBlocks = catchBlockIds;
+    cfgBlocks.finallyBlock = finallyBlockId;
+    cfgBlocks.exitBlock = exitBlockId;
+    cfgBlocks.hasFinally = stmt.hasFinally;
+    cfgBlocks.tryStatement = &stmt;
+    m_currentCFG->tryCatchStructure[trySetupBlockId] = cfgBlocks;
     
     // Continue with exit block
     m_currentBlock = exitBlock;
@@ -1037,6 +1150,63 @@ void CFGBuilder::buildEdges() {
             continue;  // Skip regular processing for test blocks
         }
         
+        // Check if this is a TRY/CATCH structure block (dispatch, catch, finally)
+        bool isTryCatchBlock = false;
+        for (const auto& ctx : m_tryCatchStack) {
+            // Check if this is the dispatch block
+            if (block->id == ctx.dispatchBlock) {
+                isTryCatchBlock = true;
+                // Dispatch block: conditional branches to each CATCH block based on error code
+                // First, check each CATCH clause in order
+                for (size_t i = 0; i < ctx.catchBlocks.size(); i++) {
+                    addConditionalEdge(block->id, ctx.catchBlocks[i], "error matches");
+                }
+                // If no CATCH matches, re-throw (goes to outer handler or terminates)
+                // We don't add an explicit edge here as it's handled by runtime
+                break;
+            }
+            
+            // Check if this is a TRY body block
+            if (block->id == ctx.tryBodyBlock) {
+                isTryCatchBlock = true;
+                // TRY body on normal completion: jump to FINALLY or exit
+                if (ctx.hasFinally) {
+                    addFallthroughEdge(block->id, ctx.finallyBlock);
+                } else {
+                    addFallthroughEdge(block->id, ctx.exitBlock);
+                }
+                // Note: Exception dispatch is reached via longjmp, not normal CFG flow
+                break;
+            }
+            
+            // Check if this is a CATCH block
+            for (size_t i = 0; i < ctx.catchBlocks.size(); i++) {
+                if (block->id == ctx.catchBlocks[i]) {
+                    isTryCatchBlock = true;
+                    // CATCH block on completion: jump to FINALLY or exit
+                    if (ctx.hasFinally) {
+                        addFallthroughEdge(block->id, ctx.finallyBlock);
+                    } else {
+                        addFallthroughEdge(block->id, ctx.exitBlock);
+                    }
+                    break;
+                }
+            }
+            if (isTryCatchBlock) break;
+            
+            // Check if this is a FINALLY block
+            if (ctx.hasFinally && block->id == ctx.finallyBlock) {
+                isTryCatchBlock = true;
+                // FINALLY always jumps to exit
+                addFallthroughEdge(block->id, ctx.exitBlock);
+                break;
+            }
+        }
+        
+        if (isTryCatchBlock) {
+            continue;  // Skip regular processing for TRY/CATCH blocks
+        }
+        
         if (block->statements.empty()) {
             // Empty block - fallthrough to next
             if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
@@ -1411,6 +1581,33 @@ void CFGBuilder::buildEdges() {
                 }
                 break;
             }
+            
+            case ASTNodeType::STMT_TRY_CATCH: {
+                // TRY/CATCH - exception handling structure
+                // Find the matching TRY/CATCH context
+                TryCatchContext* tryCtx = nullptr;
+                for (auto& ctx : m_tryCatchStack) {
+                    if (ctx.tryBlock == block->id) {
+                        tryCtx = &ctx;
+                        break;
+                    }
+                }
+                
+                if (tryCtx) {
+                    // From TRY setup block, conditional jump based on setjmp result
+                    // If setjmp returns non-zero (exception), jump to dispatch
+                    // If setjmp returns zero (normal), fall through to TRY body
+                    addConditionalEdge(block->id, tryCtx->dispatchBlock, "exception");
+                    addConditionalEdge(block->id, tryCtx->tryBodyBlock, "normal");
+                }
+                break;
+            }
+            
+            case ASTNodeType::STMT_THROW:
+                // THROW - terminates normal flow, jumps to exception handler
+                // The actual exception routing is handled by setjmp/longjmp at runtime
+                // In CFG, we mark this as terminator (already done in processStatement)
+                break;
             
             case ASTNodeType::STMT_RETURN:
             case ASTNodeType::STMT_END:

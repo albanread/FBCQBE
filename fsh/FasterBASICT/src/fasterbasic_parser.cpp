@@ -701,6 +701,10 @@ StatementPtr Parser::parseStatement() {
             return parseLoopStatement();
         case TokenType::END:
             return parseEndStatement();
+        case TokenType::TRY:
+            return parseTryStatement();
+        case TokenType::THROW:
+            return parseThrowStatement();
         case TokenType::DIM:
             return parseDimStatement();
         case TokenType::REDIM:
@@ -4426,6 +4430,38 @@ ExpressionPtr Parser::parsePrimary() {
         return funcExpr;
     }
 
+    // Special case: ERR keyword used as function call
+    if (current().type == TokenType::ERR) {
+        std::string functionName = "ERR";
+        advance();
+        
+        // Create a builtin function call expression
+        auto funcExpr = std::make_unique<FunctionCallExpression>(functionName, false);
+        
+        // ERR takes no parameters, but allow optional parentheses
+        if (match(TokenType::LPAREN)) {
+            consume(TokenType::RPAREN, "Expected ')' after ERR");
+        }
+        
+        return funcExpr;
+    }
+
+    // Special case: ERL keyword used as function call
+    if (current().type == TokenType::ERL) {
+        std::string functionName = "ERL";
+        advance();
+        
+        // Create a builtin function call expression
+        auto funcExpr = std::make_unique<FunctionCallExpression>(functionName, false);
+        
+        // ERL takes no parameters, but allow optional parentheses
+        if (match(TokenType::LPAREN)) {
+            consume(TokenType::RPAREN, "Expected ')' after ERL");
+        }
+        
+        return funcExpr;
+    }
+
     // Parenthesized expression
     if (match(TokenType::LPAREN)) {
         auto expr = parseExpression();
@@ -5064,6 +5100,7 @@ bool Parser::isBuiltinFunction(const std::string& name) const {
         "INSTR", "SPACE$", "STRING$", "UCASE$", "LCASE$", "LTRIM$", "RTRIM$", "TRIM$",
         "GETTICKS", "LOF", "EOF", "PEEK", "PEEK2", "PEEK4",
         "INKEY$", "INKEY_STRING", "CSRLIN", "POS",  // Terminal I/O functions
+        "ERR", "ERL",  // Exception handling functions
         // Add more as needed
     };
     
@@ -6205,6 +6242,115 @@ void Parser::prescanForFunctions() {
 
     // Restore token position
     m_currentIndex = savedIndex;
+}
+
+
+StatementPtr Parser::parseTryStatement() {
+    advance(); // consume TRY
+    
+    auto stmt = std::make_unique<TryCatchStatement>();
+    
+    // Parse TRY block
+    while (!check(TokenType::CATCH) && 
+           !check(TokenType::FINALLY) && 
+           !(check(TokenType::END) && peek().type == TokenType::TRY) &&
+           !isAtEnd()) {
+        size_t prevPos = m_currentIndex;
+        auto s = parseStatement();
+        if (s) {
+            stmt->tryBlock.push_back(std::move(s));
+        }
+        // Safety: if parseStatement didn't advance, force advance to prevent infinite loop
+        if (m_currentIndex == prevPos && !isAtEnd()) {
+            advance();
+        }
+    }
+    
+    // Parse CATCH clauses
+    while (check(TokenType::CATCH)) {
+        advance(); // consume CATCH
+        
+        TryCatchStatement::CatchClause clause;
+        
+        // Check for error codes
+        if (check(TokenType::NUMBER)) {
+            // Parse comma-separated error codes
+            clause.errorCodes.push_back(std::stoi(current().value));
+            advance();
+            
+            while (match(TokenType::COMMA)) {
+                if (!check(TokenType::NUMBER)) {
+                    error("Expected error code after comma in CATCH");
+                    return nullptr;
+                }
+                clause.errorCodes.push_back(std::stoi(current().value));
+                advance();
+            }
+        }
+        // else: catch-all (errorCodes is empty)
+        
+        // Parse CATCH block
+        while (!check(TokenType::CATCH) && 
+               !check(TokenType::FINALLY) && 
+               !(check(TokenType::END) && peek().type == TokenType::TRY) &&
+               !isAtEnd()) {
+            size_t prevPos = m_currentIndex;
+            auto s = parseStatement();
+            if (s) {
+                clause.block.push_back(std::move(s));
+            }
+            // Safety: if parseStatement didn't advance, force advance to prevent infinite loop
+            if (m_currentIndex == prevPos && !isAtEnd()) {
+                advance();
+            }
+        }
+        
+        stmt->catchClauses.push_back(std::move(clause));
+    }
+    
+    // Parse FINALLY clause
+    if (match(TokenType::FINALLY)) {
+        stmt->hasFinally = true;
+        
+        while (!(check(TokenType::END) && peek().type == TokenType::TRY) && !isAtEnd()) {
+            size_t prevPos = m_currentIndex;
+            auto s = parseStatement();
+            if (s) {
+                stmt->finallyBlock.push_back(std::move(s));
+            }
+            // Safety: if parseStatement didn't advance, force advance to prevent infinite loop
+            if (m_currentIndex == prevPos && !isAtEnd()) {
+                advance();
+            }
+        }
+    }
+    
+    // Expect END TRY
+    if (!match(TokenType::END)) {
+        error("Expected END TRY");
+        return nullptr;
+    }
+    if (!match(TokenType::TRY)) {
+        error("Expected TRY after END");
+        return nullptr;
+    }
+    
+    // Validate: must have at least CATCH or FINALLY
+    if (stmt->catchClauses.empty() && !stmt->hasFinally) {
+        error("TRY must have at least one CATCH or FINALLY clause");
+        return nullptr;
+    }
+    
+    return stmt;
+}
+
+StatementPtr Parser::parseThrowStatement() {
+    advance(); // consume THROW
+    
+    auto stmt = std::make_unique<ThrowStatement>();
+    stmt->errorCode = parseExpression();
+    
+    return stmt;
 }
 
 } // namespace FasterBASIC

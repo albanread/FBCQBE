@@ -188,6 +188,14 @@ void QBECodeGenerator::emitStatement(const Statement* stmt) {
             // DATA statements are preprocessed - no runtime code needed
             break;
             
+        case ASTNodeType::STMT_TRY_CATCH:
+            emitTryCatch(static_cast<const TryCatchStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_THROW:
+            emitThrow(static_cast<const ThrowStatement*>(stmt));
+            break;
+            
         case ASTNodeType::STMT_CLS:
             emitCls(static_cast<const SimpleStatement*>(stmt));
             break;
@@ -2536,6 +2544,46 @@ void QBECodeGenerator::emitWidth(const ExpressionStatement* stmt) {
     
     emit("    call $basic_width(w " + columns + ")\n");
     m_stats.instructionsGenerated++;
+}
+
+void QBECodeGenerator::emitTryCatch(const TryCatchStatement* stmt) {
+    emitComment("TRY/CATCH/FINALLY - Exception handling (TODO: complete implementation)");
+    emitComment("NOTE: Exception handling code generation not yet complete");
+    
+    // For now, just emit a placeholder to avoid hanging
+    // The TRY block statements will be emitted by normal block processing
+}
+
+void QBECodeGenerator::emitThrow(const ThrowStatement* stmt) {
+    emitComment("THROW - Raise exception");
+    
+    if (!stmt->errorCode) {
+        emitComment("ERROR: THROW requires error code expression");
+        return;
+    }
+    
+    // Evaluate error code expression
+    std::string codeTemp = emitExpression(stmt->errorCode.get());
+    VariableType codeType = inferExpressionType(stmt->errorCode.get());
+    
+    // Convert to int32 if needed
+    std::string codeInt = codeTemp;
+    if (codeType == VariableType::DOUBLE) {
+        codeInt = allocTemp("w");
+        emit("    " + codeInt + " =w dtosi " + codeTemp + "\n");
+        m_stats.instructionsGenerated++;
+    } else if (codeType == VariableType::FLOAT) {
+        codeInt = allocTemp("w");
+        emit("    " + codeInt + " =w stosi " + codeTemp + "\n");
+        m_stats.instructionsGenerated++;
+    }
+    
+    // Call basic_throw - this will longjmp and not return
+    emit("    call $basic_throw(w " + codeInt + ")\n");
+    m_stats.instructionsGenerated++;
+    
+    // Mark as unreachable (won't return)
+    emitComment("Unreachable - THROW does not return");
 }
 
 } // namespace FasterBASIC
