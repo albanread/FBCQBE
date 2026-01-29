@@ -15,9 +15,19 @@ FBCQBE compiles FasterBASIC programs to native machine code through the QBE (Qui
 
 ## Project Status
 
-**Latest Update (January 2025)**: Complete string array support with read/write access and string slicing functionality. Parser now correctly distinguishes between array access (`names$(0)`) and string slicing (`s$(1 TO 5)`) using lookahead detection of the TO keyword.
+**Latest Update (January 2025)**: Complete exception handling (TRY/CATCH/FINALLY/THROW) and dynamic array operations (ERASE/REDIM/REDIM PRESERVE) with comprehensive test coverage. String array support with read/write access and string slicing functionality. Parser correctly distinguishes between array access (`names$(0)`) and string slicing (`s$(1 TO 5)`) using lookahead detection of the TO keyword.
 
 ### ✅ Working Features
+
+**Exception Handling:**
+- ✅ TRY/CATCH/FINALLY/THROW structured exception handling
+- ✅ Specific error code matching in CATCH blocks
+- ✅ Catch-all handlers (CATCH without error code)
+- ✅ FINALLY blocks (execute on both normal and exceptional paths)
+- ✅ ERR() builtin - get current error code
+- ✅ ERL() builtin - get current error line number
+- ✅ Nested exception handling with proper propagation
+- ✅ Direct setjmp/longjmp implementation (platform-safe)
 
 **Control Flow:**
 - ✅ IF/THEN/ELSE with proper block structure
@@ -49,11 +59,17 @@ FBCQBE compiles FasterBASIC programs to native machine code through the QBE (Qui
 - ✅ Type suffix inference (%, #, !, $)
 
 **Arrays:**
-- ✅ STRING arrays with full read/write access
-- ✅ Array declaration: `DIM names$(5)`
-- ✅ Array assignment: `names$(0) = "Alice"`
-- ✅ Array access in expressions: `PRINT names$(0)`
+- ✅ STRING and numeric arrays with full read/write access
+- ✅ Array declaration: `DIM names$(5)`, `DIM numbers%(10 TO 20)`
+- ✅ Array assignment: `names$(0) = "Alice"`, `numbers%(15) = 42`
+- ✅ Array access in expressions: `PRINT names$(0)`, `x% = numbers%(i%)`
 - ✅ Bounds checking with runtime error handling
+- ✅ Dynamic array operations:
+  - ✅ ERASE - Free array memory (preserves declaration)
+  - ✅ REDIM - Reallocate array with new bounds
+  - ✅ REDIM PRESERVE - Reallocate while preserving existing elements
+- ✅ Proper string cleanup on ERASE (no memory leaks)
+- ✅ ArrayDescriptor metadata (bounds, dimensions, type info)
 
 **String Operations:**
 - ✅ String slicing: `s$(start TO end)` with all variants
@@ -92,6 +108,32 @@ FBCQBE compiles FasterBASIC programs to native machine code through the QBE (Qui
 - **Debug info**: Source maps and line number tracking
 - **Error handling**: Better error messages with source context
 - **Standard library**: Expanded runtime functions (math, string, file I/O)
+
+## Quick Start
+
+```bash
+# Build the compiler
+cd fsh
+./build_fbc_qbe.sh
+
+# Compile and run a BASIC program
+./basic --run ../tests/exceptions/test_try_catch_basic.bas
+
+# Or compile manually
+cd ..
+./qbe_basic_integrated/qbe_basic program.bas -o program
+./program
+
+# Run the full test suite
+./test_basic_suite.sh
+
+# Verify implementation integrity
+./verify_implementation.sh
+```
+
+**New to the project?** See [START_HERE.md](START_HERE.md) for a comprehensive developer guide.
+
+**⚠️ Working on exceptions or arrays?** See [docs/CRITICAL_IMPLEMENTATION_NOTES.md](docs/CRITICAL_IMPLEMENTATION_NOTES.md) for essential technical details.
 
 ## Architecture
 
@@ -251,6 +293,45 @@ PRINT "s$(7 TO): "; m$
 END
 ```
 
+### Exception Handling
+```basic
+TRY
+    PRINT "Attempting risky operation..."
+    IF condition THEN THROW 10, 42  ' Error code 10, line 42
+CATCH 5
+    PRINT "Caught error 5"
+CATCH 10
+    PRINT "Caught error 10: ERR() = "; ERR(); " at line "; ERL()
+CATCH
+    PRINT "Caught unexpected error: "; ERR()
+FINALLY
+    PRINT "Cleanup always runs"
+END TRY
+END
+```
+
+### Dynamic Arrays
+```basic
+' Declare and use array
+DIM numbers%(1 TO 10)
+numbers%(5) = 42
+PRINT numbers%(5)
+
+' Free memory
+ERASE numbers%
+
+' Reallocate with different size
+REDIM numbers%(1 TO 20)
+
+' Reallocate while preserving existing data
+numbers%(1) = 100
+numbers%(2) = 200
+REDIM PRESERVE numbers%(1 TO 30)
+PRINT numbers%(1)  ' Still 100
+PRINT numbers%(2)  ' Still 200
+END
+```
+
 ## Control Flow Graph (CFG)
 
 The compiler builds an explicit CFG for all code, ensuring correctness:
@@ -324,48 +405,102 @@ Generated QBE:
 
 ## Testing
 
-Comprehensive tests covering:
+Comprehensive test suite covering:
+
+**Exception Handling Tests** (`tests/exceptions/`)
+- TRY/CATCH with specific error codes
+- Catch-all handlers
+- FINALLY block execution
+- Nested exception handling
+- ERR() and ERL() builtins
+- Unhandled exception propagation
+
+**Array Operation Tests** (`tests/arrays/`)
+- ERASE (freeing array memory)
+- REDIM (reallocation)
+- REDIM PRESERVE (preserving elements)
+- String array cleanup
+- Memory stress tests
+
+**Control Flow Tests**
 - Simple and nested FOR loops
-- EXIT FOR
+- EXIT FOR / EXIT WHILE
 - STEP variants (positive, negative, expressions)
 - Loop index modification
+- SELECT CASE multi-way branching
+- ON GOTO / ON GOSUB
+
+**Additional Tests**
 - Recursive functions
 - Multi-function programs
-- Control flow edge cases
+- String operations
+- Arithmetic and bitwise operations
+- Type conversions
 
-Run tests:
+Run the full test suite:
 ```bash
+./test_basic_suite.sh
+
+# Or run specific test categories
+./test_basic_suite.sh exceptions
+./test_basic_suite.sh arrays
+
+# Or run a single test
 cd fsh
-for test in ../test_*.bas; do
-    echo "Testing $test..."
-    ./fbc_qbe "$test" && qbe a.out > a.s && as a.s -o a.o && gcc a.o runtime_stubs.o -o test && ./test
-done
+./basic --run ../tests/exceptions/test_try_catch_basic.bas
 ```
+
+All tests pass on macOS ARM64 and x86_64. CI runs on every commit via GitHub Actions.
 
 ## Key Implementation Insights
 
-### 1. FOR Loops and CFG
-The critical insight: FOR loops need explicit edges in the CFG, not reliance on sequential block IDs. When processing a FOR statement, we create an edge from the current block to the FOR init block, ensuring nested loops work correctly.
+### 1. Exception Handling: Direct setjmp Calls
+**Critical**: Exception handling calls `setjmp` directly from generated QBE IL, not through a C wrapper. Calling through a wrapper saves the wrapper's stack frame, which `longjmp` then tries to restore after the wrapper has returned, causing crashes. Must also branch immediately after `setjmp` returns - no intermediate instructions, as `longjmp` can corrupt their register state.
 
-### 2. NEXT and Loop Context
-NEXT statements are mapped to their loop headers during CFG construction, and this mapping is used during edge generation to create proper back-edges.
+### 2. ArrayDescriptor Field Offsets
+**Critical**: `elementSize` is at offset 40 in the `ArrayDescriptor` structure, NOT offset 24 (which is `lowerBound2`). Loading from the wrong offset causes memory corruption and allocation errors. Always verify offsets against the runtime struct definition.
 
-### 3. Loop Index Mutability
-Unlike some protected implementations, loop indices are fully mutable variables. This matches classic BASIC behavior where `i = limit` forces loop exit - a common idiom in old BASIC code.
+### 3. Array String Cleanup
+Before reallocating string arrays with REDIM, must call `array_descriptor_erase()` to release individual string memory. Direct `free()` causes memory leaks. After erase, must restore descriptor fields (lowerBound, upperBound, dimensions) as erase sets them to empty state.
 
-### 4. String Array Type Inference
-Array access expressions require proper type inference to distinguish between numeric and string arrays. The `inferExpressionType()` function now handles `EXPR_ARRAY_ACCESS` nodes by looking up array types in the symbol table.
+### 4. ERASE Semantics
+`ERASE` frees array memory but does NOT remove the declaration from the symbol table. The descriptor remains in an empty state. Use `REDIM` to reallocate - attempting to `DIM` again is a semantic error ("array already declared").
 
-### 5. Slice vs Array Syntax Disambiguation
+### 5. FOR Loops and CFG
+FOR loops need explicit edges in the CFG, not reliance on sequential block IDs. When processing a FOR statement, we create an edge from the current block to the FOR init block, ensuring nested loops work correctly.
+
+### 6. String Array Type Inference
+Array access expressions require proper type inference to distinguish between numeric and string arrays. The `inferExpressionType()` function handles `EXPR_ARRAY_ACCESS` nodes by looking up array types in the symbol table.
+
+### 7. Slice vs Array Syntax Disambiguation
 String slicing (`var$(start TO end)`) and array access (`var$(index)`) share similar syntax. The parser uses lookahead scanning within parentheses to detect the TO keyword, cleanly separating the two constructs without backtracking.
+
+For detailed technical information, see [docs/CRITICAL_IMPLEMENTATION_NOTES.md](docs/CRITICAL_IMPLEMENTATION_NOTES.md).
 
 ## Runtime
 
-Minimal C runtime (`runtime_stubs.c`) provides:
+Comprehensive C runtime (`fsh/FasterBASICT/runtime_c/`) provides:
+
+**Core Functions:**
 - `basic_init()` / `basic_cleanup()` - initialization/cleanup
-- `basic_print_*()` - output functions for different types
+- `basic_print_*()` - output functions for all types
 - `basic_input_*()` - input functions
-- String and array management (TBD)
+
+**Exception Handling:**
+- `basic_exception_push()` / `basic_exception_pop()` - context management
+- `basic_throw()` - throw exception with error code and line number
+- `basic_err()` / `basic_erl()` - get current error info
+- `basic_rethrow()` - propagate unhandled exceptions
+
+**Array Operations:**
+- `array_descriptor_erase()` - free array memory (with string cleanup)
+- Array allocation and bounds checking
+- String array element management
+
+**String Operations:**
+- UTF-32 string pool management
+- String concatenation, slicing, comparison
+- Memory management with reference counting
 
 ## Contributing
 
@@ -373,6 +508,15 @@ This is a research/educational project exploring:
 - SSA-based compilation of BASIC
 - Control flow graph construction for unstructured languages
 - Integration of modern compilation techniques with retro languages
+- Exception handling via setjmp/longjmp in compiler-generated code
+- Dynamic memory management for arrays with proper cleanup
+
+**Before contributing:**
+1. Read [START_HERE.md](START_HERE.md)
+2. If working on exceptions or arrays, read [docs/CRITICAL_IMPLEMENTATION_NOTES.md](docs/CRITICAL_IMPLEMENTATION_NOTES.md)
+3. Run `./verify_implementation.sh` before committing
+4. Run `./test_basic_suite.sh` to ensure all tests pass
+5. Add tests for new features
 
 ## License
 
