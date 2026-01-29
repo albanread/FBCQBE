@@ -135,6 +135,43 @@ cd ..
 
 **⚠️ Working on exceptions or arrays?** See [docs/CRITICAL_IMPLEMENTATION_NOTES.md](docs/CRITICAL_IMPLEMENTATION_NOTES.md) for essential technical details.
 
+## Platform Support
+
+### Auto-Detection
+
+The compiler automatically detects your platform and architecture during build:
+
+- **macOS ARM64** (Apple Silicon M1/M2/M3) → `arm64_apple` target
+- **macOS x86_64** (Intel) → `amd64_apple` target
+- **Linux x86_64** → `amd64_sysv` target
+- **Linux ARM64** → `arm64` target
+- **Linux RISC-V 64** → `rv64` target
+
+No manual configuration needed - just run `./build_qbe_basic.sh` and the correct target is selected automatically.
+
+### Runtime Library
+
+The runtime library is compiled on-demand with smart caching:
+- First compilation: builds runtime to `.o` files (~500ms)
+- Subsequent compilations: uses cached objects (~43ms, 10x faster)
+- Automatic rebuild when source files are modified
+- Self-contained in `qbe_basic_integrated/runtime/` directory
+
+### Cross-Compilation
+
+To target a different architecture, use the `-t` flag:
+
+```bash
+./qbe_basic -t amd64_apple -o program input.bas  # Target Intel Mac
+./qbe_basic -t arm64_apple -o program input.bas   # Target Apple Silicon
+./qbe_basic -t amd64_sysv -o program input.bas    # Target Linux x86_64
+```
+
+List available targets:
+```bash
+./qbe_basic -t ?
+```
+
 ## Architecture
 
 ```
