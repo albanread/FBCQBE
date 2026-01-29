@@ -111,19 +111,48 @@ FBCQBE compiles FasterBASIC programs to native machine code through the QBE (Qui
 
 ## Quick Start
 
+### Using the Integrated Compiler (Recommended)
+
+The integrated `qbe_basic` compiler combines FasterBASIC and QBE into a single executable with automatic runtime management:
+
 ```bash
-# Build the compiler
+# Build the integrated compiler
+cd qbe_basic_integrated
+./build_qbe_basic.sh
+
+# Compile to executable (one command!)
+./qbe_basic -o myprogram ../tests/exceptions/test_try_catch_basic.bas
+./myprogram
+
+# Or generate QBE IL only
+./qbe_basic -i -o output.qbe input.bas
+
+# Or generate assembly only
+./qbe_basic -c -o output.s input.bas
+```
+
+**Features:**
+- Single command compilation from BASIC → executable
+- Automatic platform detection (macOS ARM64/x86_64, Linux)
+- Smart runtime caching (10x faster on subsequent builds)
+- Self-contained with bundled runtime library
+
+### Alternative: Separate Tools
+
+For development or debugging, you can use the separate tools:
+
+```bash
+# Build FasterBASIC compiler
 cd fsh
 ./build_fbc_qbe.sh
 
-# Compile and run a BASIC program
+# Compile and run with the wrapper
 ./basic --run ../tests/exceptions/test_try_catch_basic.bas
+```
 
-# Or compile manually
-cd ..
-./qbe_basic_integrated/qbe_basic program.bas -o program
-./program
+### Testing & Verification
 
+```bash
 # Run the full test suite
 ./test_basic_suite.sh
 
@@ -226,34 +255,70 @@ List available targets:
 ### Prerequisites
 
 - C++17 compatible compiler (GCC 7+, Clang 5+, or MSVC 2017+)
-- QBE compiler ([https://c9x.me/compile/](https://c9x.me/compile/))
 - Standard build tools (make, as, gcc/clang)
+- QBE is included in the repository (no separate installation needed)
 
-### Build the Compiler
+### Build the Integrated Compiler (Recommended)
+
+```bash
+cd qbe_basic_integrated
+./build_qbe_basic.sh
+```
+
+This builds `qbe_basic`, a single executable that combines:
+- FasterBASIC compiler (lexer, parser, semantic analyzer, CFG builder)
+- QBE code generator
+- QBE SSA optimizer and code emitter
+- Integrated runtime library with smart caching
+
+**What gets built:**
+- `qbe_basic` - The integrated compiler executable
+- `runtime/` - Runtime library source files (auto-compiled on first use)
+
+### Using the Integrated Compiler
+
+```bash
+# Compile BASIC directly to executable (one command!)
+./qbe_basic -o myprogram input.bas
+./myprogram
+
+# Generate QBE IL only (for inspection/debugging)
+./qbe_basic -i -o output.qbe input.bas
+
+# Generate assembly only (for manual linking)
+./qbe_basic -c -o output.s input.bas
+```
+
+### Alternative: Build Separate Tools
+
+For compiler development or debugging the pipeline:
 
 ```bash
 cd fsh
 ./build_fbc_qbe.sh
 ```
 
-This produces `fbc_qbe`, the FasterBASIC to QBE compiler.
+This produces separate tools:
+- `fbc_qbe` - FasterBASIC to QBE IL compiler
+- `basic` - Wrapper script for running programs
 
-### Compile a BASIC Program
-
+**Manual compilation pipeline:**
 ```bash
-# Compile BASIC to QBE IL
-./fbc_qbe program.bas
+# Step 1: Compile BASIC to QBE IL
+./fbc_qbe program.bas  # produces a.out (QBE IL)
 
-# Compile QBE IL to assembly
+# Step 2: Compile QBE IL to assembly
 qbe a.out > program.s
 
-# Assemble and link
+# Step 3: Assemble and link
 as program.s -o program.o
 gcc program.o runtime_stubs.o -o program
 
-# Run
+# Step 4: Run
 ./program
 ```
+
+**Note:** Most users should use the integrated `qbe_basic` compiler for simplicity and speed.
 
 ## Example Programs
 
