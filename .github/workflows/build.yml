@@ -2,11 +2,11 @@ name: Build BASIC Compiler
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -16,66 +16,79 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-13        # Intel x86_64
+          - os: macos-13 # Intel x86_64
             arch: x86_64
-          - os: macos-14        # Apple Silicon ARM64
+          - os: macos-14 # Apple Silicon ARM64
             arch: arm64
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    - name: Setup build environment
-      run: |
-        brew install qbe || true
-        
-    - name: Build compiler
-      run: |
-        cd fsh
-        ./build_fbc_qbe.sh
-        
-    - name: Test compiler
-      run: |
-        cd fsh
-        ./basic --version || true
-        ./basic --run ../test_terminal_funcs.bas
-        
-    - name: Create distribution archive
-      run: |
-        cd fsh
-        ARCH="${{ matrix.arch }}"
-        VERSION="${GITHUB_REF#refs/tags/}"
-        if [[ "$VERSION" == "refs/heads/main" ]]; then
-          VERSION="latest"
-        fi
-        tar czf basic-compiler-macos-${ARCH}-${VERSION}.tar.gz package/
-        
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: basic-compiler-macos-${{ matrix.arch }}
-        path: fsh/basic-compiler-macos-${{ matrix.arch }}-*.tar.gz
-        retention-days: 30
+      - name: Setup build environment
+        run: |
+          brew install qbe || true
+
+      - name: Build compiler
+        run: |
+          cd fsh
+          ./build_fbc_qbe.sh
+
+      - name: Test compiler basic functionality
+        run: |
+          cd fsh
+          ./basic --version || true
+          ./basic --run ../test_terminal_funcs.bas
+
+      - name: Run comprehensive test suite
+        run: |
+          chmod +x test_basic_suite.sh
+          ./test_basic_suite.sh
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-macos-${{ matrix.arch }}
+          path: test_output/test_results.log
+          retention-days: 30
+
+      - name: Create distribution archive
+        run: |
+          cd fsh
+          ARCH="${{ matrix.arch }}"
+          VERSION="${GITHUB_REF#refs/tags/}"
+          if [[ "$VERSION" == "refs/heads/main" ]]; then
+            VERSION="latest"
+          fi
+          tar czf basic-compiler-macos-${ARCH}-${VERSION}.tar.gz package/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: basic-compiler-macos-${{ matrix.arch }}
+          path: fsh/basic-compiler-macos-${{ matrix.arch }}-*.tar.gz
+          retention-days: 30
 
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    
+
     steps:
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          basic-compiler-macos-x86_64/*.tar.gz
-          basic-compiler-macos-arm64/*.tar.gz
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            basic-compiler-macos-x86_64/*.tar.gz
+            basic-compiler-macos-arm64/*.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

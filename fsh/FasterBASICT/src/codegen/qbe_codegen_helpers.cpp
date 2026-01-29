@@ -227,7 +227,7 @@ std::string QBECodeGenerator::getActualQBEType(const Expression* expr) {
         // They always return 'w' regardless of argument types
         if (upper == "SGN" || upper == "FIX" || upper == "CINT" || upper == "INT" ||
             upper == "RAND" || upper == "ASC" || upper == "INSTR" ||
-            upper == "CSRLIN" || upper == "POS") {
+            upper == "CSRLIN" || upper == "POS" || upper == "ERR" || upper == "ERL") {
             return "w";
         }
         

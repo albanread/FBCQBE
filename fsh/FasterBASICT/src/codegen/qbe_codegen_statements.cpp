@@ -1902,9 +1902,9 @@ void QBECodeGenerator::emitRedim(const RedimStatement* stmt) {
             dimTemp = promoteToType(dimTemp, dimType, VariableType::INT);
         }
         
-        // Load element size from descriptor (offset 24)
+        // Load element size from descriptor (offset 40)
         std::string elemSizeAddr = allocTemp("l");
-        emit("    " + elemSizeAddr + " =l add " + descPtr + ", 24\n");
+        emit("    " + elemSizeAddr + " =l add " + descPtr + ", 40\n");
         std::string elemSize = allocTemp("l");
         emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
         m_stats.instructionsGenerated += 2;
@@ -1988,15 +1988,11 @@ void QBECodeGenerator::emitRedim(const RedimStatement* stmt) {
             
         } else {
             // REDIM without PRESERVE: free old, allocate new
-            emitComment("REDIM " + arrayName + " (discard old data)");
+            emitComment("REDIM " + arrayName + " (discard old data, release strings if needed)");
             
-            // Load old data pointer (offset 0)
-            std::string oldPtr = allocTemp("l");
-            emit("    " + oldPtr + " =l loadl " + descPtr + "\n");
-            m_stats.instructionsGenerated++;
-            
-            // Free old data
-            emit("    call $free(l " + oldPtr + ")\n");
+            // Use array_descriptor_erase to properly clean up old data
+            // This handles string element release before freeing the array
+            emit("    call $array_descriptor_erase(l " + descPtr + ")\n");
             m_stats.instructionsGenerated++;
             
             // Allocate new data
@@ -2012,12 +2008,28 @@ void QBECodeGenerator::emitRedim(const RedimStatement* stmt) {
             emit("    storel " + newPtr + ", " + descPtr + "\n");
             m_stats.instructionsGenerated++;
             
+            // Restore lowerBound1 in descriptor (offset 8) - assuming 0-based or 1-based from OPTION BASE
+            std::string lowerBoundAddr = allocTemp("l");
+            emit("    " + lowerBoundAddr + " =l add " + descPtr + ", 8\n");
+            std::string lowerBound = allocTemp("l");
+            emit("    " + lowerBound + " =l copy 0\n");  // 0-based by default (TODO: honor OPTION BASE)
+            emit("    storel " + lowerBound + ", " + lowerBoundAddr + "\n");
+            m_stats.instructionsGenerated += 3;
+            
             // Update upperBound in descriptor (offset 16)
             std::string upperBoundAddr = allocTemp("l");
             emit("    " + upperBoundAddr + " =l add " + descPtr + ", 16\n");
             std::string newUpperLong = allocTemp("l");
             emit("    " + newUpperLong + " =l extsw " + dimTemp + "\n");
             emit("    storel " + newUpperLong + ", " + upperBoundAddr + "\n");
+            m_stats.instructionsGenerated += 3;
+            
+            // Restore dimensions in descriptor (offset 48) - 1D array
+            std::string dimensionsAddr = allocTemp("l");
+            emit("    " + dimensionsAddr + " =l add " + descPtr + ", 48\n");
+            std::string dimensionsVal = allocTemp("w");
+            emit("    " + dimensionsVal + " =w copy 1\n");
+            emit("    storew " + dimensionsVal + ", " + dimensionsAddr + "\n");
             m_stats.instructionsGenerated += 3;
         }
         
