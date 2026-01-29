@@ -4,6 +4,8 @@
 #include <getopt.h>
 #include <unistd.h>
 #include <libgen.h>
+#include <sys/stat.h>
+#include <string.h>
 
 /* FasterBASIC frontend integration */
 extern FILE* compile_basic_to_il(const char *basic_path);
@@ -162,15 +164,17 @@ int
 main(int ac, char *av[])
 {
 	Target **t;
-	FILE *inf, *hf;
+	FILE *inf;
 	char *f, *sep, *output_file = NULL;
-	char *runtime_path = NULL;
+	char *runtime_dir = NULL;
 	char temp_asm[256] = {0};
 	char cmd[2048];
 	int c, compile_only = 0, is_basic = 0, il_only = 0;
+	int need_linking = 0;
 
 	T = Deftgt;
 	outf = stdout;
+	
 	while ((c = getopt(ac, av, "hicd:o:t:")) != -1)
 		switch (c) {
 		case 'i':
@@ -188,7 +192,6 @@ main(int ac, char *av[])
 			break;
 		case 'o':
 			output_file = optarg;
-			/* Don't open file yet - we'll decide later based on file type */
 			break;
 		case 't':
 			if (strcmp(optarg, "?") == 0) {
@@ -208,57 +211,37 @@ main(int ac, char *av[])
 			break;
 		case 'h':
 		default:
-			hf = c != 'h' ? stderr : stdout;
-			fprintf(hf, "%s [OPTIONS] {file.ssa, file.bas, -}\n", av[0]);
-			fprintf(hf, "\t%-11s prints this help\n", "-h");
-			fprintf(hf, "\t%-11s output to file\n", "-o file");
-			fprintf(hf, "\t%-11s output IL only (stop before assembly)\n", "-i");
-			fprintf(hf, "\t%-11s compile only (stop at assembly)\n", "-c");
-			fprintf(hf, "\t%-11s generate for a target among:\n", "-t <target>");
-			fprintf(hf, "\t%-11s ", "");
+			fprintf(stderr, "%s [OPTIONS] {file.ssa, file.bas, -}\n", av[0]);
+			fprintf(stderr, "\t%-11s prints this help\n", "-h");
+			fprintf(stderr, "\t%-11s output to file\n", "-o file");
+			fprintf(stderr, "\t%-11s output IL only (stop before assembly)\n", "-i");
+			fprintf(stderr, "\t%-11s compile only (stop at assembly)\n", "-c");
+			fprintf(stderr, "\t%-11s generate for a target among:\n", "-t <target>");
+			fprintf(stderr, "\t%-11s ", "");
 			for (t=tlist, sep=""; *t; t++, sep=", ") {
-				fprintf(hf, "%s%s", sep, (*t)->name);
+				fprintf(stderr, "%s%s", sep, (*t)->name);
 				if (*t == &Deftgt)
-					fputs(" (default)", hf);
+					fputs(" (default)", stderr);
 			}
-			fprintf(hf, "\n");
-			fprintf(hf, "\t%-11s dump debug information\n", "-d <flags>");
+			fprintf(stderr, "\n");
+			fprintf(stderr, "\t%-11s dump debug information\n", "-d <flags>");
 			exit(c != 'h');
 		}
 
-	/* Debug: show what files we're processing */
 	if (optind >= ac) {
 		fprintf(stderr, "error: no input file specified\n");
 		exit(1);
 	}
 
+	/* Process input files */
 	do {
 		f = av[optind];
 		if (!f || strcmp(f, "-") == 0) {
 			inf = stdin;
 			f = "-";
+			is_basic = 0;
 		} else {
-			/* Check if this is a BASIC source file */
 			is_basic = is_basic_file(f);
-			
-			/* Set up output file based on file type and flags */
-			if (is_basic && output_file && !compile_only && !il_only) {
-				/* BASIC file with -o but not -c and not -i: compile to executable */
-				snprintf(temp_asm, sizeof(temp_asm), "/tmp/qbe_basic_%d.s", getpid());
-				outf = fopen(temp_asm, "w");
-				if (!outf) {
-					fprintf(stderr, "cannot create temp file '%s'\n", temp_asm);
-					exit(1);
-				}
-			} else if (output_file && strcmp(output_file, "-") != 0) {
-				/* Regular output to file (assembly or IL) */
-				outf = fopen(output_file, "w");
-				if (!outf) {
-					fprintf(stderr, "cannot open '%s'\n", output_file);
-					exit(1);
-				}
-			}
-			/* else: outf remains stdout */
 			
 			if (is_basic) {
 				inf = compile_basic_to_il(f);
@@ -274,61 +257,188 @@ main(int ac, char *av[])
 				}
 			}
 		}
+		
+		/* Decide output strategy:
+		 * -i: Output IL only to -o or stdout
+		 * -c: Output assembly to -o or stdout
+		 * BASIC + -o (no flags): Create executable (temp asm, then link)
+		 * Otherwise: Output assembly to stdout
+		 */
+		
 		if (il_only) {
-			/* Just output the IL without processing through QBE */
+			/* Output IL only - just copy through */
+			if (output_file && strcmp(output_file, "-") != 0) {
+				outf = fopen(output_file, "w");
+				if (!outf) {
+					fprintf(stderr, "cannot open '%s'\n", output_file);
+					exit(1);
+				}
+			} else {
+				outf = stdout;
+			}
+			
 			char buf[4096];
 			size_t n;
 			while ((n = fread(buf, 1, sizeof(buf), inf)) > 0) {
 				fwrite(buf, 1, n, outf);
 			}
 			fclose(inf);
-		} else {
-			parse(inf, f, dbgfile, data, func);
-			fclose(inf);
-		}
-	} while (++optind < ac);
-
-	if (!dbg && !il_only)
-		T.emitfin(outf);
-
-	/* If we created a temp assembly file, now assemble and link */
-	if (temp_asm[0]) {
-		fclose(outf);
-		
-		/* Find precompiled runtime_stubs.o - it should be in obj/ relative to executable */
-		char exe_dir_buf[1024];
-		ssize_t len = readlink("/proc/self/exe", exe_dir_buf, sizeof(exe_dir_buf) - 1);
-		if (len == -1) {
-			/* macOS - use _NSGetExecutablePath */
-			extern int _NSGetExecutablePath(char *buf, uint32_t *size);
-			uint32_t size = sizeof(exe_dir_buf);
-			if (_NSGetExecutablePath(exe_dir_buf, &size) == 0) {
-				len = strlen(exe_dir_buf);
-			}
-		}
-		if (len > 0) {
-			exe_dir_buf[len] = '\0';
-			char *dir = dirname(exe_dir_buf);
-			snprintf(cmd, sizeof(cmd), "%s/obj/runtime_stubs.o", dir);
-			runtime_path = strdup(cmd);
-		}
-		
-		/* If precompiled runtime not found, fall back to source */
-		if (!runtime_path || access(runtime_path, R_OK) != 0) {
-			runtime_path = "../fsh/runtime_stubs.c";
-			if (access(runtime_path, R_OK) != 0) {
-				fprintf(stderr, "Error: runtime library not found\n");
+			
+			if (outf != stdout)
+				fclose(outf);
+				
+		} else if (is_basic && output_file && !compile_only) {
+			/* BASIC file with -o but no -c or -i: compile to executable */
+			snprintf(temp_asm, sizeof(temp_asm), "/tmp/qbe_basic_%d.s", getpid());
+			outf = fopen(temp_asm, "w");
+			if (!outf) {
+				fprintf(stderr, "cannot create temp file '%s'\n", temp_asm);
 				exit(1);
 			}
-			/* Compile from source */
-			snprintf(cmd, sizeof(cmd), "cc -O2 %s %s -o %s", temp_asm, runtime_path, output_file);
+			need_linking = 1;
+			
+			parse(inf, f, dbgfile, data, func);
+			fclose(inf);
+			
+			if (!dbg)
+				T.emitfin(outf);
+			fclose(outf);
+			
 		} else {
-			/* Link with precompiled runtime */
-			snprintf(cmd, sizeof(cmd), "cc %s %s -o %s", temp_asm, runtime_path, output_file);
+			/* Regular QBE processing - output assembly */
+			if (output_file && strcmp(output_file, "-") != 0) {
+				outf = fopen(output_file, "w");
+				if (!outf) {
+					fprintf(stderr, "cannot open '%s'\n", output_file);
+					exit(1);
+				}
+			} else {
+				outf = stdout;
+			}
+			
+			parse(inf, f, dbgfile, data, func);
+			fclose(inf);
+			
+			if (!dbg)
+				T.emitfin(outf);
+				
+			if (outf != stdout)
+				fclose(outf);
 		}
 		
+	} while (++optind < ac);
+
+	/* If we need to link (BASIC + -o without -i or -c) */
+	if (need_linking && temp_asm[0]) {
+		/* Find runtime library - try multiple locations */
+		char runtime_path[1024];
+		char *search_paths[] = {
+			"runtime",                         /* Local runtime directory (preferred) */
+			"qbe_basic_integrated/runtime",    /* From project root */
+			"../runtime",                      /* From qbe_basic_integrated/ when in project root */
+			"fsh/FasterBASICT/runtime_c",      /* Development location from project root */
+			"../fsh/FasterBASICT/runtime_c",   /* Development location from qbe_basic_integrated/ */
+			NULL
+		};
+		
+		/* Find runtime directory */
+		for (char **search = search_paths; *search; search++) {
+			if (access(*search, R_OK) == 0) {
+				runtime_dir = *search;
+				break;
+			}
+		}
+		
+		if (!runtime_dir) {
+			fprintf(stderr, "Error: runtime library not found\n");
+			fprintf(stderr, "Searched:\n");
+			for (char **search = search_paths; *search; search++) {
+				fprintf(stderr, "  %s\n", *search);
+			}
+			unlink(temp_asm);
+			exit(1);
+		}
+		
+		/* Runtime source files */
+		char *runtime_files[] = {
+			"basic_runtime.c",
+			"io_ops.c",
+			"io_ops_format.c",
+			"math_ops.c",
+			"string_ops.c",
+			"string_pool.c",
+			"string_utf32.c",
+			"conversion_ops.c",
+			"array_ops.c",
+			"array_descriptor_runtime.c",
+			"memory_mgmt.c",
+			"basic_data.c",
+			NULL
+		};
+		
+		/* Check if we have precompiled runtime objects */
+		char obj_dir[1024];
+		snprintf(obj_dir, sizeof(obj_dir), "%s/.obj", runtime_dir);
+		
+		int need_rebuild = 0;
+		if (access(obj_dir, R_OK) != 0) {
+			/* Create object directory if it doesn't exist */
+			snprintf(cmd, sizeof(cmd), "mkdir -p %s", obj_dir);
+			run_command(cmd);
+			need_rebuild = 1;
+		} else {
+			/* Check if any source is newer than its object */
+			for (char **src = runtime_files; *src; src++) {
+				char src_path[1024], obj_path[1024];
+				snprintf(src_path, sizeof(src_path), "%s/%s", runtime_dir, *src);
+				snprintf(obj_path, sizeof(obj_path), "%s/.obj/%s.o", runtime_dir, *src);
+				
+				/* If object doesn't exist or source is newer, rebuild */
+				struct stat src_stat, obj_stat;
+				if (stat(obj_path, &obj_stat) != 0 ||
+				    (stat(src_path, &src_stat) == 0 && src_stat.st_mtime > obj_stat.st_mtime)) {
+					need_rebuild = 1;
+					break;
+				}
+			}
+		}
+		
+		/* Build runtime objects if needed */
+		if (need_rebuild) {
+			if (!dbg) {
+				fprintf(stderr, "Building runtime library...\n");
+			}
+			
+			for (char **src = runtime_files; *src; src++) {
+				char src_path[1024], obj_path[1024];
+				snprintf(src_path, sizeof(src_path), "%s/%s", runtime_dir, *src);
+				snprintf(obj_path, sizeof(obj_path), "%s/.obj/%s.o", runtime_dir, *src);
+				
+				/* Compile source to object */
+				snprintf(cmd, sizeof(cmd), "cc -O2 -c %s -o %s 2>&1 | grep -v warning || true", 
+					src_path, obj_path);
+				
+				int ret = run_command(cmd);
+				if (ret != 0) {
+					fprintf(stderr, "Failed to compile %s\n", *src);
+					unlink(temp_asm);
+					exit(1);
+				}
+			}
+		}
+		
+		/* Build link command with precompiled runtime objects */
+		char obj_list[2048] = "";
+		for (char **src = runtime_files; *src; src++) {
+			char obj_path[256];
+			snprintf(obj_path, sizeof(obj_path), "%s/.obj/%s.o ", runtime_dir, *src);
+			strcat(obj_list, obj_path);
+		}
+		
+		snprintf(cmd, sizeof(cmd), "cc -O2 %s %s -o %s", temp_asm, obj_list, output_file);
+		
 		int ret = run_command(cmd);
-		unlink(temp_asm);  /* Clean up temp file */
+		unlink(temp_asm);
 		
 		if (ret != 0) {
 			fprintf(stderr, "assembly/linking failed\n");

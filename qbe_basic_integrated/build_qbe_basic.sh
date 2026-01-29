@@ -65,7 +65,22 @@ clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -I"$
 
 echo "  ✓ Wrapper compiled"
 
-# Step 4: Ensure QBE objects are built
+# Step 4: Copy runtime files to local directory
+echo "Copying runtime files..."
+RUNTIME_SRC="$PROJECT_ROOT/../fsh/FasterBASICT/runtime_c"
+RUNTIME_DEST="$PROJECT_ROOT/runtime"
+
+mkdir -p "$RUNTIME_DEST"
+
+if [ -d "$RUNTIME_SRC" ]; then
+    cp "$RUNTIME_SRC"/*.c "$RUNTIME_DEST/" 2>/dev/null || true
+    cp "$RUNTIME_SRC"/*.h "$RUNTIME_DEST/" 2>/dev/null || true
+    echo "  ✓ Runtime files copied to runtime/"
+else
+    echo "  ⚠ Warning: Runtime source not found at $RUNTIME_SRC"
+fi
+
+# Step 5: Ensure QBE objects are built
 echo "Checking QBE object files..."
 cd "$QBE_DIR"
 
@@ -112,7 +127,7 @@ fi
 
 echo "  ✓ QBE objects ready"
 
-# Step 5: Link everything together
+# Step 6: Link everything together
 echo "Linking QBE with FasterBASIC support..."
 
 clang++ -O2 -o "$PROJECT_ROOT/qbe_basic" \
@@ -128,6 +143,10 @@ echo "=== Build Complete ==="
 echo "Executable: $PROJECT_ROOT/qbe_basic"
 echo ""
 echo "Usage:"
-echo "  ./qbe_basic input.qbe -o output.s    # Compile QBE IL"
-echo "  ./qbe_basic input.bas -o output.s    # Compile BASIC directly!"
+echo "  ./qbe_basic input.bas -o program      # Compile to executable"
+echo "  ./qbe_basic -i -o output.qbe input.bas # Generate QBE IL only"
+echo "  ./qbe_basic -c -o output.s input.bas   # Generate assembly only"
+echo ""
+echo "Note: Runtime library will be built automatically on first use"
+echo "      and cached in runtime/.obj/ for faster subsequent builds."
 echo ""
