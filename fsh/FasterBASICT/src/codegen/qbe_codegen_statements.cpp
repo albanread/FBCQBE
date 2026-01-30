@@ -162,6 +162,12 @@ void QBECodeGenerator::emitStatement(const Statement* stmt) {
             emitLocal(static_cast<const LocalStatement*>(stmt));
             break;
             
+        case ASTNodeType::STMT_GLOBAL:
+            // GLOBAL declarations are pure compile-time metadata
+            // Variables are already registered by semantic analyzer and initialized in main
+            // No runtime code needed
+            break;
+            
         case ASTNodeType::STMT_SHARED:
             emitShared(static_cast<const SharedStatement*>(stmt));
             break;

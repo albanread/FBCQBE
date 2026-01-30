@@ -461,13 +461,14 @@ struct VariableSymbol {
     bool isUsed;
     SourceLocation firstUse;
     std::string functionScope;                       // Empty string = global, otherwise function name
+    bool isGlobal;                                   // true if declared with GLOBAL statement
 
     VariableSymbol()
-        : typeDesc(BaseType::UNKNOWN), type(VariableType::UNKNOWN), isDeclared(false), isUsed(false), functionScope("") {}
+        : typeDesc(BaseType::UNKNOWN), type(VariableType::UNKNOWN), isDeclared(false), isUsed(false), functionScope(""), isGlobal(false) {}
 
     // Constructor from TypeDescriptor
     VariableSymbol(const std::string& n, const TypeDescriptor& td, bool decl = false)
-        : name(n), typeDesc(td), type(descriptorToLegacyType(td)), isDeclared(decl), isUsed(false), functionScope("") {
+        : name(n), typeDesc(td), type(descriptorToLegacyType(td)), isDeclared(decl), isUsed(false), functionScope(""), isGlobal(false) {
         if (td.isUserDefined()) {
             typeName = td.udtName;
         }
@@ -933,6 +934,7 @@ private:
     void collectLineNumbers(Program& program);
     void collectLabels(Program& program);
     void collectOptionStatements(Program& program);
+    void collectGlobalStatements(Program& program);
     void collectDimStatements(Program& program);
     void collectDefStatements(Program& program);
     void collectFunctionAndSubStatements(Program& program);

@@ -336,6 +336,7 @@ void SemanticAnalyzer::pass1_collectDeclarations(Program& program) {
     // NOTE: collectOptionStatements removed - options are now collected by parser
     collectTypeDeclarations(program);  // Collect TYPE/END TYPE declarations first
     collectConstantStatements(program);  // Collect constants BEFORE DIM statements (they may use constants)
+    collectGlobalStatements(program);  // Collect GLOBAL variable declarations
     collectDimStatements(program);
     collectDefStatements(program);
     collectFunctionAndSubStatements(program);
@@ -385,6 +386,61 @@ void SemanticAnalyzer::collectOptionStatements(Program& program) {
     // by the parser before AST generation and passed as CompilerOptions.
     // This function is kept for backward compatibility but does nothing.
     // OPTION statements should not appear in the AST anymore.
+}
+
+void SemanticAnalyzer::collectGlobalStatements(Program& program) {
+    for (const auto& line : program.lines) {
+        for (const auto& stmt : line->statements) {
+            if (stmt->getType() == ASTNodeType::STMT_GLOBAL) {
+                const GlobalStatement& globalStmt = static_cast<const GlobalStatement&>(*stmt);
+                
+                // Register global variables in symbol table
+                for (const auto& var : globalStmt.variables) {
+                    // Determine variable type
+                    VariableType varType = VariableType::DOUBLE;  // Default
+                    
+                    if (var.hasAsType && !var.asTypeName.empty()) {
+                        // Map AS type name to VariableType
+                        std::string typeName = var.asTypeName;
+                        std::transform(typeName.begin(), typeName.end(), typeName.begin(), ::toupper);
+                        
+                        if (typeName == "INTEGER" || typeName == "INT") {
+                            varType = VariableType::INT;
+                        } else if (typeName == "DOUBLE") {
+                            varType = VariableType::DOUBLE;
+                        } else if (typeName == "SINGLE" || typeName == "FLOAT") {
+                            varType = VariableType::FLOAT;
+                        } else if (typeName == "STRING") {
+                            varType = VariableType::STRING;
+                        } else if (typeName == "LONG") {
+                            varType = VariableType::INT;
+                        }
+                    } else if (var.typeSuffix != TokenType::UNKNOWN) {
+                        varType = inferTypeFromSuffix(var.typeSuffix);
+                    } else {
+                        varType = inferTypeFromName(var.name);
+                    }
+                    
+                    // Check if already declared
+                    if (m_symbolTable.variables.count(var.name)) {
+                        error(SemanticErrorType::ARRAY_REDECLARED,
+                              "Variable '" + var.name + "' already declared",
+                              stmt->location);
+                        continue;
+                    }
+                    
+                    // Create variable symbol and mark it as global
+                    VariableSymbol varSym(var.name, legacyTypeToDescriptor(varType), true);
+                    varSym.type = varType;
+                    varSym.functionScope = "";  // Empty scope = global
+                    varSym.firstUse = stmt->location;
+                    varSym.isGlobal = true;  // Mark as GLOBAL variable
+                    
+                    m_symbolTable.variables[var.name] = varSym;
+                }
+            }
+        }
+    }
 }
 
 void SemanticAnalyzer::collectDimStatements(Program& program) {
@@ -628,20 +684,24 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
             // Has AS TypeName
             paramTypeName = stmt.parameterAsTypes[i];
             
+            // Convert to uppercase for case-insensitive comparison
+            std::string upperTypeName = paramTypeName;
+            std::transform(upperTypeName.begin(), upperTypeName.end(), upperTypeName.begin(), ::toupper);
+            
             // Check if it's a built-in type keyword or user-defined type
-            if (paramTypeName == "INTEGER" || paramTypeName == "INT") {
+            if (upperTypeName == "INTEGER" || upperTypeName == "INT") {
                 paramType = VariableType::INT;
                 paramTypeName = "";  // It's built-in, don't store name
-            } else if (paramTypeName == "DOUBLE") {
+            } else if (upperTypeName == "DOUBLE") {
                 paramType = VariableType::DOUBLE;
                 paramTypeName = "";
-            } else if (paramTypeName == "SINGLE" || paramTypeName == "FLOAT") {
+            } else if (upperTypeName == "SINGLE" || upperTypeName == "FLOAT") {
                 paramType = VariableType::FLOAT;
                 paramTypeName = "";
-            } else if (paramTypeName == "STRING") {
+            } else if (upperTypeName == "STRING") {
                 paramType = VariableType::STRING;
                 paramTypeName = "";
-            } else if (paramTypeName == "LONG") {
+            } else if (upperTypeName == "LONG") {
                 paramType = VariableType::INT;
                 paramTypeName = "";
             } else {
@@ -668,20 +728,24 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
     if (stmt.hasReturnAsType && !stmt.returnTypeAsName.empty()) {
         sym.returnTypeName = stmt.returnTypeAsName;
         
+        // Convert to uppercase for case-insensitive comparison
+        std::string upperReturnType = sym.returnTypeName;
+        std::transform(upperReturnType.begin(), upperReturnType.end(), upperReturnType.begin(), ::toupper);
+        
         // Check if it's a built-in type keyword or user-defined type
-        if (sym.returnTypeName == "INTEGER" || sym.returnTypeName == "INT") {
+        if (upperReturnType == "INTEGER" || upperReturnType == "INT") {
             sym.returnType = VariableType::INT;
             sym.returnTypeName = "";
-        } else if (sym.returnTypeName == "DOUBLE") {
+        } else if (upperReturnType == "DOUBLE") {
             sym.returnType = VariableType::DOUBLE;
             sym.returnTypeName = "";
-        } else if (sym.returnTypeName == "SINGLE" || sym.returnTypeName == "FLOAT") {
+        } else if (upperReturnType == "SINGLE" || upperReturnType == "FLOAT") {
             sym.returnType = VariableType::FLOAT;
             sym.returnTypeName = "";
-        } else if (sym.returnTypeName == "STRING") {
+        } else if (upperReturnType == "STRING") {
             sym.returnType = VariableType::STRING;
             sym.returnTypeName = "";
-        } else if (sym.returnTypeName == "LONG") {
+        } else if (upperReturnType == "LONG") {
             sym.returnType = VariableType::INT;
             sym.returnTypeName = "";
         } else {
@@ -741,20 +805,24 @@ void SemanticAnalyzer::processSubStatement(const SubStatement& stmt) {
             // Has AS TypeName
             paramTypeName = stmt.parameterAsTypes[i];
             
+            // Convert to uppercase for case-insensitive comparison
+            std::string upperTypeName = paramTypeName;
+            std::transform(upperTypeName.begin(), upperTypeName.end(), upperTypeName.begin(), ::toupper);
+            
             // Check if it's a built-in type keyword or user-defined type
-            if (paramTypeName == "INTEGER" || paramTypeName == "INT") {
+            if (upperTypeName == "INTEGER" || upperTypeName == "INT") {
                 paramType = VariableType::INT;
                 paramTypeName = "";  // It's built-in, don't store name
-            } else if (paramTypeName == "DOUBLE") {
+            } else if (upperTypeName == "DOUBLE") {
                 paramType = VariableType::DOUBLE;
                 paramTypeName = "";
-            } else if (paramTypeName == "SINGLE" || paramTypeName == "FLOAT") {
+            } else if (upperTypeName == "SINGLE" || upperTypeName == "FLOAT") {
                 paramType = VariableType::FLOAT;
                 paramTypeName = "";
-            } else if (paramTypeName == "STRING") {
+            } else if (upperTypeName == "STRING") {
                 paramType = VariableType::STRING;
                 paramTypeName = "";
-            } else if (paramTypeName == "LONG") {
+            } else if (upperTypeName == "LONG") {
                 paramType = VariableType::INT;
                 paramTypeName = "";
             } else {
@@ -804,12 +872,12 @@ void SemanticAnalyzer::collectDataStatements(Program& program) {
                 dataLabel = labelStmt->labelName;
                 hasLabel = true;
                 // DEBUG
-                fprintf(stderr, "[collectDataStatements] Found label '%s' on line %d\n", 
-                       dataLabel.c_str(), lineNumber);
+                // fprintf(stderr, "[collectDataStatements] Found label '%s' on line %d\n", 
+                //        dataLabel.c_str(), lineNumber);
             } else if (stmt->getType() == ASTNodeType::STMT_DATA) {
                 hasData = true;
                 // DEBUG
-                fprintf(stderr, "[collectDataStatements] Found DATA on line %d\n", lineNumber);
+                // fprintf(stderr, "[collectDataStatements] Found DATA on line %d\n", lineNumber);
             }
         }
         
@@ -892,29 +960,33 @@ void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
             if (arrayDim.hasAsType && !arrayDim.asTypeName.empty()) {
                 // AS INTEGER, AS DOUBLE, etc.
                 std::string typeName = arrayDim.asTypeName;
-                if (typeName == "INTEGER" || typeName == "INT") {
+                // Convert to uppercase for case-insensitive comparison
+                std::string upperTypeName = typeName;
+                std::transform(upperTypeName.begin(), upperTypeName.end(), upperTypeName.begin(), ::toupper);
+                
+                if (upperTypeName == "INTEGER" || upperTypeName == "INT") {
                     typeDesc = TypeDescriptor(BaseType::INTEGER);
-                } else if (typeName == "LONG") {
+                } else if (upperTypeName == "LONG") {
                     typeDesc = TypeDescriptor(BaseType::LONG);
-                } else if (typeName == "SHORT") {
+                } else if (upperTypeName == "SHORT") {
                     typeDesc = TypeDescriptor(BaseType::SHORT);
-                } else if (typeName == "BYTE") {
+                } else if (upperTypeName == "BYTE") {
                     typeDesc = TypeDescriptor(BaseType::BYTE);
-                } else if (typeName == "DOUBLE") {
+                } else if (upperTypeName == "DOUBLE") {
                     typeDesc = TypeDescriptor(BaseType::DOUBLE);
                 } else if (typeName == "FLOAT" || typeName == "SINGLE") {
                     typeDesc = TypeDescriptor(BaseType::SINGLE);
-                } else if (typeName == "STRING") {
+                } else if (upperTypeName == "STRING") {
                     // For STRING variable declarations, use global mode
                     typeDesc = (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
                         TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
-                } else if (typeName == "UBYTE") {
+                } else if (upperTypeName == "UBYTE") {
                     typeDesc = TypeDescriptor(BaseType::UBYTE);
-                } else if (typeName == "USHORT") {
+                } else if (upperTypeName == "USHORT") {
                     typeDesc = TypeDescriptor(BaseType::USHORT);
-                } else if (typeName == "UINTEGER") {
+                } else if (upperTypeName == "UINTEGER") {
                     typeDesc = TypeDescriptor(BaseType::UINTEGER);
-                } else if (typeName == "ULONG") {
+                } else if (upperTypeName == "ULONG") {
                     typeDesc = TypeDescriptor(BaseType::ULONG);
                 } else {
                     // Unknown built-in type name, default to DOUBLE
@@ -1021,29 +1093,33 @@ void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
             // Built-in type - check for AS clause or infer from suffix/name
             if (arrayDim.hasAsType && !arrayDim.asTypeName.empty()) {
                 std::string typeName = arrayDim.asTypeName;
-                if (typeName == "INTEGER" || typeName == "INT") {
+                // Convert to uppercase for case-insensitive comparison
+                std::string upperTypeName = typeName;
+                std::transform(upperTypeName.begin(), upperTypeName.end(), upperTypeName.begin(), ::toupper);
+                
+                if (upperTypeName == "INTEGER" || upperTypeName == "INT") {
                     elementType = TypeDescriptor(BaseType::INTEGER);
-                } else if (typeName == "LONG") {
+                } else if (upperTypeName == "LONG") {
                     elementType = TypeDescriptor(BaseType::LONG);
-                } else if (typeName == "SHORT") {
+                } else if (upperTypeName == "SHORT") {
                     elementType = TypeDescriptor(BaseType::SHORT);
-                } else if (typeName == "BYTE") {
+                } else if (upperTypeName == "BYTE") {
                     elementType = TypeDescriptor(BaseType::BYTE);
-                } else if (typeName == "DOUBLE") {
+                } else if (upperTypeName == "DOUBLE") {
                     elementType = TypeDescriptor(BaseType::DOUBLE);
                 } else if (typeName == "FLOAT" || typeName == "SINGLE") {
                     elementType = TypeDescriptor(BaseType::SINGLE);
-                } else if (typeName == "STRING") {
+                } else if (upperTypeName == "STRING") {
                     // For STRING array declarations, use global mode
                     elementType = (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
                         TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
-                } else if (typeName == "UBYTE") {
+                } else if (upperTypeName == "UBYTE") {
                     elementType = TypeDescriptor(BaseType::UBYTE);
-                } else if (typeName == "USHORT") {
+                } else if (upperTypeName == "USHORT") {
                     elementType = TypeDescriptor(BaseType::USHORT);
-                } else if (typeName == "UINTEGER") {
+                } else if (upperTypeName == "UINTEGER") {
                     elementType = TypeDescriptor(BaseType::UINTEGER);
-                } else if (typeName == "ULONG") {
+                } else if (upperTypeName == "ULONG") {
                     elementType = TypeDescriptor(BaseType::ULONG);
                 } else {
                     elementType = TypeDescriptor(BaseType::DOUBLE);
@@ -1431,6 +1507,16 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
                 }
                 
                 m_currentFunctionScope.localVariables.insert(var.name);
+            }
+            break;
+        }
+        case ASTNodeType::STMT_GLOBAL: {
+            // GLOBAL declarations are already collected in pass1
+            // Just verify they're not inside functions
+            if (m_currentFunctionScope.inFunction) {
+                error(SemanticErrorType::CONTROL_FLOW_MISMATCH,
+                      "GLOBAL can only be used at global scope, not inside functions",
+                      stmt.location);
             }
             break;
         }
@@ -3185,7 +3271,9 @@ VariableType SemanticAnalyzer::inferTypeFromSuffix(TokenType suffix) {
 }
 
 VariableType SemanticAnalyzer::inferTypeFromName(const std::string& name) {
-    if (name.empty()) return VariableType::DOUBLE;  // Default numeric type is DOUBLE
+    // For 64-bit systems (ARM64/x86-64), DOUBLE is the natural numeric type
+    // Modern CPUs handle 64-bit floats natively and efficiently
+    if (name.empty()) return VariableType::DOUBLE;
     
     // Check for normalized suffixes first (e.g., A_STRING, B_INT, C_DOUBLE)
     if (name.length() > 7 && name.substr(name.length() - 7) == "_STRING") {
@@ -3208,10 +3296,10 @@ VariableType SemanticAnalyzer::inferTypeFromName(const std::string& name) {
             // For string variables, use global mode
             return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
                 VariableType::UNICODE : VariableType::STRING;
-        case '%': return VariableType::INT;
-        case '!': return VariableType::FLOAT;
-        case '#': return VariableType::DOUBLE;
-        default:  return VariableType::DOUBLE;  // Default numeric type is DOUBLE (like Lua)
+        case '%': return VariableType::INT;      // Integer (32/64-bit on modern systems)
+        case '!': return VariableType::FLOAT;    // Single-precision (32-bit float)
+        case '#': return VariableType::DOUBLE;   // Double-precision (64-bit float)
+        default:  return VariableType::DOUBLE;   // Default: DOUBLE for 64-bit systems (ARM64/x86-64)
     }
 }
 
@@ -4638,7 +4726,8 @@ TypeDescriptor SemanticAnalyzer::inferTypeFromSuffixD(char suffix) const {
 
 TypeDescriptor SemanticAnalyzer::inferTypeFromNameD(const std::string& name) const {
     if (name.empty()) {
-        return TypeDescriptor(BaseType::DOUBLE);  // Default numeric type
+        // For 64-bit systems (ARM64/x86-64), DOUBLE is the natural numeric type
+        return TypeDescriptor(BaseType::DOUBLE);
     }
     
     // Check for normalized suffixes (e.g., A_STRING, B_INT)
@@ -4676,7 +4765,7 @@ TypeDescriptor SemanticAnalyzer::inferTypeFromNameD(const std::string& name) con
         return TypeDescriptor(type);
     }
     
-    // No suffix - default to DOUBLE for numeric
+    // No suffix - default to DOUBLE for numeric (natural type for 64-bit systems)
     return TypeDescriptor(BaseType::DOUBLE);
 }
 

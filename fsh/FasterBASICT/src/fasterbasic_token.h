@@ -97,6 +97,7 @@ enum class TokenType {
     ENDFUNCTION,     // END FUNCTION
     CALL,            // CALL
     LOCAL,           // LOCAL
+    GLOBAL,          // GLOBAL (for global variables accessible via SHARED)
     SHARED,          // SHARED (for shared variables in SUBs)
     BYREF,           // BYREF (pass by reference)
     BYVAL,           // BYVAL (pass by value)
@@ -405,6 +406,7 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::ENDFUNCTION: return "ENDFUNCTION";
         case TokenType::CALL: return "CALL";
         case TokenType::LOCAL: return "LOCAL";
+        case TokenType::GLOBAL: return "GLOBAL";
         case TokenType::SHARED: return "SHARED";
         case TokenType::BYREF: return "BYREF";
         case TokenType::BYVAL: return "BYVAL";
