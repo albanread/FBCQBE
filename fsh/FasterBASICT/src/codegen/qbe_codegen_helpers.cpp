@@ -454,6 +454,39 @@ std::string QBECodeGenerator::sanitizeQBEVariableName(const std::string& varName
 }
 
 std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
+    // Check if this is a GLOBAL variable first
+    if (m_symbols) {
+        auto it = m_symbols->variables.find(varName);
+        if (it != m_symbols->variables.end() && it->second.isGlobal) {
+            // Generate efficient pointer arithmetic load sequence for global variable
+            int slot = it->second.globalOffset;
+            VariableType type = it->second.type;
+            
+            // 1. Get base address
+            std::string base = allocTemp("l");
+            emit("    " + base + " =l call $basic_global_base()\n");
+            
+            // 2. Calculate byte offset (slot * 8)
+            std::string offset = allocTemp("l");
+            emit("    " + offset + " =l mul " + std::to_string(slot) + ", 8\n");
+            
+            // 3. Calculate address
+            std::string addr = allocTemp("l");
+            emit("    " + addr + " =l add " + base + ", " + offset + "\n");
+            
+            // 4. Load value into cache variable
+            std::string cache = allocTemp(getQBEType(type));
+            if (type == VariableType::DOUBLE) {
+                emit("    " + cache + " =d loadd " + addr + "\n");
+            } else {
+                emit("    " + cache + " =l loadl " + addr + "\n");
+            }
+            
+            m_stats.instructionsGenerated += 4;
+            return cache;  // Return cache temp
+        }
+    }
+    
     // Check if this is a FOR EACH loop variable
     LoopContext* loop = getCurrentLoop();
     if (loop && loop->isForEach && varName == loop->forVariable) {

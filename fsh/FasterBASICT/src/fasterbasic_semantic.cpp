@@ -389,6 +389,8 @@ void SemanticAnalyzer::collectOptionStatements(Program& program) {
 }
 
 void SemanticAnalyzer::collectGlobalStatements(Program& program) {
+    int nextOffset = 0;  // Track next available global slot
+    
     for (const auto& line : program.lines) {
         for (const auto& stmt : line->statements) {
             if (stmt->getType() == ASTNodeType::STMT_GLOBAL) {
@@ -435,12 +437,16 @@ void SemanticAnalyzer::collectGlobalStatements(Program& program) {
                     varSym.functionScope = "";  // Empty scope = global
                     varSym.firstUse = stmt->location;
                     varSym.isGlobal = true;  // Mark as GLOBAL variable
+                    varSym.globalOffset = nextOffset++;  // Assign slot number and increment
                     
                     m_symbolTable.variables[var.name] = varSym;
                 }
             }
         }
     }
+    
+    // Update global count in symbol table
+    m_symbolTable.globalVariableCount = nextOffset;
 }
 
 void SemanticAnalyzer::collectDimStatements(Program& program) {

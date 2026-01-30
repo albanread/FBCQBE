@@ -525,55 +525,104 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
         m_stats.instructionsGenerated++;
     } else if (stmt->indices.empty()) {
         // Simple variable assignment
-        std::string varRef = getVariableRef(stmt->variable);
+        
+        // Check if this is a GLOBAL variable - handle specially with store operations
+        bool isGlobalVar = false;
+        int globalSlot = -1;
         VariableType varType = getVariableType(stmt->variable);
-        std::string qbeType = getQBEType(varType);
         
-        // Infer the type of the expression value
-        VariableType exprType = inferExpressionType(stmt->value.get());
-        
-        // For STRING types, call string_retain to increment refcount
-        if (varType == VariableType::STRING && exprType == VariableType::STRING) {
-            std::string retainedTemp = allocTemp("l");
-            emit("    " + retainedTemp + " =l call $string_retain(l " + valueTemp + ")\n");
-            emit("    " + varRef + " =l copy " + retainedTemp + "\n");
-            m_stats.instructionsGenerated += 2;
-        } else if (varType != exprType) {
-            // Convert value to match variable type if needed
-            // promoteToType emits the conversion and returns the result temp
-            // Pass actual QBE type so it knows if INT is 'w' or 'l'
-            std::string actualQBEType = getActualQBEType(stmt->value.get());
-            std::string convertedValue = promoteToType(valueTemp, exprType, varType, actualQBEType);
-            emit("    " + varRef + " =" + qbeType + " copy " + convertedValue + "\n");
-            m_stats.instructionsGenerated++;
-        } else {
-            // Semantic types match, but check if QBE types differ (e.g., w vs l for INT)
-            std::string exprQBEType = getActualQBEType(stmt->value.get());
-            
-            if (exprQBEType != qbeType) {
-                // Need to convert between QBE types
-                std::string convertedValue = valueTemp;
-                
-                if (exprQBEType == "w" && qbeType == "l") {
-                    // Word to long (sign extend)
-                    std::string extendedTemp = allocTemp("l");
-                    emit("    " + extendedTemp + " =l extsw " + valueTemp + "\n");
-                    convertedValue = extendedTemp;
-                    m_stats.instructionsGenerated++;
-                } else if (exprQBEType == "l" && qbeType == "w") {
-                    // Long to word (truncate)
-                    std::string truncTemp = allocTemp("w");
-                    emit("    " + truncTemp + " =w copy " + valueTemp + "\n");
-                    convertedValue = truncTemp;
-                    m_stats.instructionsGenerated++;
-                }
-                
-                emit("    " + varRef + " =" + qbeType + " copy " + convertedValue + "\n");
-            } else {
-                // QBE types match, just copy
-                emit("    " + varRef + " =" + qbeType + " copy " + valueTemp + "\n");
+        if (m_symbols) {
+            auto it = m_symbols->variables.find(stmt->variable);
+            if (it != m_symbols->variables.end() && it->second.isGlobal) {
+                isGlobalVar = true;
+                globalSlot = it->second.globalOffset;
+                varType = it->second.type;
             }
-            m_stats.instructionsGenerated++;
+        }
+        
+        if (isGlobalVar) {
+            // GLOBAL variable assignment using pointer arithmetic + store
+            std::string qbeType = getQBEType(varType);
+            VariableType exprType = inferExpressionType(stmt->value.get());
+            
+            // Type conversion if needed
+            std::string finalValue = valueTemp;
+            if (varType != exprType) {
+                std::string actualQBEType = getActualQBEType(stmt->value.get());
+                finalValue = promoteToType(valueTemp, exprType, varType, actualQBEType);
+            }
+            
+            // 1. Get base address
+            std::string base = allocTemp("l");
+            emit("    " + base + " =l call $basic_global_base()\n");
+            
+            // 2. Calculate byte offset (slot * 8)
+            std::string offset = allocTemp("l");
+            emit("    " + offset + " =l mul " + std::to_string(globalSlot) + ", 8\n");
+            
+            // 3. Calculate address
+            std::string addr = allocTemp("l");
+            emit("    " + addr + " =l add " + base + ", " + offset + "\n");
+            
+            // 4. Store value
+            if (varType == VariableType::DOUBLE) {
+                emit("    stored " + finalValue + ", " + addr + "\n");
+            } else {
+                emit("    storel " + finalValue + ", " + addr + "\n");
+            }
+            
+            m_stats.instructionsGenerated += 4;
+        } else {
+            // Local or regular variable assignment
+            std::string varRef = getVariableRef(stmt->variable);
+            std::string qbeType = getQBEType(varType);
+            
+            // Infer the type of the expression value
+            VariableType exprType = inferExpressionType(stmt->value.get());
+            
+            // For STRING types, call string_retain to increment refcount
+            if (varType == VariableType::STRING && exprType == VariableType::STRING) {
+                std::string retainedTemp = allocTemp("l");
+                emit("    " + retainedTemp + " =l call $string_retain(l " + valueTemp + ")\n");
+                emit("    " + varRef + " =l copy " + retainedTemp + "\n");
+                m_stats.instructionsGenerated += 2;
+            } else if (varType != exprType) {
+                // Convert value to match variable type if needed
+                // promoteToType emits the conversion and returns the result temp
+                // Pass actual QBE type so it knows if INT is 'w' or 'l'
+                std::string actualQBEType = getActualQBEType(stmt->value.get());
+                std::string convertedValue = promoteToType(valueTemp, exprType, varType, actualQBEType);
+                emit("    " + varRef + " =" + qbeType + " copy " + convertedValue + "\n");
+                m_stats.instructionsGenerated++;
+            } else {
+                // Semantic types match, but check if QBE types differ (e.g., w vs l for INT)
+                std::string exprQBEType = getActualQBEType(stmt->value.get());
+                
+                if (exprQBEType != qbeType) {
+                    // Need to convert between QBE types
+                    std::string convertedValue = valueTemp;
+                    
+                    if (exprQBEType == "w" && qbeType == "l") {
+                        // Word to long (sign extend)
+                        std::string extendedTemp = allocTemp("l");
+                        emit("    " + extendedTemp + " =l extsw " + valueTemp + "\n");
+                        convertedValue = extendedTemp;
+                        m_stats.instructionsGenerated++;
+                    } else if (exprQBEType == "l" && qbeType == "w") {
+                        // Long to word (truncate)
+                        std::string truncTemp = allocTemp("w");
+                        emit("    " + truncTemp + " =w copy " + valueTemp + "\n");
+                        convertedValue = truncTemp;
+                        m_stats.instructionsGenerated++;
+                    }
+                    
+                    emit("    " + varRef + " =" + qbeType + " copy " + convertedValue + "\n");
+                } else {
+                    // QBE types match, just copy
+                    emit("    " + varRef + " =" + qbeType + " copy " + valueTemp + "\n");
+                }
+                m_stats.instructionsGenerated++;
+            }
         }
     } else {
         // Array element assignment using descriptor-based approach

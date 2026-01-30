@@ -462,13 +462,14 @@ struct VariableSymbol {
     SourceLocation firstUse;
     std::string functionScope;                       // Empty string = global, otherwise function name
     bool isGlobal;                                   // true if declared with GLOBAL statement
+    int globalOffset;                                // Slot number in global vector (only valid if isGlobal == true)
 
     VariableSymbol()
-        : typeDesc(BaseType::UNKNOWN), type(VariableType::UNKNOWN), isDeclared(false), isUsed(false), functionScope(""), isGlobal(false) {}
+        : typeDesc(BaseType::UNKNOWN), type(VariableType::UNKNOWN), isDeclared(false), isUsed(false), functionScope(""), isGlobal(false), globalOffset(-1) {}
 
     // Constructor from TypeDescriptor
     VariableSymbol(const std::string& n, const TypeDescriptor& td, bool decl = false)
-        : name(n), typeDesc(td), type(descriptorToLegacyType(td)), isDeclared(decl), isUsed(false), functionScope(""), isGlobal(false) {
+        : name(n), typeDesc(td), type(descriptorToLegacyType(td)), isDeclared(decl), isUsed(false), functionScope(""), isGlobal(false), globalOffset(-1) {
         if (td.isUserDefined()) {
             typeName = td.udtName;
         }
@@ -763,6 +764,7 @@ struct SymbolTable {
     DataSegment dataSegment;
     int nextLabelId = 10000;  // Start label IDs at 10000 to avoid conflicts with line numbers
     int arrayBase = 1;  // OPTION BASE: 0 or 1 (default 1 to match Lua arrays)
+    int globalVariableCount = 0;  // Number of GLOBAL variables (for runtime vector allocation)
     CompilerOptions::StringMode stringMode = CompilerOptions::StringMode::DETECTSTRING;  // OPTION ASCII/UNICODE/DETECTSTRING
     bool errorTracking = true;  // OPTION ERROR: if true, emit _LINE tracking for error messages
     bool cancellableLoops = true;  // OPTION CANCELLABLE: if true, inject script cancellation checks in loops

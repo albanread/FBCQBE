@@ -271,6 +271,16 @@ void QBECodeGenerator::emitMainFunction() {
     m_stats.instructionsGenerated++;
     emit("\n");
     
+    // Initialize global variable vector if any globals exist
+    if (m_symbols && m_symbols->globalVariableCount > 0) {
+        emitComment("Allocate global variable vector (" + 
+                    std::to_string(m_symbols->globalVariableCount) + " slots)");
+        emit("    call $basic_global_init(l " + 
+             std::to_string(m_symbols->globalVariableCount) + ")\n");
+        m_stats.instructionsGenerated++;
+        emit("\n");
+    }
+    
     // Declare all variables upfront (QBE requires this)
     emitComment("Variable declarations");
     
@@ -281,6 +291,11 @@ void QBECodeGenerator::emitMainFunction() {
         for (const auto& [name, varSym] : m_symbols->variables) {
             // Skip FOR EACH variables - they're not real variables
             if (name == "n") {
+                continue;
+            }
+            
+            // Skip GLOBAL variables - they're stored in the runtime global vector, not as SSA temps
+            if (varSym.isGlobal) {
                 continue;
             }
             
@@ -412,6 +427,12 @@ void QBECodeGenerator::emitMainFunction() {
             
             m_stats.instructionsGenerated += 2;
         }
+    }
+    
+    // Clean up global variable vector if any globals exist
+    if (m_symbols && m_symbols->globalVariableCount > 0) {
+        emit("    call $basic_global_cleanup()\n");
+        m_stats.instructionsGenerated++;
     }
     
     emit("    call $basic_runtime_cleanup()\n");
