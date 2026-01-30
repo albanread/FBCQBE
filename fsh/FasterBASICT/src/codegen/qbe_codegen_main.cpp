@@ -204,8 +204,8 @@ void QBECodeGenerator::emitDataSection() {
                 // Use 'l' (long/64-bit) for integers to match runtime int64_t
                 emit("l " + std::to_string(std::get<int>(val)));
             } else if (std::holds_alternative<double>(val)) {
-                // Use 'd' (double/64-bit) for doubles
-                emit("d " + std::to_string(std::get<double>(val)));
+                // In data section: 'd' size specifier followed by 'd_' prefixed literal
+                emit("d d_" + std::to_string(std::get<double>(val)));
             } else {
                 // String pointer - add to string pool and reference it
                 const std::string& str = std::get<std::string>(val);
@@ -1251,6 +1251,13 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
         // Statement already handled control flow (GOTO, RETURN, END)
         emit("\n");
         m_currentBlock = nullptr;
+        return;
+    }
+    
+    // Check if the last statement was a terminator (RETURN, EXIT, GOTO, etc.)
+    // If so, don't emit any additional jumps
+    if (m_lastStatementWasTerminator) {
+        // Terminator already emitted the necessary jump/return
         return;
     }
     

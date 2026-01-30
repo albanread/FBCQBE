@@ -1331,6 +1331,9 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
         case ASTNodeType::STMT_LET:
             validateLetStatement(static_cast<const LetStatement&>(stmt));
             break;
+        case ASTNodeType::STMT_SLICE_ASSIGN:
+            validateSliceAssignStatement(static_cast<const SliceAssignStatement&>(stmt));
+            break;
         case ASTNodeType::STMT_GOTO:
             validateGotoStatement(static_cast<const GotoStatement&>(stmt));
             break;
@@ -1588,6 +1591,54 @@ void SemanticAnalyzer::validateInputStatement(const InputStatement& stmt) {
     
     for (const auto& varName : stmt.variables) {
         useVariable(varName, stmt.location);
+    }
+}
+
+void SemanticAnalyzer::validateSliceAssignStatement(const SliceAssignStatement& stmt) {
+    // Validate the variable exists and is a string type
+    useVariable(stmt.variable, stmt.location);
+    
+    auto* varSym = lookupVariable(stmt.variable);
+    if (varSym) {
+        if (varSym->type != VariableType::STRING && varSym->type != VariableType::UNICODE) {
+            error(SemanticErrorType::TYPE_MISMATCH,
+                  "Slice assignment can only be used on STRING variables, not " + 
+                  std::string(typeToString(varSym->type)),
+                  stmt.location);
+            return;
+        }
+    }
+    
+    // Validate start and end expressions (must be numeric)
+    if (stmt.start) {
+        validateExpression(*stmt.start);
+        VariableType startType = inferExpressionType(*stmt.start);
+        if (!isNumericType(startType)) {
+            error(SemanticErrorType::TYPE_MISMATCH,
+                  "Slice start index must be numeric, not " + std::string(typeToString(startType)),
+                  stmt.location);
+        }
+    }
+    
+    if (stmt.end) {
+        validateExpression(*stmt.end);
+        VariableType endType = inferExpressionType(*stmt.end);
+        if (!isNumericType(endType)) {
+            error(SemanticErrorType::TYPE_MISMATCH,
+                  "Slice end index must be numeric, not " + std::string(typeToString(endType)),
+                  stmt.location);
+        }
+    }
+    
+    // Validate replacement expression (must be string type)
+    if (stmt.replacement) {
+        validateExpression(*stmt.replacement);
+        VariableType replacementType = inferExpressionType(*stmt.replacement);
+        if (replacementType != VariableType::STRING && replacementType != VariableType::UNICODE) {
+            error(SemanticErrorType::TYPE_MISMATCH,
+                  "Slice replacement value must be STRING, not " + std::string(typeToString(replacementType)),
+                  stmt.location);
+        }
     }
 }
 
@@ -2901,6 +2952,12 @@ VariableType SemanticAnalyzer::inferFunctionCallType(const FunctionCallExpressio
         std::string upperName = expr.name;
         std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
 
+        // Check for internal string slice function
+        if (upperName == "__STRING_SLICE") {
+            return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
+                VariableType::UNICODE : VariableType::STRING;
+        }
+        
         // Any built-in ending with $ or _STRING suffix returns a string/Unicode
         if (!upperName.empty() && upperName.back() == '$') {
             // For function calls, use global mode (string literal detection happens elsewhere)

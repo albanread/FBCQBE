@@ -968,6 +968,7 @@ private:
     void validateConsoleStatement(const ConsoleStatement& stmt);
     void validateInputStatement(const InputStatement& stmt);
     void validateLetStatement(const LetStatement& stmt);
+    void validateSliceAssignStatement(const SliceAssignStatement& stmt);
     void validateGotoStatement(const GotoStatement& stmt);
     void validateGosubStatement(const GosubStatement& stmt);
     void validateOnGotoStatement(const OnGotoStatement& stmt);
