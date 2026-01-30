@@ -179,6 +179,18 @@ void QBECodeGenerator::emitDataSection() {
     emitComment("=== DATA SECTION ===");
     emit("\n");
     
+    // Emit global variable vector (if program uses globals)
+    if (m_symbols && m_symbols->globalVariableCount > 0) {
+        emitComment("Global variable vector (" + std::to_string(m_symbols->globalVariableCount) + " slots, 8 bytes each)");
+        emit("data $__global_vector = { ");
+        for (int i = 0; i < m_symbols->globalVariableCount; ++i) {
+            if (i > 0) emit(", ");
+            emit("l 0");  // Each slot initialized to 0
+        }
+        emit(" }\n");
+        emit("\n");
+    }
+    
     // Emit DATA values if present
     if (!m_dataValues.empty()) {
         emitComment("DATA values");
@@ -271,15 +283,8 @@ void QBECodeGenerator::emitMainFunction() {
     m_stats.instructionsGenerated++;
     emit("\n");
     
-    // Initialize global variable vector if any globals exist
-    if (m_symbols && m_symbols->globalVariableCount > 0) {
-        emitComment("Allocate global variable vector (" + 
-                    std::to_string(m_symbols->globalVariableCount) + " slots)");
-        emit("    call $basic_global_init(l " + 
-             std::to_string(m_symbols->globalVariableCount) + ")\n");
-        m_stats.instructionsGenerated++;
-        emit("\n");
-    }
+    // Note: Global vector is now compile-time allocated in data section
+    // No runtime initialization needed!
     
     // Declare all variables upfront (QBE requires this)
     emitComment("Variable declarations");
@@ -429,11 +434,7 @@ void QBECodeGenerator::emitMainFunction() {
         }
     }
     
-    // Clean up global variable vector if any globals exist
-    if (m_symbols && m_symbols->globalVariableCount > 0) {
-        emit("    call $basic_global_cleanup()\n");
-        m_stats.instructionsGenerated++;
-    }
+    // Note: Global vector cleanup not needed (compile-time allocated in data section)
     
     emit("    call $basic_runtime_cleanup()\n");
     emit("    ret 0\n");
@@ -451,6 +452,7 @@ void QBECodeGenerator::enterFunctionContext(const std::string& functionName) {
     m_currentFunction = functionName;
     m_localVariables.clear();
     m_sharedVariables.clear();
+    m_cachedGlobalBase.clear();  // Reset cached global base for new function scope
     
     // Create function context for local array tracking
     // Determine if SUB or FUNCTION and return type

@@ -119,6 +119,9 @@ private:
     std::unordered_set<std::string> m_forLoopVariables; // FOR loop indices (always INTEGER)
     std::unordered_map<std::string, std::string> m_defFnParams; // DEF FN parameter name -> QBE temp mapping
     
+    // Cached global base pointer (for efficient global variable access)
+    std::string m_cachedGlobalBase;  // Cached %global_base temp (empty if not yet cached)
+    
     // Current block being emitted (for statement handlers)
     const BasicBlock* m_currentBlock = nullptr;
     
