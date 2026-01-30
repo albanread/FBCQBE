@@ -28,6 +28,7 @@ CFGBuilder::CFGBuilder()
     , m_mergeBlocks(false)
     , m_blocksCreated(0)
     , m_edgesCreated(0)
+    , m_processingNestedStatements(false)
 {
 }
 
@@ -413,7 +414,11 @@ void CFGBuilder::processStatement(const Statement& stmt, BasicBlock* currentBloc
         case ASTNodeType::STMT_RETURN:
         case ASTNodeType::STMT_END:
         case ASTNodeType::STMT_EXIT:
-            currentBlock->isTerminator = true;
+            // Only mark as terminator if we're not processing nested statements
+            // (nested statements in IF branches shouldn't terminate the parent block)
+            if (!m_processingNestedStatements) {
+                currentBlock->isTerminator = true;
+            }
             break;
             
         default:
@@ -503,6 +508,10 @@ void CFGBuilder::processIfStatement(const IfStatement& stmt, BasicBlock* current
 // Helper method to recursively process nested statements (e.g., inside IF blocks)
 void CFGBuilder::processNestedStatements(const std::vector<StatementPtr>& statements, 
                                          BasicBlock* currentBlock, int defaultLineNumber) {
+    // Set flag to indicate we're processing nested statements
+    bool wasProcessingNested = m_processingNestedStatements;
+    m_processingNestedStatements = true;
+    
     for (const auto& nestedStmt : statements) {
         // Get the line number for this nested statement
         // For multi-line IF blocks, nested statements might not have their own line numbers
@@ -549,6 +558,9 @@ void CFGBuilder::processNestedStatements(const std::vector<StatementPtr>& statem
             m_currentBlock->addStatement(nestedStmt.get(), lineNumber);
         }
     }
+    
+    // Restore flag
+    m_processingNestedStatements = wasProcessingNested;
 }
 
 void CFGBuilder::processForStatement(const ForStatement& stmt, BasicBlock* currentBlock) {

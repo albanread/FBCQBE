@@ -599,6 +599,9 @@ private:
     bool m_createExitBlock;
     bool m_mergeBlocks;
     
+    // Flag to track if we're processing nested statements (inside IF branches, etc.)
+    bool m_processingNestedStatements;
+    
     // Statistics
     int m_blocksCreated;
     int m_edgesCreated;

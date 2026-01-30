@@ -54,6 +54,7 @@ void printUsage(const char* programName) {
     std::cerr << "  --emit-asm     Emit assembly (.s) file and exit\n";
     std::cerr << "  -v, --verbose  Verbose output (compilation stats)\n";
     std::cerr << "  --trace-ast    Dump AST structure after parsing\n";
+    std::cerr << "  --trace-cfg    Dump CFG structure after building\n";
     std::cerr << "  -h, --help     Show this help message\n";
     std::cerr << "  --profile      Show detailed timing for each compilation phase\n";
     std::cerr << "  --keep-temps   Keep intermediate files (.qbe, .s)\n";
@@ -115,6 +116,7 @@ int main(int argc, char** argv) {
     bool showProfile = false;
     bool runAfterCompile = false;
     bool traceAST = false;
+    bool traceCFG = false;
     
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -142,6 +144,8 @@ int main(int argc, char** argv) {
             verbose = true;  // Auto-enable verbose for profiling
         } else if (strcmp(argv[i], "--trace-ast") == 0) {
             traceAST = true;
+        } else if (strcmp(argv[i], "--trace-cfg") == 0) {
+            traceCFG = true;
         } else if (strcmp(argv[i], "-o") == 0) {
             if (i + 1 < argc) {
                 outputFile = argv[++i];
@@ -307,6 +311,21 @@ int main(int argc, char** argv) {
         auto cfg = cfgBuilder.build(*ast, semantic.getSymbolTable());
         
         auto cfgEndTime = std::chrono::high_resolution_clock::now();
+        
+        // Dump CFG if requested
+        if (traceCFG && cfg && cfg->mainCFG) {
+            std::cerr << cfg->mainCFG->toString();
+            
+            // Also dump function CFGs if any
+            for (const auto& funcName : cfg->getFunctionNames()) {
+                const auto* funcCFG = cfg->getFunctionCFG(funcName);
+                if (funcCFG) {
+                    std::cerr << "\n=== Function: " << funcName << " ===\n";
+                    std::cerr << funcCFG->toString();
+                }
+            }
+        }
+        
         double cfgMs = std::chrono::duration<double, std::milli>(cfgEndTime - phaseStartTime).count();
         
         if (verbose) {
