@@ -210,6 +210,8 @@ void Lexer::initializeKeywords() {
         s_keywords["BASE"] = TokenType::BASE;
         s_keywords["EXPLICIT"] = TokenType::EXPLICIT;
         s_keywords["UNICODE"] = TokenType::UNICODE;
+        s_keywords["ASCII"] = TokenType::ASCII;
+        s_keywords["DETECTSTRING"] = TokenType::DETECTSTRING;
         s_keywords["ERROR"] = TokenType::ERROR;
         s_keywords["INCLUDE"] = TokenType::INCLUDE;
         s_keywords["ONCE"] = TokenType::ONCE;

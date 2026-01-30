@@ -264,7 +264,7 @@ int main(int argc, char** argv) {
         if (verbose) {
             std::cerr << "Program lines: " << ast->lines.size() << "\n";
             std::cerr << "Compiler options: arrayBase=" << compilerOptions.arrayBase 
-                      << " unicodeMode=" << compilerOptions.unicodeMode << "\n";
+                      << " stringMode=" << static_cast<int>(compilerOptions.stringMode) << "\n";
         }
         
         // Semantic analysis

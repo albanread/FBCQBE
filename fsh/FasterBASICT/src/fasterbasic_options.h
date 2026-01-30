@@ -16,14 +16,22 @@ namespace FasterBASIC {
 // =============================================================================
 
 struct CompilerOptions {
+    // String encoding mode
+    enum class StringMode {
+        ASCII,         // OPTION ASCII - all strings are byte sequences, non-ASCII is error
+        UNICODE,       // OPTION UNICODE - all strings are Unicode codepoint arrays
+        DETECTSTRING   // OPTION DETECTSTRING - detect per-literal (ASCII if all bytes < 128, else Unicode)
+    };
+    
     // Array indexing: OPTION BASE 0 or OPTION BASE 1
     // Default is 1 (matches Lua's 1-based indexing)
     int arrayBase = 1;
     
-    // String encoding: OPTION UNICODE
-    // When true, strings are represented as Unicode codepoint arrays
-    // When false, strings are byte sequences (standard Lua strings)
-    bool unicodeMode = false;
+    // String encoding: OPTION UNICODE / OPTION ASCII / OPTION DETECTSTRING
+    // ASCII: strings are byte sequences, non-ASCII characters are errors
+    // UNICODE: all strings are Unicode codepoint arrays
+    // DETECTSTRING: automatically detect based on literal content (default)
+    StringMode stringMode = StringMode::DETECTSTRING;
     
     // Loop cancellation: OPTION CANCELLABLE ON/OFF
     // When true, inject script cancellation checks into loops
@@ -57,7 +65,7 @@ struct CompilerOptions {
     // Reset to defaults
     void reset() {
         arrayBase = 1;
-        unicodeMode = false;
+        stringMode = StringMode::DETECTSTRING;
         cancellableLoops = true;   // Default to enabled for safety
         errorTracking = true;      // Default to enabled for better UX
         bitwiseOperators = false;

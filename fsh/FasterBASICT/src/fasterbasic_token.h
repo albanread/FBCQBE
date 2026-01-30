@@ -82,6 +82,8 @@ enum class TokenType {
     BASE,            // BASE (for OPTION BASE)
     EXPLICIT,        // EXPLICIT (for OPTION EXPLICIT)
     UNICODE,         // UNICODE (for OPTION UNICODE)
+    ASCII,           // ASCII (for OPTION ASCII)
+    DETECTSTRING,    // DETECTSTRING (for OPTION DETECTSTRING)
     ERROR,           // ERROR (for OPTION ERROR - line tracking)
     INCLUDE,         // INCLUDE (file inclusion)
     ONCE,            // ONCE (for OPTION ONCE)
@@ -395,6 +397,8 @@ inline const char* tokenTypeToString(TokenType type) {
         case TokenType::EXPLICIT: return "EXPLICIT";
         case TokenType::FORCE_YIELD: return "FORCE_YIELD";
         case TokenType::UNICODE: return "UNICODE";
+        case TokenType::ASCII: return "ASCII";
+        case TokenType::DETECTSTRING: return "DETECTSTRING";
         case TokenType::SUB: return "SUB";
         case TokenType::FUNCTION: return "FUNCTION";
         case TokenType::ENDSUB: return "ENDSUB";

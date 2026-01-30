@@ -108,6 +108,9 @@ private:
     int m_labelCounter = 0;
     int m_stringCounter = 0;
     
+    // Track QBE types of temporaries (for type-aware operations)
+    std::unordered_map<std::string, std::string> m_tempTypes;
+    
     // Current function context
     std::string m_currentFunction;
     bool m_inFunction = false;
@@ -263,6 +266,7 @@ private:
     std::string emitArrayAccessExpr(const ArrayAccessExpression* expr);
     std::string emitArrayElementPtr(const std::string& arrayName, const std::vector<std::unique_ptr<Expression>>& indices);
     std::string emitMemberAccessExpr(const MemberAccessExpression* expr);
+    std::string emitIIF(const IIFExpression* expr);
     
     // Constant folding helpers
     bool isNumberLiteral(const Expression* expr, double& value);

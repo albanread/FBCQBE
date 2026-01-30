@@ -1,0 +1,77 @@
+Fix critical UDT bugs: member access type inference and arrays of UDTs
+
+This commit resolves two critical bugs in the User-Defined Type (UDT)
+implementation that prevented proper compilation and runtime behavior.
+
+## Bug #1: Member Access Type Inference and Codegen
+
+### Issues Fixed:
+- Member access expressions returned UNKNOWN type
+- Wrong QBE instructions used for INTEGER fields (loadl/storel instead of loadw/storew)
+- Member assignments not properly validated for type compatibility
+
+### Changes:
+- fasterbasic_semantic.cpp:
+  * Enhanced inferMemberAccessType() to look up actual field types from TypeSymbols
+  * Fixed validateLetStatement() to handle array element member access (Points(0).X)
+  * Added member chain traversal for proper type validation
+
+- qbe_codegen_expressions.cpp:
+  * Fixed emitMemberAccessExpr() to use TypeDescriptor::toQBEType()
+  * Correctly load INTEGER fields with loadw + sign-extend to l with extsw
+  * Added proper handling for all QBE types (w, l, d, s)
+
+- qbe_codegen_statements.cpp:
+  * Fixed emitLet() to use TypeDescriptor for correct store instructions
+  * Added type conversion and truncation logic
+
+## Bug #2: Arrays of UDTs
+
+### Issues Fixed:
+- DIM Points(2) AS Point caused "Variable not declared" error
+- Array element member access failed validation
+- Runtime errors due to wrong pointer arithmetic (writing to descriptor instead of data)
+
+### Changes:
+- fasterbasic_semantic.cpp:
+  * Fixed validateLetStatement() to look up arrays (not just variables) for member chains
+  * Get base type from arrSym->asTypeName for array element validation
+
+- qbe_codegen_statements.cpp:
+  * Fixed emitLet() array element member access to load data pointer from descriptor
+  * Changed offset calculation: dataPtr = loadl arrayRef; baseRef = add dataPtr, offset
+  * Previously was adding offset directly to descriptor address (wrong!)
+
+## Test Results:
+All 5 UDT tests now pass:
+✅ test_udt_simple.bas - Simple UDT with INTEGER field
+✅ test_udt_twofields.bas - INTEGER and DOUBLE fields
+✅ test_udt_nested.bas - Nested UDT member access
+✅ test_udt_string.bas - STRING fields in UDTs
+✅ test_udt_array.bas - Arrays of UDTs with element member access
+
+## Key Technical Details:
+- TypeDescriptor system ensures correct QBE type mapping:
+  * BaseType::INTEGER → QBE "w" (32-bit) → loadw/storew
+  * BaseType::LONG → QBE "l" (64-bit) → loadl/storel
+  * BaseType::DOUBLE → QBE "d" → loadd/stored
+
+- ArrayDescriptor layout (64 bytes):
+  * Offset 0: data pointer (must be loaded before offset calculation)
+  * Offset 8-16: bounds for dimension 1
+  * Offset 24-32: bounds for dimension 2
+  * Offset 40: elementSize
+  * Offset 48: dimensions count
+  * Offset 56: typeSuffix
+
+- INTEGER fields require sign extension after load:
+  * temp = loadw ptr       # Load 32-bit value
+  * result = extsw temp    # Sign-extend to 64-bit for operations
+
+Files Modified:
+- fsh/FasterBASICT/src/fasterbasic_semantic.cpp
+- fsh/FasterBASICT/src/codegen/qbe_codegen_expressions.cpp
+- fsh/FasterBASICT/src/codegen/qbe_codegen_statements.cpp
+
+Documentation Added:
+- UDT_BUG_FIXES_COMPLETE.md - Comprehensive summary of fixes

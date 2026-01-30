@@ -762,7 +762,7 @@ struct SymbolTable {
     DataSegment dataSegment;
     int nextLabelId = 10000;  // Start label IDs at 10000 to avoid conflicts with line numbers
     int arrayBase = 1;  // OPTION BASE: 0 or 1 (default 1 to match Lua arrays)
-    bool unicodeMode = false;  // OPTION UNICODE: if true, strings are represented as codepoint arrays
+    CompilerOptions::StringMode stringMode = CompilerOptions::StringMode::DETECTSTRING;  // OPTION ASCII/UNICODE/DETECTSTRING
     bool errorTracking = true;  // OPTION ERROR: if true, emit _LINE tracking for error messages
     bool cancellableLoops = true;  // OPTION CANCELLABLE: if true, inject script cancellation checks in loops
     bool eventsUsed = false;  // EVENT DETECTION: if true, program uses ON EVENT statements and needs event processing code
@@ -791,6 +791,24 @@ struct SymbolTable {
     }
 
     std::string toString() const;
+    
+    // Helper: Determine string type based on stringMode and literal content
+    // Returns STRING for ASCII, UNICODE for non-ASCII (in DETECTSTRING mode)
+    BaseType getStringTypeForLiteral(bool hasNonASCII) const {
+        switch (stringMode) {
+            case CompilerOptions::StringMode::ASCII:
+                // ASCII mode: all strings are STRING (non-ASCII is error, caught by parser)
+                return BaseType::STRING;
+            case CompilerOptions::StringMode::UNICODE:
+                // Unicode mode: all strings are UNICODE
+                return BaseType::UNICODE;
+            case CompilerOptions::StringMode::DETECTSTRING:
+                // Detect mode: ASCII if all bytes < 128, else UNICODE
+                return hasNonASCII ? BaseType::UNICODE : BaseType::STRING;
+            default:
+                return BaseType::STRING;
+        }
+    }
 };
 
 // =============================================================================

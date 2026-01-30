@@ -299,7 +299,7 @@ bool SemanticAnalyzer::analyze(Program& program, const CompilerOptions& options)
     
     // Apply compiler options to symbol table
     m_symbolTable.arrayBase = options.arrayBase;
-    m_symbolTable.unicodeMode = options.unicodeMode;
+    m_symbolTable.stringMode = options.stringMode;
     m_symbolTable.errorTracking = options.errorTracking;
     m_symbolTable.cancellableLoops = options.cancellableLoops;
     m_symbolTable.forceYieldEnabled = options.forceYieldEnabled;
@@ -528,7 +528,8 @@ void SemanticAnalyzer::processTypeDeclarationStatement(const TypeDeclarationStat
                     fieldTypeDesc = TypeDescriptor(BaseType::DOUBLE);
                     break;
                 case TokenType::KEYWORD_STRING:
-                    fieldTypeDesc = m_symbolTable.unicodeMode ? 
+                    // For STRING type in TYPE definition, use global mode (not per-literal detection)
+                    fieldTypeDesc = (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
                         TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
                     break;
                 case TokenType::KEYWORD_LONG:
@@ -904,7 +905,8 @@ void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
                 } else if (typeName == "FLOAT" || typeName == "SINGLE") {
                     typeDesc = TypeDescriptor(BaseType::SINGLE);
                 } else if (typeName == "STRING") {
-                    typeDesc = m_symbolTable.unicodeMode ? 
+                    // For STRING variable declarations, use global mode
+                    typeDesc = (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
                         TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
                 } else if (typeName == "UBYTE") {
                     typeDesc = TypeDescriptor(BaseType::UBYTE);
@@ -1032,7 +1034,8 @@ void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
                 } else if (typeName == "FLOAT" || typeName == "SINGLE") {
                     elementType = TypeDescriptor(BaseType::SINGLE);
                 } else if (typeName == "STRING") {
-                    elementType = m_symbolTable.unicodeMode ? 
+                    // For STRING array declarations, use global mode
+                    elementType = (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
                         TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
                 } else if (typeName == "UBYTE") {
                     elementType = TypeDescriptor(BaseType::UBYTE);
@@ -1576,7 +1579,94 @@ void SemanticAnalyzer::validateLetStatement(const LetStatement& stmt) {
     
     // Type check
     VariableType targetType;
-    if (!stmt.indices.empty()) {
+    
+    // Handle member access (UDT field assignment)
+    if (!stmt.memberChain.empty()) {
+        // Check if this is array element member access or simple variable member access
+        std::string baseTypeName;
+        
+        if (!stmt.indices.empty()) {
+            // Array element with member access: Points(0).X = 42
+            auto* arrSym = lookupArray(stmt.variable);
+            if (!arrSym) {
+                error(SemanticErrorType::UNDEFINED_VARIABLE,
+                      "Variable '" + stmt.variable + "' not declared",
+                      stmt.location);
+                return;
+            }
+            
+            if (arrSym->type != VariableType::USER_DEFINED) {
+                error(SemanticErrorType::TYPE_MISMATCH,
+                      "Cannot use member access on non-UDT array '" + stmt.variable + "'",
+                      stmt.location);
+                return;
+            }
+            
+            baseTypeName = arrSym->asTypeName;
+        } else {
+            // Simple variable with member access: Player.X = 42
+            auto* varSym = lookupVariable(stmt.variable);
+            if (!varSym) {
+                error(SemanticErrorType::UNDEFINED_VARIABLE,
+                      "Variable '" + stmt.variable + "' not declared",
+                      stmt.location);
+                return;
+            }
+            
+            if (varSym->type != VariableType::USER_DEFINED) {
+                error(SemanticErrorType::TYPE_MISMATCH,
+                      "Cannot use member access on non-UDT variable '" + stmt.variable + "'",
+                      stmt.location);
+                return;
+            }
+            
+            baseTypeName = varSym->typeName;
+        }
+        
+        // Look up the UDT type
+        TypeSymbol* typeSymbol = lookupType(baseTypeName);
+        if (!typeSymbol) {
+            error(SemanticErrorType::UNDEFINED_TYPE,
+                  "Type '" + baseTypeName + "' not defined",
+                  stmt.location);
+            return;
+        }
+        
+        // Navigate through the member chain
+        TypeSymbol* currentType = typeSymbol;
+        for (size_t i = 0; i < stmt.memberChain.size(); ++i) {
+            const std::string& memberName = stmt.memberChain[i];
+            const TypeSymbol::Field* field = currentType->findField(memberName);
+            
+            if (!field) {
+                error(SemanticErrorType::UNDEFINED_FIELD,
+                      "Field '" + memberName + "' not found in type '" + currentType->name + "'",
+                      stmt.location);
+                return;
+            }
+            
+            // If this is the last member, get its type
+            if (i == stmt.memberChain.size() - 1) {
+                targetType = field->isBuiltIn ? field->builtInType : VariableType::USER_DEFINED;
+            } else {
+                // This is a nested member, must be a UDT
+                if (!field->isBuiltIn) {
+                    currentType = lookupType(field->typeName);
+                    if (!currentType) {
+                        error(SemanticErrorType::UNDEFINED_TYPE,
+                              "Type '" + field->typeName + "' not defined",
+                              stmt.location);
+                        return;
+                    }
+                } else {
+                    error(SemanticErrorType::TYPE_MISMATCH,
+                          "Cannot access member '" + stmt.memberChain[i+1] + "' of non-UDT field '" + memberName + "'",
+                          stmt.location);
+                    return;
+                }
+            }
+        }
+    } else if (!stmt.indices.empty()) {
         auto* arraySym = lookupArray(stmt.variable);
         targetType = arraySym ? arraySym->type : VariableType::UNKNOWN;
     } else {
@@ -2386,7 +2476,9 @@ VariableType SemanticAnalyzer::inferExpressionType(const Expression& expr) {
         
         case ASTNodeType::EXPR_STRING:
             // Return UNICODE type if in Unicode mode
-            return m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
+            // For variable member access, use global mode
+            return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
+                VariableType::UNICODE : VariableType::STRING;
         
         case ASTNodeType::EXPR_VARIABLE:
             return inferVariableType(static_cast<const VariableExpression&>(expr));
@@ -2416,34 +2508,69 @@ VariableType SemanticAnalyzer::inferExpressionType(const Expression& expr) {
 VariableType SemanticAnalyzer::inferMemberAccessType(const MemberAccessExpression& expr) {
     // Infer the type of a member access expression (e.g., point.X)
     
-    // First, determine the type of the base object
-    VariableType baseType = VariableType::UNKNOWN;
+    // First, determine the type name of the base object
     std::string baseTypeName;
     
     // Check if the object is a variable
     if (expr.object->getType() == ASTNodeType::EXPR_VARIABLE) {
         const VariableExpression* varExpr = static_cast<const VariableExpression*>(expr.object.get());
         VariableSymbol* varSym = lookupVariable(varExpr->name);
-        if (varSym) {
-            baseType = varSym->type;
-            // For user-defined types, we need to find the type name
-            // Variables of user-defined types store the type name (we'll enhance this later)
+        if (varSym && varSym->type == VariableType::USER_DEFINED) {
+            // Get the UDT type name
+            baseTypeName = varSym->typeName;
+        } else {
+            return VariableType::UNKNOWN;
         }
     } else if (expr.object->getType() == ASTNodeType::EXPR_ARRAY_ACCESS) {
         // Array element access
         const ArrayAccessExpression* arrayExpr = static_cast<const ArrayAccessExpression*>(expr.object.get());
         ArraySymbol* arraySym = lookupArray(arrayExpr->name);
-        if (arraySym) {
-            baseType = arraySym->type;
+        if (arraySym && arraySym->type == VariableType::USER_DEFINED) {
+            baseTypeName = arraySym->asTypeName;
+        } else {
+            return VariableType::UNKNOWN;
         }
     } else if (expr.object->getType() == ASTNodeType::EXPR_MEMBER_ACCESS) {
         // Nested member access (e.g., a.b.c)
-        baseType = inferMemberAccessType(*static_cast<const MemberAccessExpression*>(expr.object.get()));
+        // Recursively get the type of the nested member
+        VariableType nestedType = inferMemberAccessType(*static_cast<const MemberAccessExpression*>(expr.object.get()));
+        
+        // If the nested member is a UDT, we need to get its type name
+        // For now, we'll handle this by looking up the field in the parent type
+        // This is complex, so we return the nested type for now
+        if (nestedType == VariableType::USER_DEFINED) {
+            // TODO: Handle nested UDT member access properly
+            // For now, continue with type lookup attempt
+            return nestedType;
+        }
+        return nestedType;
+    } else {
+        return VariableType::UNKNOWN;
     }
     
-    // For now, return UNKNOWN - full implementation requires tracking type names in variables
-    // This will be completed when we integrate DIM AS TypeName
-    return VariableType::UNKNOWN;
+    // Look up the type definition
+    if (baseTypeName.empty()) {
+        return VariableType::UNKNOWN;
+    }
+    
+    TypeSymbol* typeSymbol = lookupType(baseTypeName);
+    if (!typeSymbol) {
+        return VariableType::UNKNOWN;
+    }
+    
+    // Find the field in the type
+    const TypeSymbol::Field* field = typeSymbol->findField(expr.memberName);
+    if (!field) {
+        return VariableType::UNKNOWN;
+    }
+    
+    // Return the field's type
+    if (field->isBuiltIn) {
+        return field->builtInType;
+    } else {
+        // Field is a nested UDT
+        return VariableType::USER_DEFINED;
+    }
 }
 
 VariableType SemanticAnalyzer::inferBinaryExpressionType(const BinaryExpression& expr) {
@@ -2684,11 +2811,15 @@ VariableType SemanticAnalyzer::inferFunctionCallType(const FunctionCallExpressio
 
         // Any built-in ending with $ or _STRING suffix returns a string/Unicode
         if (!upperName.empty() && upperName.back() == '$') {
-            return m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
+            // For function calls, use global mode (string literal detection happens elsewhere)
+            return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
+                VariableType::UNICODE : VariableType::STRING;
         }
         // Check for mangled string function names (e.g., STR_STRING, CHR_STRING)
         if (upperName.length() > 7 && upperName.substr(upperName.length() - 7) == "_STRING") {
-            return m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
+            // For CHR$ and other string functions, use global mode
+            return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
+                VariableType::UNICODE : VariableType::STRING;
         }
         
         // Functions that return INT
@@ -2728,7 +2859,9 @@ VariableType SemanticAnalyzer::inferRegistryFunctionType(const RegistryFunctionE
         case FasterBASIC::ModularCommands::ReturnType::FLOAT:
             return VariableType::FLOAT;
         case FasterBASIC::ModularCommands::ReturnType::STRING:
-            return m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
+            // For string concatenation, use global mode
+            return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
+                VariableType::UNICODE : VariableType::STRING;
         case FasterBASIC::ModularCommands::ReturnType::BOOL:
             return VariableType::INT; // BASIC treats booleans as integers
         case FasterBASIC::ModularCommands::ReturnType::VOID:
@@ -3044,7 +3177,9 @@ VariableType SemanticAnalyzer::inferTypeFromSuffix(TokenType suffix) {
         case TokenType::TYPE_DOUBLE: return VariableType::DOUBLE;
         case TokenType::TYPE_STRING: 
             // Return UNICODE type if in Unicode mode
-            return m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
+            // For INPUT, use global mode
+            return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
+                VariableType::UNICODE : VariableType::STRING;
         default:                     return VariableType::UNKNOWN;
     }
 }
@@ -3054,7 +3189,9 @@ VariableType SemanticAnalyzer::inferTypeFromName(const std::string& name) {
     
     // Check for normalized suffixes first (e.g., A_STRING, B_INT, C_DOUBLE)
     if (name.length() > 7 && name.substr(name.length() - 7) == "_STRING") {
-        return m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
+        // Default string type for unknown cases, use global mode
+        return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
+            VariableType::UNICODE : VariableType::STRING;
     }
     if (name.length() > 4 && name.substr(name.length() - 4) == "_INT") {
         return VariableType::INT;
@@ -3068,7 +3205,9 @@ VariableType SemanticAnalyzer::inferTypeFromName(const std::string& name) {
     switch (lastChar) {
         case '$': 
             // Return UNICODE type if in Unicode mode
-            return m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
+            // For string variables, use global mode
+            return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
+                VariableType::UNICODE : VariableType::STRING;
         case '%': return VariableType::INT;
         case '!': return VariableType::FLOAT;
         case '#': return VariableType::DOUBLE;
@@ -3515,9 +3654,13 @@ VariableType SemanticAnalyzer::getBuiltinReturnType(const std::string& name) con
     }
     
     // String functions return STRING
-    if (name.back() == '$') {
+    // Check for both $ suffix and _STRING suffix (mangled by parser)
+    if (name.back() == '$' || 
+        (name.length() > 7 && name.substr(name.length() - 7) == "_STRING")) {
         // Return UNICODE type if in Unicode mode
-        return m_symbolTable.unicodeMode ? VariableType::UNICODE : VariableType::STRING;
+        // For string type names, use global mode
+        return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
+            VariableType::UNICODE : VariableType::STRING;
     }
     
     // LEN and ASC return INT
@@ -4114,9 +4257,12 @@ TypeDescriptor SemanticAnalyzer::inferExpressionTypeD(const Expression& expr) {
             return TypeDescriptor(BaseType::DOUBLE);
         }
         
-        case ASTNodeType::EXPR_STRING:
-            return m_symbolTable.unicodeMode ? 
-                TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
+        case ASTNodeType::EXPR_STRING: {
+            // String literals: detect based on content if in DETECTSTRING mode
+            const StringExpression* strExpr = static_cast<const StringExpression*>(&expr);
+            BaseType stringType = m_symbolTable.getStringTypeForLiteral(strExpr->hasNonASCII);
+            return TypeDescriptor(stringType);
+        }
         
         case ASTNodeType::EXPR_VARIABLE:
             return inferVariableTypeD(static_cast<const VariableExpression&>(expr));
@@ -4261,7 +4407,8 @@ TypeDescriptor SemanticAnalyzer::inferRegistryFunctionTypeD(const RegistryFuncti
         case FasterBASIC::ModularCommands::ReturnType::FLOAT:
             return TypeDescriptor(BaseType::DOUBLE);  // FLOAT in registry is treated as DOUBLE
         case FasterBASIC::ModularCommands::ReturnType::STRING:
-            return m_symbolTable.unicodeMode ? 
+            // For variable member access, use global mode
+            return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
                 TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
         case FasterBASIC::ModularCommands::ReturnType::VOID:
             return TypeDescriptor(BaseType::VOID);
@@ -4469,7 +4616,8 @@ TypeDescriptor SemanticAnalyzer::inferTypeFromSuffixD(TokenType suffix) const {
         case TokenType::TYPE_DOUBLE:
             return TypeDescriptor(BaseType::DOUBLE);
         case TokenType::TYPE_STRING:
-            return m_symbolTable.unicodeMode ? 
+            // For array member access, use global mode
+            return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
                 TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
         case TokenType::TYPE_BYTE:
             return TypeDescriptor(BaseType::BYTE);
@@ -4482,7 +4630,7 @@ TypeDescriptor SemanticAnalyzer::inferTypeFromSuffixD(TokenType suffix) const {
 
 TypeDescriptor SemanticAnalyzer::inferTypeFromSuffixD(char suffix) const {
     BaseType type = baseTypeFromSuffix(suffix);
-    if (type == BaseType::STRING && m_symbolTable.unicodeMode) {
+    if (type == BaseType::STRING && m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) {
         type = BaseType::UNICODE;
     }
     return TypeDescriptor(type);
@@ -4495,7 +4643,8 @@ TypeDescriptor SemanticAnalyzer::inferTypeFromNameD(const std::string& name) con
     
     // Check for normalized suffixes (e.g., A_STRING, B_INT)
     if (name.length() > 7 && name.substr(name.length() - 7) == "_STRING") {
-        return m_symbolTable.unicodeMode ? 
+        // For string coercion, use global mode
+        return (m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) ?
             TypeDescriptor(BaseType::UNICODE) : TypeDescriptor(BaseType::STRING);
     }
     if (name.length() > 4 && name.substr(name.length() - 4) == "_INT") {
@@ -4521,7 +4670,7 @@ TypeDescriptor SemanticAnalyzer::inferTypeFromNameD(const std::string& name) con
     char lastChar = name.back();
     BaseType type = baseTypeFromSuffix(lastChar);
     if (type != BaseType::UNKNOWN) {
-        if (type == BaseType::STRING && m_symbolTable.unicodeMode) {
+        if (type == BaseType::STRING && m_symbolTable.stringMode == CompilerOptions::StringMode::UNICODE) {
             type = BaseType::UNICODE;
         }
         return TypeDescriptor(type);

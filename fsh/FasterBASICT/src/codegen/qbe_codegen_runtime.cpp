@@ -23,24 +23,36 @@ void QBECodeGenerator::emitPrintValue(const std::string& value, VariableType typ
         // String is now a StringDescriptor pointer (l type)
         emit("    call $basic_print_string_desc(l " + value + ")\n");
     } else if (type == VariableType::INT) {
-        // INT could be a word (w) from byte/short loads - extend to long if needed
-        // Check if the value is already a long or needs extension
-        // For simplicity, always extend words to longs for print
-        std::string longValue = allocTemp("l");
-        emit("    " + longValue + " =l extsw " + value + "\n");
-        emit("    call $basic_print_int(l " + longValue + ")\n");
-        m_stats.instructionsGenerated++;
+        // INT represents both 32-bit INTEGER and 64-bit LONG in legacy type system
+        // The value might be 'w' (word) or 'l' (long) in QBE
+        // Check if it's already a long by looking at the variable type in our temp map
+        std::string qbeType = "l";
+        
+        // Try to get the actual QBE type from our tracking
+        auto typeIt = m_tempTypes.find(value);
+        if (typeIt != m_tempTypes.end()) {
+            qbeType = typeIt->second;
+        }
+        
+        // If it's a word, extend it to long for printing
+        // If it's already a long, just pass it directly
+        if (qbeType == "w") {
+            std::string longValue = allocTemp("l");
+            emit("    " + longValue + " =l extsw " + value + "\n");
+            emit("    call $basic_print_int(l " + longValue + ")\n");
+            m_stats.instructionsGenerated++;
+        } else {
+            // Already long, pass directly
+            emit("    call $basic_print_int(l " + value + ")\n");
+        }
     } else if (type == VariableType::DOUBLE) {
         emit("    call $basic_print_double(d " + value + ")\n");
     } else if (type == VariableType::FLOAT) {
         // FLOAT (single) passes directly as float
         emit("    call $basic_print_float(s " + value + ")\n");
     } else {
-        // Default to int - extend word to long
-        std::string longValue = allocTemp("l");
-        emit("    " + longValue + " =l extsw " + value + "\n");
-        emit("    call $basic_print_int(l " + longValue + ")\n");
-        m_stats.instructionsGenerated++;
+        // Default to int - assume already long
+        emit("    call $basic_print_int(l " + value + ")\n");
     }
     m_stats.instructionsGenerated++;
 }

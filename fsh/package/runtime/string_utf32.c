@@ -440,7 +440,13 @@ StringDescriptor* string_promote_to_utf32(StringDescriptor* str) {
 // Clone string (deep copy)
 StringDescriptor* string_clone(const StringDescriptor* str) {
     if (!str) return string_new_capacity(0);
-    return string_new_utf32(str->data, str->length);
+    
+    // Preserve encoding when cloning
+    if (str->encoding == STRING_ENCODING_ASCII) {
+        return string_new_ascii_len((uint8_t*)str->data, str->length);
+    } else {
+        return string_new_utf32((uint32_t*)str->data, str->length);
+    }
 }
 
 // Retain string (increment refcount)
@@ -1090,8 +1096,8 @@ StringDescriptor* string_reverse(const StringDescriptor* str) {
         int64_t sep_len = sep ? sep->length : 0;
 
         // Compute element count
-        int64_t count = (arrayDesc->upperBound >= arrayDesc->lowerBound)
-            ? (arrayDesc->upperBound - arrayDesc->lowerBound + 1)
+        int64_t count = (arrayDesc->upperBound1 >= arrayDesc->lowerBound1)
+            ? (arrayDesc->upperBound1 - arrayDesc->lowerBound1 + 1)
             : 0;
 
         if (count <= 0 || !arrayDesc->data) {
@@ -1158,7 +1164,7 @@ StringDescriptor* string_reverse(const StringDescriptor* str) {
     static ArrayDescriptor* alloc_split_desc(int64_t upperBound, size_t elemSize) {
         ArrayDescriptor* desc = (ArrayDescriptor*)malloc(sizeof(ArrayDescriptor));
         if (!desc) return NULL;
-        if (array_descriptor_init(desc, 0, upperBound, (int64_t)elemSize, 1, 0, '$') != 0) {
+        if (array_descriptor_init(desc, 0, upperBound, (int64_t)elemSize, 0, '$') != 0) {
             free(desc);
             return NULL;
         }
@@ -1534,6 +1540,14 @@ size_t string_memory_usage(const StringDescriptor* str) {
 StringDescriptor* string_mid_assign(StringDescriptor* str, int64_t pos, int64_t len, const StringDescriptor* replacement) {
     if (!str || pos < 1 || len < 0) return str;
     if (!replacement) replacement = string_new_capacity(0);
+    
+    // Copy-on-write: If string is shared (refcount > 1), create independent copy
+    if (str->refcount > 1) {
+        StringDescriptor* new_str = string_clone(str);
+        if (!new_str) return str;  // Allocation failed, return original
+        str->refcount--;  // Decrement refcount on original
+        str = new_str;    // Work with the new copy
+    }
     
     // Adjust for 1-based indexing
     pos--;  // Convert to 0-based

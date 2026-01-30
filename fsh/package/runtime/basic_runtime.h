@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <setjmp.h>
 #include "string_descriptor.h"
 
 #ifdef __cplusplus
@@ -22,6 +23,15 @@ extern "C" {
 // =============================================================================
 // Type Definitions
 // =============================================================================
+
+// Exception handling context for TRY/CATCH/FINALLY
+typedef struct ExceptionContext {
+    jmp_buf jump_buffer;              // setjmp/longjmp buffer
+    struct ExceptionContext* prev;    // Previous context (for nesting)
+    int32_t error_code;               // Current error code
+    int32_t error_line;               // Line where error occurred
+    int32_t has_finally;              // Whether this context has FINALLY
+} ExceptionContext;
 
 // String type with reference counting
 typedef struct BasicString {
@@ -147,6 +157,43 @@ float str_to_float(BasicString* str);
 
 // Convert string to double
 double str_to_double(BasicString* str);
+
+// =============================================================================
+// Exception Handling
+// =============================================================================
+
+// Push new exception context (returns context pointer)
+ExceptionContext* basic_exception_push(int32_t has_finally);
+
+// Pop exception context
+void basic_exception_pop(void);
+
+// Throw exception with error code (longjmp to handler)
+void basic_throw(int32_t error_code);
+
+// Get current error code (ERR function)
+int32_t basic_err(void);
+
+// Get error line number (ERL function)
+int32_t basic_erl(void);
+
+// Re-throw current exception (for unmatched CATCH clauses)
+void basic_rethrow(void);
+
+// Wrapper for setjmp (called from generated code)
+int32_t basic_setjmp(void);
+
+// Standard BASIC error codes
+#define ERR_ILLEGAL_CALL       5
+#define ERR_OVERFLOW           6
+#define ERR_SUBSCRIPT          9
+#define ERR_DIV_ZERO          11
+#define ERR_TYPE_MISMATCH     13
+#define ERR_BAD_FILE          52
+#define ERR_FILE_NOT_FOUND    53
+#define ERR_DISK_FULL         61
+#define ERR_INPUT_PAST_END    62
+#define ERR_DISK_NOT_READY    71
 
 // =============================================================================
 // Array Operations

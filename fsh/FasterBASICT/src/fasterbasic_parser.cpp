@@ -316,7 +316,11 @@ void Parser::collectOptionsFromTokens() {
             } else if (match(TokenType::EXPLICIT)) {
                 m_options.explicitDeclarations = true;
             } else if (match(TokenType::UNICODE)) {
-                m_options.unicodeMode = true;
+                m_options.stringMode = CompilerOptions::StringMode::UNICODE;
+            } else if (match(TokenType::ASCII)) {
+                m_options.stringMode = CompilerOptions::StringMode::ASCII;
+            } else if (match(TokenType::DETECTSTRING)) {
+                m_options.stringMode = CompilerOptions::StringMode::DETECTSTRING;
             } else if (match(TokenType::ERROR)) {
                 m_options.errorTracking = true;
             } else if (match(TokenType::CANCELLABLE)) {
@@ -368,9 +372,11 @@ void Parser::validateStringLiterals() {
     // Validate all string literals in the token stream
     // In ASCII mode, string literals with non-ASCII characters are errors
     // In UNICODE mode, non-ASCII characters are allowed (UTF-8 will be converted to codepoints)
+    // In DETECTSTRING mode, both are allowed (auto-detect per literal)
 
-    if (m_options.unicodeMode) {
-        // Unicode mode: all strings are allowed (UTF-8 will be decoded to codepoints)
+    if (m_options.stringMode == CompilerOptions::StringMode::UNICODE ||
+        m_options.stringMode == CompilerOptions::StringMode::DETECTSTRING) {
+        // Unicode/DetectString mode: all strings are allowed
         return;
     }
 
@@ -380,7 +386,7 @@ void Parser::validateStringLiterals() {
             // Report error with location information
             std::ostringstream oss;
             oss << "Non-ASCII characters in string literal are not allowed in ASCII mode.\n"
-                << "Use OPTION UNICODE to enable Unicode string support.\n"
+                << "Use OPTION UNICODE or OPTION DETECTSTRING to enable Unicode string support.\n"
                 << "String value: \"" << token.value << "\"";
             error(oss.str(), token.location);
             // Error will cause exit, but continue checking for completeness
@@ -3427,6 +3433,10 @@ StatementPtr Parser::parseOptionStatement() {
         return std::make_unique<OptionStatement>(OptionStatement::OptionType::EXPLICIT);
     } else if (match(TokenType::UNICODE)) {
         return std::make_unique<OptionStatement>(OptionStatement::OptionType::UNICODE);
+    } else if (match(TokenType::ASCII)) {
+        return std::make_unique<OptionStatement>(OptionStatement::OptionType::ASCII);
+    } else if (match(TokenType::DETECTSTRING)) {
+        return std::make_unique<OptionStatement>(OptionStatement::OptionType::DETECTSTRING);
     } else if (match(TokenType::ERROR)) {
         return std::make_unique<OptionStatement>(OptionStatement::OptionType::ERROR);
     } else if (match(TokenType::CANCELLABLE)) {
@@ -3440,7 +3450,7 @@ StatementPtr Parser::parseOptionStatement() {
             return nullptr;
         }
     } else {
-        error("Unknown OPTION type. Expected BITWISE, LOGICAL, BASE, EXPLICIT, UNICODE, ERROR, or CANCELLABLE");
+        error("Unknown OPTION type. Expected BITWISE, LOGICAL, BASE, EXPLICIT, UNICODE, ASCII, DETECTSTRING, ERROR, or CANCELLABLE");
         return nullptr;
     }
 }
@@ -4375,7 +4385,7 @@ ExpressionPtr Parser::parsePrimary() {
 
     // String literal
     if (current().type == TokenType::STRING) {
-        auto expr = std::make_unique<StringExpression>(current().value);
+        auto expr = std::make_unique<StringExpression>(current().value, current().hasNonASCII);
         advance();
         return expr;
     }
@@ -4796,7 +4806,8 @@ ExpressionPtr Parser::parseRegistryFunctionExpression() {
                         funcExpr->addArgument(std::make_unique<NumberExpression>(defaultVal));
                     } else if (paramDef.type == FasterBASIC::ModularCommands::ParameterType::STRING) {
                         std::string defaultVal = paramDef.defaultValue.empty() ? "" : paramDef.defaultValue;
-                        funcExpr->addArgument(std::make_unique<StringExpression>(defaultVal));
+                        // Default values from registry are ASCII
+                        funcExpr->addArgument(std::make_unique<StringExpression>(defaultVal, false));
                     } else {
                         // Default numeric value
                         funcExpr->addArgument(std::make_unique<NumberExpression>(0));
@@ -5098,6 +5109,7 @@ bool Parser::isBuiltinFunction(const std::string& name) const {
         "LEN", "ASC", "CHR$", "CHR_STRING", "STR$", "STR_STRING", "VAL", "STRTYPE",
         "LEFT$", "RIGHT$", "MID$", "LEFT_STRING", "RIGHT_STRING", "MID_STRING",
         "INSTR", "SPACE$", "STRING$", "UCASE$", "LCASE$", "LTRIM$", "RTRIM$", "TRIM$",
+        "UCASE_STRING", "LCASE_STRING", "LTRIM_STRING", "RTRIM_STRING", "TRIM_STRING",
         "GETTICKS", "LOF", "EOF", "PEEK", "PEEK2", "PEEK4",
         "INKEY$", "INKEY_STRING", "CSRLIN", "POS",  // Terminal I/O functions
         "ERR", "ERL",  // Exception handling functions
@@ -5682,7 +5694,8 @@ StatementPtr Parser::parseRegistryCommandStatement() {
                     stmt->addArgument(std::make_unique<NumberExpression>(defaultVal));
                 } else if (paramDef.type == FasterBASIC::ModularCommands::ParameterType::STRING) {
                     std::string defaultVal = paramDef.defaultValue.empty() ? "" : paramDef.defaultValue;
-                    stmt->addArgument(std::make_unique<StringExpression>(defaultVal));
+                    // Default values from registry are ASCII
+                    stmt->addArgument(std::make_unique<StringExpression>(defaultVal, false));
                 } else {
                     // Default numeric value
                     stmt->addArgument(std::make_unique<NumberExpression>(0));

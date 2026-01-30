@@ -48,7 +48,9 @@ void QBECodeGenerator::emitLabel(const std::string& label) {
 // =============================================================================
 
 std::string QBECodeGenerator::allocTemp(const std::string& qbeType) {
-    return "%t" + std::to_string(m_tempCounter++);
+    std::string tempName = "%t" + std::to_string(m_tempCounter++);
+    m_tempTypes[tempName] = qbeType;
+    return tempName;
 }
 
 std::string QBECodeGenerator::allocLabel() {
@@ -911,8 +913,37 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
             return inferExpressionType(unaryExpr->expr.get());
         }
         
+        case ASTNodeType::EXPR_IIF: {
+            const IIFExpression* iifExpr = static_cast<const IIFExpression*>(expr);
+            
+            // Infer types from both branches
+            VariableType trueType = inferExpressionType(iifExpr->trueValue.get());
+            VariableType falseType = inferExpressionType(iifExpr->falseValue.get());
+            
+            // If both branches are the same type, return that type
+            if (trueType == falseType) {
+                return trueType;
+            }
+            
+            // If one is STRING, return STRING (strings don't auto-convert)
+            if (trueType == VariableType::STRING || falseType == VariableType::STRING) {
+                return VariableType::STRING;
+            }
+            
+            // Numeric type promotion: DOUBLE > FLOAT > INT
+            if (trueType == VariableType::DOUBLE || falseType == VariableType::DOUBLE) {
+                return VariableType::DOUBLE;
+            }
+            if (trueType == VariableType::FLOAT || falseType == VariableType::FLOAT) {
+                return VariableType::DOUBLE;
+            }
+            
+            // Default to DOUBLE if types are incompatible
+            return VariableType::DOUBLE;
+        }
+        
         default:
-            return VariableType::DOUBLE;  // Default to DOUBLE
+            return VariableType::DOUBLE;
     }
 }
 
@@ -1086,19 +1117,39 @@ size_t QBECodeGenerator::calculateTypeSize(const std::string& typeName) {
         size_t fieldAlignment = 0;
         
         if (field.isBuiltIn) {
-            // Built-in type sizes
-            switch (field.builtInType) {
-                case VariableType::INT:
+            // Use TypeDescriptor for accurate size calculation (handles LONG vs INT correctly)
+            switch (field.typeDesc.baseType) {
+                case BaseType::BYTE:
+                case BaseType::UBYTE:
+                    fieldSize = 1;
+                    fieldAlignment = 1;
+                    break;
+                case BaseType::SHORT:
+                case BaseType::USHORT:
+                    fieldSize = 2;
+                    fieldAlignment = 2;
+                    break;
+                case BaseType::INTEGER:
+                case BaseType::UINTEGER:
                     fieldSize = 4;
                     fieldAlignment = 4;
                     break;
-                case VariableType::FLOAT:
-                case VariableType::DOUBLE:
+                case BaseType::LONG:
+                case BaseType::ULONG:
                     fieldSize = 8;
                     fieldAlignment = 8;
                     break;
-                case VariableType::STRING:
-                case VariableType::UNICODE:
+                case BaseType::SINGLE:
+                    fieldSize = 4;
+                    fieldAlignment = 4;
+                    break;
+                case BaseType::DOUBLE:
+                    fieldSize = 8;
+                    fieldAlignment = 8;
+                    break;
+                case BaseType::STRING:
+                case BaseType::UNICODE:
+                case BaseType::POINTER:
                     fieldSize = 8;  // Pointer
                     fieldAlignment = 8;
                     break;
@@ -1159,19 +1210,40 @@ size_t QBECodeGenerator::calculateFieldOffset(const std::string& typeName, const
         size_t fieldAlignment = 0;
         
         if (field.isBuiltIn) {
-            switch (field.builtInType) {
-                case VariableType::INT:
+            // Use TypeDescriptor for accurate size calculation (handles LONG vs INT correctly)
+            switch (field.typeDesc.baseType) {
+                case BaseType::BYTE:
+                case BaseType::UBYTE:
+                    fieldSize = 1;
+                    fieldAlignment = 1;
+                    break;
+                case BaseType::SHORT:
+                case BaseType::USHORT:
+                    fieldSize = 2;
+                    fieldAlignment = 2;
+                    break;
+                case BaseType::INTEGER:
+                case BaseType::UINTEGER:
                     fieldSize = 4;
                     fieldAlignment = 4;
                     break;
-                case VariableType::FLOAT:
-                case VariableType::DOUBLE:
+                case BaseType::LONG:
+                case BaseType::ULONG:
                     fieldSize = 8;
                     fieldAlignment = 8;
                     break;
-                case VariableType::STRING:
-                case VariableType::UNICODE:
+                case BaseType::SINGLE:
+                    fieldSize = 4;
+                    fieldAlignment = 4;
+                    break;
+                case BaseType::DOUBLE:
                     fieldSize = 8;
+                    fieldAlignment = 8;
+                    break;
+                case BaseType::STRING:
+                case BaseType::UNICODE:
+                case BaseType::POINTER:
+                    fieldSize = 8;  // Pointer
                     fieldAlignment = 8;
                     break;
                 default:

@@ -85,6 +85,9 @@ std::string QBECodeGenerator::emitExpression(const Expression* expr) {
         case ASTNodeType::EXPR_MEMBER_ACCESS:
             return emitMemberAccessExpr(static_cast<const MemberAccessExpression*>(expr));
             
+        case ASTNodeType::EXPR_IIF:
+            return emitIIF(static_cast<const IIFExpression*>(expr));
+            
         default:
             emitComment("TODO: Unhandled expression type " + std::to_string(static_cast<int>(nodeType)));
             std::string temp = allocTemp("w");
@@ -208,17 +211,22 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
     
     TokenType op = expr->op;
     
-    // Special handling for string concatenation
-    if (op == TokenType::PLUS && leftType == VariableType::STRING && rightType == VariableType::STRING) {
+    // Special handling for string concatenation (supports STRING + STRING, STRING + UNICODE, UNICODE + STRING, UNICODE + UNICODE)
+    // The runtime library automatically promotes ASCII strings to UTF-32 when mixing encodings
+    if (op == TokenType::PLUS && 
+        (leftType == VariableType::STRING || leftType == VariableType::UNICODE) &&
+        (rightType == VariableType::STRING || rightType == VariableType::UNICODE)) {
         return emitStringConcat(leftTemp, rightTemp);
     }
     
-    // Special handling for string comparison operators
+    // Special handling for string comparison operators (supports STRING and UNICODE)
     bool isComparison = (op == TokenType::EQUAL || op == TokenType::NOT_EQUAL ||
                          op == TokenType::LESS_THAN || op == TokenType::LESS_EQUAL ||
                          op == TokenType::GREATER_THAN || op == TokenType::GREATER_EQUAL);
     
-    if (isComparison && leftType == VariableType::STRING && rightType == VariableType::STRING) {
+    if (isComparison && 
+        (leftType == VariableType::STRING || leftType == VariableType::UNICODE) &&
+        (rightType == VariableType::STRING || rightType == VariableType::UNICODE)) {
         // Call string_compare runtime function
         std::string cmpResult = allocTemp("w");
         emit("    " + cmpResult + " =w call $string_compare(l " + leftTemp + ", l " + rightTemp + ")\n");
@@ -1950,25 +1958,52 @@ std::string QBECodeGenerator::emitMemberAccessExpr(const MemberAccessExpression*
     }
     m_stats.instructionsGenerated++;
     
-    // 6. Load value based on field type
+    // 6. Load value based on field type (use TypeDescriptor for correct QBE type)
     std::string resultTemp;
     
     if (field->isBuiltIn) {
-        // Built-in type - load the value
-        std::string qbeType = getQBEType(field->builtInType);
-        resultTemp = allocTemp(qbeType);
+        // Built-in type - load the value using TypeDescriptor
+        TypeDescriptor fieldTypeDesc = field->typeDesc;
+        std::string qbeType = fieldTypeDesc.toQBEType();
+        std::string memOp = fieldTypeDesc.toQBEMemOp();
         
+        emitComment("Field type: " + fieldTypeDesc.toString() + " -> QBE type: " + qbeType);
+        
+        // For INTEGER fields (TypeDescriptor -> "w"), we need to load a word and potentially extend
         if (qbeType == "w") {
-            emit("    " + resultTemp + " =w loadw " + memberPtr + "\n");
+            // Load 32-bit word
+            resultTemp = allocTemp("w");
+            emit("    " + resultTemp + " =w load" + memOp + " " + memberPtr + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Sign-extend to long for arithmetic operations that expect 'l'
+            // Most operations in QBE work with long integers, so we extend here
+            std::string extendedTemp = allocTemp("l");
+            emit("    " + extendedTemp + " =l extsw " + resultTemp + "\n");
+            m_stats.instructionsGenerated++;
+            resultTemp = extendedTemp;
         } else if (qbeType == "d") {
-            emit("    " + resultTemp + " =d loadd " + memberPtr + "\n");
+            resultTemp = allocTemp("d");
+            emit("    " + resultTemp + " =d load" + memOp + " " + memberPtr + "\n");
+            m_stats.instructionsGenerated++;
         } else if (qbeType == "l") {
-            emit("    " + resultTemp + " =l loadl " + memberPtr + "\n");
+            resultTemp = allocTemp("l");
+            emit("    " + resultTemp + " =l load" + memOp + " " + memberPtr + "\n");
+            m_stats.instructionsGenerated++;
+        } else if (qbeType == "s") {
+            resultTemp = allocTemp("s");
+            emit("    " + resultTemp + " =s load" + memOp + " " + memberPtr + "\n");
+            m_stats.instructionsGenerated++;
         } else {
-            // Default to word
+            // Default to word with sign extension
+            resultTemp = allocTemp("w");
             emit("    " + resultTemp + " =w loadw " + memberPtr + "\n");
+            m_stats.instructionsGenerated++;
+            std::string extendedTemp = allocTemp("l");
+            emit("    " + extendedTemp + " =l extsw " + resultTemp + "\n");
+            m_stats.instructionsGenerated++;
+            resultTemp = extendedTemp;
         }
-        m_stats.instructionsGenerated++;
     } else {
         // Nested UDT - return the pointer (no load)
         // This allows further member access: Player.Position.X
@@ -2102,6 +2137,103 @@ std::string QBECodeGenerator::mapToRuntimeFunction(const std::string& basicFunc)
     
     // Default: prefix with basic_
     return "basic_" + upper;
+}
+
+// =============================================================================
+// IIF (Immediate IF) Expression - Inline Conditional
+// =============================================================================
+
+std::string QBECodeGenerator::emitIIF(const IIFExpression* expr) {
+    if (!expr || !expr->condition || !expr->trueValue || !expr->falseValue) {
+        std::string temp = allocTemp("w");
+        emit("    " + temp + " =w copy 0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    emitComment("IIF expression");
+    
+    // Infer the result type from the true/false branches
+    VariableType trueType = inferExpressionType(expr->trueValue.get());
+    VariableType falseType = inferExpressionType(expr->falseValue.get());
+    
+    // Determine result type (should be compatible)
+    VariableType resultType = trueType;
+    if (trueType != falseType) {
+        // If types differ, promote to the "wider" type
+        if (trueType == VariableType::DOUBLE || falseType == VariableType::DOUBLE) {
+            resultType = VariableType::DOUBLE;
+        } else if (trueType == VariableType::FLOAT || falseType == VariableType::FLOAT) {
+            resultType = VariableType::FLOAT;
+        } else if (trueType == VariableType::STRING || falseType == VariableType::STRING) {
+            resultType = VariableType::STRING;
+        }
+    }
+    
+    std::string qbeType = getQBEType(resultType);
+    
+    // Allocate result temporary
+    std::string resultTemp = allocTemp(qbeType);
+    
+    // Create labels for true branch, false branch, and end
+    std::string trueLabel = makeLabel("iif_true");
+    std::string falseLabel = makeLabel("iif_false");
+    std::string endLabel = makeLabel("iif_end");
+    
+    // Evaluate condition
+    std::string condTemp = emitExpression(expr->condition.get());
+    VariableType condType = inferExpressionType(expr->condition.get());
+    
+    // Convert condition to integer if needed before boolean test
+    if (condType == VariableType::DOUBLE || condType == VariableType::FLOAT) {
+        // Convert double/float to int first
+        std::string intTemp = allocTemp("w");
+        emit("    " + intTemp + " =w dtosi " + condTemp + "\n");
+        condTemp = intTemp;
+        m_stats.instructionsGenerated++;
+    }
+    
+    // Convert condition to boolean (0 or 1)
+    std::string boolTemp = allocTemp("w");
+    emit("    " + boolTemp + " =w cnew " + condTemp + ", 0\n");
+    m_stats.instructionsGenerated++;
+    
+    // Branch based on condition
+    emit("    jnz " + boolTemp + ", @" + trueLabel + ", @" + falseLabel + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // True branch
+    emit("@" + trueLabel + "\n");
+    m_stats.labelsGenerated++;
+    std::string trueTemp = emitExpression(expr->trueValue.get());
+    
+    // Convert true value to result type if needed
+    if (trueType != resultType) {
+        trueTemp = promoteToType(trueTemp, trueType, resultType);
+    }
+    
+    emit("    " + resultTemp + " =" + qbeType + " copy " + trueTemp + "\n");
+    emit("    jmp @" + endLabel + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // False branch
+    emit("@" + falseLabel + "\n");
+    m_stats.labelsGenerated++;
+    std::string falseTemp = emitExpression(expr->falseValue.get());
+    
+    // Convert false value to result type if needed
+    if (falseType != resultType) {
+        falseTemp = promoteToType(falseTemp, falseType, resultType);
+    }
+    
+    emit("    " + resultTemp + " =" + qbeType + " copy " + falseTemp + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // End label
+    emit("@" + endLabel + "\n");
+    m_stats.labelsGenerated++;
+    
+    return resultTemp;
 }
 
 } // namespace FasterBASIC

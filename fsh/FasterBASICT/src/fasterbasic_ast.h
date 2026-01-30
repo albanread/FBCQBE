@@ -252,14 +252,18 @@ public:
 class StringExpression : public Expression {
 public:
     std::string value;
+    bool hasNonASCII;  // Track if string contains non-ASCII characters
 
-    explicit StringExpression(const std::string& v) : value(v) {}
+    explicit StringExpression(const std::string& v, bool nonASCII = false) 
+        : value(v), hasNonASCII(nonASCII) {}
 
     ASTNodeType getType() const override { return ASTNodeType::EXPR_STRING; }
 
     std::string toString(int indent = 0) const override {
         std::ostringstream oss;
-        oss << makeIndent(indent) << "String(\"" << value << "\")\n";
+        oss << makeIndent(indent) << "String(\"" << value << "\"";
+        if (hasNonASCII) oss << " [Unicode]";
+        oss << ")\n";
         return oss.str();
     }
 };
@@ -2185,6 +2189,8 @@ public:
         BASE,
         EXPLICIT,
         UNICODE,
+        ASCII,
+        DETECTSTRING,
         ERROR,
         CANCELLABLE
     };
@@ -2205,6 +2211,10 @@ public:
             case OptionType::BASE: oss << "BASE " << value; break;
             case OptionType::EXPLICIT: oss << "EXPLICIT"; break;
             case OptionType::UNICODE: oss << "UNICODE"; break;
+            case OptionType::ASCII: oss << "ASCII"; break;
+            case OptionType::DETECTSTRING: oss << "DETECTSTRING"; break;
+            case OptionType::ERROR: oss << "ERROR"; break;
+            case OptionType::CANCELLABLE: oss << "CANCELLABLE"; break;
         }
         oss << "\n";
         return oss.str();

@@ -405,6 +405,11 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
             currentTypeName = elemTypeIt->second;
             size_t elementSize = calculateTypeSize(currentTypeName);
             
+            // Load the data pointer from the descriptor (offset 0)
+            std::string dataPtr = allocTemp("l");
+            emit("    " + dataPtr + " =l loadl " + arrayRef + "\n");
+            m_stats.instructionsGenerated++;
+            
             std::string indexTemp = indexTemps[0];
             std::string indexLong = allocTemp("l");
             emit("    " + indexLong + " =l extsw " + indexTemp + "\n");
@@ -415,7 +420,7 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
             m_stats.instructionsGenerated++;
             
             baseRef = allocTemp("l");
-            emit("    " + baseRef + " =l add " + arrayRef + ", " + offsetTemp + "\n");
+            emit("    " + baseRef + " =l add " + dataPtr + ", " + offsetTemp + "\n");
             m_stats.instructionsGenerated++;
         } else {
             // Simple variable member access: Player.X = 100
@@ -473,22 +478,39 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
             return;
         }
         
-        VariableType fieldType = finalField->builtInType;
+        // Get field type from TypeDescriptor (correct for INTEGER = 'w' not 'l')
+        TypeDescriptor fieldTypeDesc = finalField->typeDesc;
+        std::string qbeType = fieldTypeDesc.toQBEType();
         
         // 5. Type conversion if needed
         VariableType exprType = inferExpressionType(stmt->value.get());
-        if (fieldType != exprType) {
-            valueTemp = promoteToType(valueTemp, exprType, fieldType);
+        VariableType fieldTypeLegacy = finalField->builtInType;
+        
+        if (fieldTypeLegacy != exprType) {
+            // Convert expression to field type
+            // For INTEGER fields, this will convert to 'w' (32-bit)
+            std::string convertedTemp = promoteToType(valueTemp, exprType, fieldTypeLegacy);
+            
+            // If promoteToType returned 'l' but field needs 'w', truncate
+            if (qbeType == "w" && fieldTypeLegacy == VariableType::INT) {
+                std::string truncTemp = allocTemp("w");
+                emit("    " + truncTemp + " =w copy " + convertedTemp + "\n");
+                m_stats.instructionsGenerated++;
+                valueTemp = truncTemp;
+            } else {
+                valueTemp = convertedTemp;
+            }
         }
         
-        // 6. Store value
-        std::string qbeType = getQBEType(fieldType);
+        // 6. Store value using correct QBE type
         if (qbeType == "w") {
             emit("    storew " + valueTemp + ", " + currentPtr + "\n");
         } else if (qbeType == "d") {
             emit("    stored " + valueTemp + ", " + currentPtr + "\n");
         } else if (qbeType == "l") {
             emit("    storel " + valueTemp + ", " + currentPtr + "\n");
+        } else if (qbeType == "s") {
+            emit("    stores " + valueTemp + ", " + currentPtr + "\n");
         } else {
             // Default to word
             emit("    storew " + valueTemp + ", " + currentPtr + "\n");
@@ -504,11 +526,20 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
         // Infer the type of the expression value
         VariableType exprType = inferExpressionType(stmt->value.get());
         
-        // Convert value to match variable type if needed
-        if (varType != exprType) {
+        // For STRING types, call string_retain to increment refcount
+        if (varType == VariableType::STRING && exprType == VariableType::STRING) {
+            std::string retainedTemp = allocTemp("l");
+            emit("    " + retainedTemp + " =l call $string_retain(l " + valueTemp + ")\n");
+            emit("    " + varRef + " =l copy " + retainedTemp + "\n");
+            m_stats.instructionsGenerated += 2;
+        } else if (varType != exprType) {
+            // Convert value to match variable type if needed
             // promoteToType emits the conversion and returns the result temp
-            std::string convertedValue = promoteToType(valueTemp, exprType, varType);
+            // Pass actual QBE type so it knows if INT is 'w' or 'l'
+            std::string actualQBEType = getActualQBEType(stmt->value.get());
+            std::string convertedValue = promoteToType(valueTemp, exprType, varType, actualQBEType);
             emit("    " + varRef + " =" + qbeType + " copy " + convertedValue + "\n");
+            m_stats.instructionsGenerated++;
         } else {
             // Semantic types match, but check if QBE types differ (e.g., w vs l for INT)
             std::string exprQBEType = getActualQBEType(stmt->value.get());
@@ -536,8 +567,8 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
                 // QBE types match, just copy
                 emit("    " + varRef + " =" + qbeType + " copy " + valueTemp + "\n");
             }
+            m_stats.instructionsGenerated++;
         }
-        m_stats.instructionsGenerated++;
     } else {
         // Array element assignment using descriptor-based approach
         emitComment("Array assignment: " + stmt->variable + "(...) = value");

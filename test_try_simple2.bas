@@ -1,0 +1,8 @@
+PRINT "Before TRY"
+TRY
+    PRINT "In TRY"
+CATCH
+    PRINT "In CATCH"
+END TRY
+PRINT "After TRY"
+END

@@ -44,8 +44,7 @@ __attribute__((weak)) int64_t __basic_data_ptr = 0;
 int32_t basic_read_int(void) {
     // Check bounds
     if (__basic_data_ptr < 0) {
-        fprintf(stderr, "ERROR: DATA pointer is negative\n");
-        exit(1);
+        basic_throw(ERR_ILLEGAL_CALL);
     }
     
     int64_t idx = __basic_data_ptr;
@@ -53,9 +52,7 @@ int32_t basic_read_int(void) {
     
     // Type check
     if (type != DATA_TYPE_INT) {
-        fprintf(stderr, "ERROR: Type mismatch in READ - expected INT at position %lld\n", 
-                (long long)idx);
-        exit(1);
+        basic_throw(ERR_TYPE_MISMATCH);
     }
     
     // Read value and advance pointer
@@ -69,8 +66,7 @@ int32_t basic_read_int(void) {
 double basic_read_double(void) {
     // Check bounds
     if (__basic_data_ptr < 0) {
-        fprintf(stderr, "ERROR: DATA pointer is negative\n");
-        exit(1);
+        basic_throw(ERR_ILLEGAL_CALL);
     }
     
     int64_t idx = __basic_data_ptr;
@@ -91,9 +87,7 @@ double basic_read_double(void) {
         __basic_data_ptr++;
         return converter.d;
     } else {
-        fprintf(stderr, "ERROR: Type mismatch in READ - expected DOUBLE at position %lld\n", 
-                (long long)idx);
-        exit(1);
+        basic_throw(ERR_TYPE_MISMATCH);
     }
 }
 
@@ -101,8 +95,7 @@ double basic_read_double(void) {
 const char* basic_read_string(void) {
     // Check bounds
     if (__basic_data_ptr < 0) {
-        fprintf(stderr, "ERROR: DATA pointer is negative\n");
-        exit(1);
+        basic_throw(ERR_ILLEGAL_CALL);
     }
     
     int64_t idx = __basic_data_ptr;
@@ -110,9 +103,7 @@ const char* basic_read_string(void) {
     
     // Type check
     if (type != DATA_TYPE_STRING) {
-        fprintf(stderr, "ERROR: Type mismatch in READ - expected STRING at position %lld\n", 
-                (long long)idx);
-        exit(1);
+        basic_throw(ERR_TYPE_MISMATCH);
     }
     
     // Read pointer value and advance pointer
