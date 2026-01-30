@@ -15,11 +15,15 @@
 #include "fasterbasic_cfg.h"
 #include "fasterbasic_data_preprocessor.h"
 #include "fasterbasic_qbe_codegen.h"
+#include "fasterbasic_ast_dump.h"
+#include "modular_commands.h"
+#include "command_registry_core.h"
 
 using namespace FasterBASIC;
 
-// Global flag for --trace-cfg option
+// Global flags for trace options
 static bool g_traceCFG = false;
+static bool g_traceAST = false;
 
 // Function to visualize CFG structure
 static void dumpCFG(const ProgramCFG& cfg) {
@@ -173,16 +177,21 @@ static void dumpCFG(const ProgramCFG& cfg) {
 
 extern "C" {
 
-/* Set trace-cfg flag (called from main before compilation) */
-void set_trace_cfg(int enable) {
-    g_traceCFG = (enable != 0);
-}
-
 /* Compile BASIC source to QBE IL string
  * Returns: malloc'd string with QBE IL, or NULL on error
  */
 char* compile_basic_to_qbe_string(const char *basic_path) {
     try {
+        // Initialize command registry with core BASIC commands/functions
+        static bool registryInitialized = false;
+        if (!registryInitialized) {
+            auto& registry = FasterBASIC::ModularCommands::getGlobalCommandRegistry();
+            FasterBASIC::ModularCommands::CoreCommandRegistry::registerCoreCommands(registry);
+            FasterBASIC::ModularCommands::CoreCommandRegistry::registerCoreFunctions(registry);
+            FasterBASIC::ModularCommands::markGlobalRegistryInitialized();
+            registryInitialized = true;
+        }
+        
         // Read source file
         std::ifstream file(basic_path);
         if (!file) {
@@ -231,6 +240,12 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
                 std::cerr << "  " << error.toString() << "\n";
             }
             return nullptr;
+        }
+        
+        // Debug: Dump AST if requested
+        if (g_traceAST || getenv("TRACE_AST")) {
+            dumpAST(*ast, std::cerr);
+            return nullptr;  // Exit after dumping AST
         }
         
         // Debug: Dump symbol table if requested
@@ -299,6 +314,16 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
         std::cerr << "FasterBASIC unknown error\n";
         return nullptr;
     }
+}
+
+/* Enable/disable CFG tracing */
+void set_trace_cfg_impl(int enable) {
+    g_traceCFG = (enable != 0);
+}
+
+/* Enable/disable AST tracing */
+void set_trace_ast_impl(int enable) {
+    g_traceAST = (enable != 0);
 }
 
 } // extern "C"

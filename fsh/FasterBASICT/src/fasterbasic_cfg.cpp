@@ -484,33 +484,14 @@ void CFGBuilder::processIfStatement(const IfStatement& stmt, BasicBlock* current
         
         // Do NOT process nested statements - they should not be in CFG blocks
         // The codegen will handle them using the AST structure
-    } else if (!stmt.thenStatements.empty() || !stmt.elseIfClauses.empty() || !stmt.elseStatements.empty()) {
-        // Single-line IF with structured statements (unusual case)
-        // Process nested statements for cases like: IF x THEN : PRINT "hi" : END IF
+    } else {
+        // Single-line IF: IF x THEN statement
+        // Do NOT process nested statements here - leave them in the AST
+        // The code generator will emit them with proper conditional branching
+        // This is different from multi-line IF which uses CFG-driven branching
         
-        // Get the line number for this IF statement (for nested statements that don't have their own line numbers)
-        int ifLineNumber = 0;
-        auto it = currentBlock->statementLineNumbers.find(&stmt);
-        if (it != currentBlock->statementLineNumbers.end()) {
-            ifLineNumber = it->second;
-        }
-        
-        // Process THEN branch
-        if (!stmt.thenStatements.empty()) {
-            processNestedStatements(stmt.thenStatements, m_currentBlock, ifLineNumber);
-        }
-        
-        // Process ELSEIF branches
-        for (const auto& elseIfClause : stmt.elseIfClauses) {
-            if (!elseIfClause.statements.empty()) {
-                processNestedStatements(elseIfClause.statements, m_currentBlock, ifLineNumber);
-            }
-        }
-        
-        // Process ELSE branch
-        if (!stmt.elseStatements.empty()) {
-            processNestedStatements(stmt.elseStatements, m_currentBlock, ifLineNumber);
-        }
+        // Single-line IF statements should be handled by emitIf() in codegen
+        // which will emit: evaluate condition, jnz to then/else labels, emit statements
     }
 }
 

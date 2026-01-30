@@ -29,6 +29,7 @@ clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -c \
     "$FASTERBASIC_SRC/fasterbasic_semantic.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_cfg.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_data_preprocessor.cpp" \
+    "$FASTERBASIC_SRC/fasterbasic_ast_dump.cpp" \
     "$FASTERBASIC_SRC/modular_commands.cpp" \
     "$FASTERBASIC_SRC/command_registry_core.cpp" \
     "$FASTERBASIC_SRC/../runtime/ConstantsManager.cpp" \

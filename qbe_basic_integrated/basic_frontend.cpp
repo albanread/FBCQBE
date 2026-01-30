@@ -8,6 +8,8 @@
 
 /* Forward declare the C++ function from fasterbasic_wrapper.cpp */
 extern "C" char* compile_basic_to_qbe_string(const char *basic_path);
+extern "C" void set_trace_cfg_impl(int enable);
+extern "C" void set_trace_ast_impl(int enable);
 
 extern "C" {
 
@@ -42,6 +44,16 @@ int is_basic_file(const char *filename) {
     
     const char *ext = filename + len - 4;
     return (strcmp(ext, ".bas") == 0 || strcmp(ext, ".BAS") == 0);
+}
+
+/* Enable CFG tracing in the compiler */
+void set_trace_cfg(int enable) {
+    set_trace_cfg_impl(enable);
+}
+
+/* Enable AST tracing in the compiler */
+void set_trace_ast(int enable) {
+    set_trace_ast_impl(enable);
 }
 
 }  // extern "C"

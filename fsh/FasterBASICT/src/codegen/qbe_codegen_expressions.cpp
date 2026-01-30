@@ -12,6 +12,7 @@
 //
 
 #include "../fasterbasic_qbe_codegen.h"
+#include "../modular_commands.h"
 #include <sstream>
 #include <cmath>
 #include <algorithm>
@@ -566,6 +567,8 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
     std::string upper = funcName;
     for (char& c : upper) c = std::toupper(c);
     
+    emit("    # DEBUG emitFunctionCall: funcName=" + funcName + " upper=" + upper + " args=" + std::to_string(expr->arguments.size()) + "\n");
+    
     // Special case: LEN() - just load the length field from StringDescriptor (offset 8)
     if (upper == "LEN" && expr->arguments.size() == 1) {
         std::string strTemp = emitExpression(expr->arguments[0].get());
@@ -730,13 +733,17 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
     
     // Special case: MID$(str, start, length) - substring extraction
     if ((upper == "MID" || upper == "MID$") && expr->arguments.size() == 3) {
+        emit("    # DEBUG: MID$ special case matched, name=" + expr->name + ", args=" + std::to_string(expr->arguments.size()) + "\n");
         std::string strTemp = emitExpression(expr->arguments[0].get());
         std::string startTemp = emitExpression(expr->arguments[1].get());
         std::string lenTemp = emitExpression(expr->arguments[2].get());
+        emit("    # DEBUG: startTemp=" + startTemp + ", lenTemp=" + lenTemp + "\n");
         
         // Ensure start and length are int64_t (l type)
         VariableType startType = inferExpressionType(expr->arguments[1].get());
+        emit("    # DEBUG: startType=" + std::to_string(static_cast<int>(startType)) + "\n");
         if (startType == VariableType::DOUBLE) {
+            emit("    # DEBUG: Converting startTemp from DOUBLE to INT64\n");
             // Convert double to int64_t
             std::string startInt = allocTemp("w");
             emit("    " + startInt + " =w dtosi " + startTemp + "\n");
@@ -763,9 +770,14 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
             lenTemp = lenLong;
         }
         
+        // BASIC uses 1-based indexing, but C runtime uses 0-based
+        // Subtract 1 from start position
+        std::string adjustedStart = allocTemp("l");
+        emit("    " + adjustedStart + " =l sub " + startTemp + ", 1\n");
+        
         std::string result = allocTemp("l");
-        emit("    " + result + " =l call $string_mid(l " + strTemp + ", l " + startTemp + ", l " + lenTemp + ")\n");
-        m_stats.instructionsGenerated++;
+        emit("    " + result + " =l call $string_mid(l " + strTemp + ", l " + adjustedStart + ", l " + lenTemp + ")\n");
+        m_stats.instructionsGenerated += 2;
         return result;
     }
     
@@ -1261,12 +1273,86 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
             convertedArgTypes.push_back(getQBEType(paramType));
         }
     } else {
-        // For runtime functions, use the actual QBE type of each argument temp
-        for (size_t i = 0; i < argTemps.size(); ++i) {
-            convertedArgTemps.push_back(argTemps[i]);
-            // Get the actual QBE type from the expression, not the semantic type
-            std::string actualType = getActualQBEType(expr->arguments[i].get());
-            convertedArgTypes.push_back(actualType);
+        // For runtime functions, check registry for parameter types and convert if needed
+        auto& registry = FasterBASIC::ModularCommands::getGlobalCommandRegistry();
+        
+        // Convert mangled names back to original form for registry lookup
+        // e.g., MID_STRING -> MID$, STR_STRING -> STR$
+        std::string registryName = funcName;
+        if (upper.length() > 7 && upper.substr(upper.length() - 7) == "_STRING") {
+            registryName = upper.substr(0, upper.length() - 7) + "$";
+        }
+        
+        emit("    # DEBUG: Looking for '" + registryName + "' in registry (original: " + funcName + ")\n");
+        emit("    # DEBUG: hasFunction(\"MID$\") = " + std::to_string(registry.hasFunction("MID$")) + "\n");
+        emit("    # DEBUG: hasFunction(\"" + registryName + "\") = " + std::to_string(registry.hasFunction(registryName)) + "\n");
+        
+        bool hasRegistryInfo = registry.hasFunction(registryName);
+        
+        if (hasRegistryInfo) {
+            const auto* funcDef = registry.getFunction(registryName);
+            emit("    # DEBUG: Found registry function: " + registryName + " (from " + funcName + ") with " + std::to_string(funcDef->parameters.size()) + " params\n");
+            
+            for (size_t i = 0; i < argTemps.size(); ++i) {
+                std::string argTemp = argTemps[i];
+                VariableType argType = argTypes[i];
+                
+                // Check if registry specifies parameter type
+                VariableType expectedType = VariableType::DOUBLE;  // Default
+                if (i < funcDef->parameters.size()) {
+                    // Convert registry ParameterType to VariableType
+                    auto paramType = funcDef->parameters[i].type;
+                    emit("    # DEBUG: Param " + std::to_string(i) + " registry type=" + std::to_string(static_cast<int>(paramType)) + ", argType=" + std::to_string(static_cast<int>(argType)) + "\n");
+                    if (paramType == FasterBASIC::ModularCommands::ParameterType::INT) {
+                        expectedType = VariableType::INT;
+                    } else if (paramType == FasterBASIC::ModularCommands::ParameterType::FLOAT) {
+                        expectedType = VariableType::DOUBLE;
+                    } else if (paramType == FasterBASIC::ModularCommands::ParameterType::STRING) {
+                        expectedType = VariableType::STRING;
+                    }
+                    
+                    // Convert if types don't match
+                    if (argType != expectedType && argType != VariableType::UNKNOWN) {
+                        emit("    # DEBUG: Type mismatch - converting from " + std::to_string(static_cast<int>(argType)) + " to " + std::to_string(static_cast<int>(expectedType)) + "\n");
+                        if (argType == VariableType::DOUBLE && expectedType == VariableType::INT) {
+                            // Convert double to int64_t
+                            emit("    # DEBUG: Converting DOUBLE to INT64\n");
+                            std::string intTemp = allocTemp("w");
+                            emit("    " + intTemp + " =w dtosi " + argTemp + "\n");
+                            std::string longTemp = allocTemp("l");
+                            emit("    " + longTemp + " =l extsw " + intTemp + "\n");
+                            argTemp = longTemp;
+                            emit("    # DEBUG: Converted " + argTemps[i] + " to " + argTemp + "\n");
+                        } else if (argType == VariableType::INT && expectedType == VariableType::DOUBLE) {
+                            // Convert int to double
+                            argTemp = promoteToType(argTemp, argType, expectedType);
+                        }
+                    }
+                }
+                
+                convertedArgTemps.push_back(argTemp);
+                // Get the actual QBE type from the expression (or converted value)
+                std::string actualType = getActualQBEType(expr->arguments[i].get());
+                // Update type if we converted
+                if (argTemp != argTemps[i]) {
+                    if (expectedType == VariableType::INT) {
+                        actualType = "l";
+                    } else if (expectedType == VariableType::DOUBLE) {
+                        actualType = "d";
+                    } else if (expectedType == VariableType::STRING) {
+                        actualType = "l";  // StringDescriptor*
+                    }
+                }
+                convertedArgTypes.push_back(actualType);
+            }
+        } else {
+            emit("    # DEBUG: Function " + funcName + " (tried " + registryName + ") NOT in registry\n");
+            // No registry info - use actual types
+            for (size_t i = 0; i < argTemps.size(); ++i) {
+                convertedArgTemps.push_back(argTemps[i]);
+                std::string actualType = getActualQBEType(expr->arguments[i].get());
+                convertedArgTypes.push_back(actualType);
+            }
         }
     }
     
