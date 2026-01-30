@@ -196,6 +196,9 @@ void CFGBuilder::buildBlocks(const Program& program, const std::set<int>& jumpTa
     m_currentCFG->entryBlock = entryBlock->id;
     m_currentBlock = entryBlock;
     
+    // Track if we've hit an END statement - code after END is only reachable via GOSUB
+    bool afterEnd = false;
+    
     // Process each program line
     for (const auto& line : program.lines) {
         int lineNumber = line->lineNumber;
@@ -206,7 +209,8 @@ void CFGBuilder::buildBlocks(const Program& program, const std::set<int>& jumpTa
             if (!m_currentBlock->statements.empty() || !m_currentBlock->lineNumbers.empty()) {
                 BasicBlock* targetBlock = createNewBlock("Target_" + std::to_string(lineNumber));
                 // Add fallthrough edge from previous block if it doesn't end with a jump
-                if (!m_currentBlock->statements.empty()) {
+                // and we haven't encountered END yet
+                if (!afterEnd && !m_currentBlock->statements.empty()) {
                     const Statement* lastStmt = m_currentBlock->statements.back();
                     ASTNodeType lastType = lastStmt->getType();
                     if (lastType != ASTNodeType::STMT_GOTO && 
@@ -229,6 +233,17 @@ void CFGBuilder::buildBlocks(const Program& program, const std::set<int>& jumpTa
         // Process each statement in the line
         for (const auto& stmt : line->statements) {
             processStatement(*stmt, m_currentBlock, lineNumber);
+            
+            // Check if this statement is END - if so, subsequent code is only reachable via GOSUB
+            // BUT: We need to distinguish standalone END from END IF, END SELECT, etc.
+            // Check if this is truly a standalone END statement (EndStatement class)
+            if (stmt->getType() == ASTNodeType::STMT_END) {
+                // Check if it's actually an EndStatement object (not part of END IF, etc.)
+                const EndStatement* endStmt = dynamic_cast<const EndStatement*>(stmt.get());
+                if (endStmt != nullptr) {
+                    afterEnd = true;
+                }
+            }
         }
     }
     
@@ -516,7 +531,9 @@ void CFGBuilder::processNestedStatements(const std::vector<StatementPtr>& statem
                              type == ASTNodeType::STMT_LABEL ||
                              type == ASTNodeType::STMT_RETURN ||
                              type == ASTNodeType::STMT_EXIT ||
-                             type == ASTNodeType::STMT_END ||
+                             // Note: STMT_END here includes END IF, END SELECT, etc.
+                             // We should NOT treat these as program termination END
+                             // type == ASTNodeType::STMT_END ||
                              type == ASTNodeType::STMT_THROW ||
                              type == ASTNodeType::STMT_FUNCTION ||
                              type == ASTNodeType::STMT_SUB ||

@@ -25,55 +25,62 @@ mkdir -p "$BUILD_DIR"
 echo "Compiling source files..."
 echo ""
 
+# Compile AST dump utility
+echo "  [1/14] Compiling fasterbasic_ast_dump.cpp..."
+g++ -std=c++17 -O2 -c \
+    -I"$SRC_DIR" \
+    "$SRC_DIR/fasterbasic_ast_dump.cpp" \
+    -o "$BUILD_DIR/fasterbasic_ast_dump.o"
+
 # Compile lexer
-echo "  [1/13] Compiling fasterbasic_lexer.cpp..."
+echo "  [2/14] Compiling fasterbasic_lexer.cpp..."
 g++ -std=c++17 -O2 -c \
     -I"$SRC_DIR" \
     "$SRC_DIR/fasterbasic_lexer.cpp" \
     -o "$BUILD_DIR/fasterbasic_lexer.o"
 
 # Compile parser
-echo "  [2/13] Compiling fasterbasic_parser.cpp..."
+echo "  [3/14] Compiling fasterbasic_parser.cpp..."
 g++ -std=c++17 -O2 -c \
     -I"$SRC_DIR" \
     "$SRC_DIR/fasterbasic_parser.cpp" \
     -o "$BUILD_DIR/fasterbasic_parser.o"
 
 # Compile semantic analyzer
-echo "  [3/13] Compiling fasterbasic_semantic.cpp..."
+echo "  [4/14] Compiling fasterbasic_semantic.cpp..."
 g++ -std=c++17 -O2 -c \
     -I"$SRC_DIR" \
     "$SRC_DIR/fasterbasic_semantic.cpp" \
     -o "$BUILD_DIR/fasterbasic_semantic.o"
 
 # Compile CFG builder
-echo "  [4/13] Compiling fasterbasic_cfg.cpp..."
+echo "  [5/14] Compiling fasterbasic_cfg.cpp..."
 g++ -std=c++17 -O2 -c \
     -I"$SRC_DIR" \
     "$SRC_DIR/fasterbasic_cfg.cpp" \
     -o "$BUILD_DIR/fasterbasic_cfg.o"
 
 # Compile data preprocessor
-echo "  [5/13] Compiling fasterbasic_data_preprocessor.cpp..."
+echo "  [6/14] Compiling fasterbasic_data_preprocessor.cpp..."
 g++ -std=c++17 -O2 -c \
     -I"$SRC_DIR" \
     "$SRC_DIR/fasterbasic_data_preprocessor.cpp" \
     -o "$BUILD_DIR/fasterbasic_data_preprocessor.o"
 
 # Compile modular QBE code generator files
-echo "  [6/13] Compiling qbe_codegen_main.cpp..."
+echo "  [10/14] Compiling qbe_codegen_helpers.cpp..."
 g++ -std=c++17 -O2 -c \
     -I"$SRC_DIR" \
     "$CODEGEN_DIR/qbe_codegen_main.cpp" \
     -o "$BUILD_DIR/qbe_codegen_main.o"
 
-echo "  [7/13] Compiling qbe_codegen_expressions.cpp..."
+echo "  [8/14] Compiling qbe_codegen_expressions.cpp..."
 g++ -std=c++17 -O2 -c \
     -I"$SRC_DIR" \
     "$CODEGEN_DIR/qbe_codegen_expressions.cpp" \
     -o "$BUILD_DIR/qbe_codegen_expressions.o"
 
-echo "  [8/13] Compiling qbe_codegen_statements.cpp..."
+echo "  [11/14] Compiling qbe_codegen_runtime.cpp..."
 g++ -std=c++17 -O2 -c \
     -I"$SRC_DIR" \
     "$CODEGEN_DIR/qbe_codegen_statements.cpp" \
@@ -92,14 +99,14 @@ g++ -std=c++17 -O2 -c \
     -o "$BUILD_DIR/qbe_codegen_helpers.o"
 
 # Compile modular commands
-echo "  [11/13] Compiling modular_commands.cpp..."
+echo "  [12/14] Compiling modular_commands.cpp..."
 g++ -std=c++17 -O2 -c \
     -I"$SRC_DIR" \
     "$SRC_DIR/modular_commands.cpp" \
     -o "$BUILD_DIR/modular_commands.o"
 
 # Compile command registry core
-echo "  [12/13] Compiling command_registry_core.cpp..."
+echo "  [13/14] Compiling command_registry_core.cpp..."
 g++ -std=c++17 -O2 -c \
     -I"$SRC_DIR" \
     "$SRC_DIR/command_registry_core.cpp" \
@@ -128,10 +135,8 @@ g++ -std=c++17 -O2 -c \
 
 echo ""
 echo "Linking fbc_qbe executable..."
-
-# Link everything together
 g++ -std=c++17 -O2 \
-    "$BUILD_DIR/fbc_qbe.o" \
+    "$BUILD_DIR/fasterbasic_ast_dump.o" \
     "$BUILD_DIR/fasterbasic_lexer.o" \
     "$BUILD_DIR/fasterbasic_parser.o" \
     "$BUILD_DIR/fasterbasic_semantic.o" \
@@ -140,12 +145,13 @@ g++ -std=c++17 -O2 \
     "$BUILD_DIR/qbe_codegen_main.o" \
     "$BUILD_DIR/qbe_codegen_expressions.o" \
     "$BUILD_DIR/qbe_codegen_statements.o" \
-    "$BUILD_DIR/qbe_codegen_runtime.o" \
     "$BUILD_DIR/qbe_codegen_helpers.o" \
+    "$BUILD_DIR/qbe_codegen_runtime.o" \
     "$BUILD_DIR/modular_commands.o" \
     "$BUILD_DIR/command_registry_core.o" \
     "$BUILD_DIR/ConstantsManager.o" \
-    -o basic
+    "$BUILD_DIR/fbc_qbe.o" \
+    -o "basic"
 
 echo ""
 echo "=== Build Complete ==="

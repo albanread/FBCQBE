@@ -10,6 +10,7 @@
 #include "fasterbasic_cfg.h"
 #include "fasterbasic_qbe_codegen.h"
 #include "fasterbasic_data_preprocessor.h"
+#include "fasterbasic_ast_dump.h"
 #include "modular_commands.h"
 #include "command_registry_core.h"
 #include <iostream>
@@ -52,6 +53,7 @@ void printUsage(const char* programName) {
     std::cerr << "  --emit-qbe     Emit QBE IL (.qbe) file only and exit\n";
     std::cerr << "  --emit-asm     Emit assembly (.s) file and exit\n";
     std::cerr << "  -v, --verbose  Verbose output (compilation stats)\n";
+    std::cerr << "  --trace-ast    Dump AST structure after parsing\n";
     std::cerr << "  -h, --help     Show this help message\n";
     std::cerr << "  --profile      Show detailed timing for each compilation phase\n";
     std::cerr << "  --keep-temps   Keep intermediate files (.qbe, .s)\n";
@@ -112,6 +114,7 @@ int main(int argc, char** argv) {
     bool keepTemps = false;
     bool showProfile = false;
     bool runAfterCompile = false;
+    bool traceAST = false;
     
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -137,6 +140,8 @@ int main(int argc, char** argv) {
         } else if (strcmp(argv[i], "--profile") == 0) {
             showProfile = true;
             verbose = true;  // Auto-enable verbose for profiling
+        } else if (strcmp(argv[i], "--trace-ast") == 0) {
+            traceAST = true;
         } else if (strcmp(argv[i], "-o") == 0) {
             if (i + 1 < argc) {
                 outputFile = argv[++i];
@@ -246,6 +251,11 @@ int main(int argc, char** argv) {
         auto ast = parser.parse(tokens, inputFile);
         
         auto parseEndTime = std::chrono::high_resolution_clock::now();
+        
+        // Dump AST if requested
+        if (traceAST && ast) {
+            dumpAST(*ast, std::cerr);
+        }
         double parseMs = std::chrono::duration<double, std::milli>(parseEndTime - phaseStartTime).count();
         
         // Check for parser errors - if parsing failed, don't continue

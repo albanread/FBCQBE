@@ -468,6 +468,24 @@ std::unique_ptr<ProgramLine> Parser::parseProgramLine(size_t physicalLine) {
         lineNumber = *mappedLineNumber;
         hasLineNumber = true;
     }
+    
+    // Check if the current token belongs to this physical line
+    // If a multi-line statement (like IF...END IF) consumed multiple lines,
+    // the token stream will have advanced past those lines.
+    // We detect this by checking if the current token's source line matches
+    // the expected physical line.
+    if (!isAtEnd() && current().type != TokenType::END_OF_LINE) {
+        int expectedSourceLine = static_cast<int>(physicalLine) + 1; // physicalLine is 0-based, source lines are 1-based
+        int currentTokenSourceLine = current().location.line;
+        
+        // If the current token is from a later source line than expected,
+        // this line was already consumed by a multi-line statement
+        if (currentTokenSourceLine > expectedSourceLine) {
+            // Skip this line - it was already parsed as part of a multi-line construct
+            // Return nullptr to indicate this line should be skipped
+            return nullptr;
+        }
+    }
 
     // If the line is just a REM statement, collect it
     if (current().type == TokenType::REM) {
