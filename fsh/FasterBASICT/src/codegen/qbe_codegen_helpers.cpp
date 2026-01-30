@@ -780,6 +780,12 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
                 return VariableType::STRING;
             }
             
+            // Division operator (/) always returns DOUBLE in BASIC
+            // Use \ (INT_DIVIDE) for integer division
+            if (op == TokenType::DIVIDE) {
+                return VariableType::DOUBLE;
+            }
+            
             // Type promotion rules: DOUBLE is the default numeric type
             // Only use INT if BOTH operands are explicitly INT
             if (leftType == VariableType::DOUBLE || rightType == VariableType::DOUBLE) {

@@ -275,6 +275,10 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
     VariableType opType;
     if (requiresInteger) {
         opType = VariableType::INT;
+    } else if (op == TokenType::DIVIDE) {
+        // Division operator (/) always performs floating-point division in BASIC
+        // Use \ (INT_DIVIDE) for integer division
+        opType = VariableType::DOUBLE;
     } else if (leftType == VariableType::DOUBLE || rightType == VariableType::DOUBLE) {
         opType = VariableType::DOUBLE;  // DOUBLE is default, promotes from INT
     } else if (leftType == VariableType::FLOAT || rightType == VariableType::FLOAT) {
