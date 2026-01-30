@@ -1,0 +1,48 @@
+Fix: Recursive CFG processing for nested control-flow in IF statements
+
+PROBLEM:
+WHILE and FOR loops nested inside multi-line IF statements only
+executed one iteration instead of looping correctly. The CFG builder
+was not recursively processing nested control-flow statements.
+
+ROOT CAUSE:
+Multi-line IF statements store their bodies as child nodes
+(thenStatements, elseStatements, elseIfClauses) in the AST. The CFG
+builder only processed top-level sequential statements and never
+recursively descended into IF statement bodies.
+
+SOLUTION:
+- Added processNestedStatements() helper method to recursively process
+  statements inside IF blocks
+- Modified processIfStatement() to call processNestedStatements() for
+  THEN, ELSEIF, and ELSE branches
+- Handles all control-flow statement types (WHILE, FOR, DO, REPEAT, IF,
+  GOTO, GOSUB, CASE, TRY/CATCH, labels)
+- Avoids double-processing by adding non-control-flow statements directly
+  to blocks
+
+CHANGES:
+- fsh/FasterBASICT/src/fasterbasic_cfg.cpp: Added processNestedStatements()
+  method and modified processIfStatement()
+- fsh/FasterBASICT/src/fasterbasic_cfg.h: Added method declaration
+- test_basic_suite.sh: Added CFG test section
+- tests/test_while_if_nested.bas: New test case
+- tests/test_for_if_nested.bas: New test case
+- NESTED_WHILE_IF_BUG.md: Updated status to FIXED
+- NESTED_WHILE_IF_FIX_SUMMARY.md: Detailed fix documentation
+- CFG_FIX_SESSION_COMPLETE.md: Complete session summary
+
+TESTING:
+✅ test_while_if_nested.bas - WHILE inside IF works correctly
+✅ test_for_if_nested.bas - FOR inside IF works correctly
+✅ test_while_nested_simple.bas - No regression in simple nesting
+✅ test_primes_sieve.bas - Real-world algorithm works
+✅ All core tests pass (no regressions)
+
+IMPACT:
+- Enables correct execution of nested control structures
+- Fixes prime sieve and similar algorithms
+- No breaking changes
+- Minimal performance impact (compile-time only)
+
+Fixes: Nested WHILE-in-IF bug

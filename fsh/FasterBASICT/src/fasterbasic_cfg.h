@@ -536,6 +536,8 @@ private:
     void processTryCatchStatement(const TryCatchStatement& stmt, BasicBlock* currentBlock);
     
     // Helper functions
+    void processNestedStatements(const std::vector<StatementPtr>& statements, 
+                                 BasicBlock* currentBlock, int defaultLineNumber);
     VariableType inferTypeFromName(const std::string& name);
     
     // Block management

@@ -254,6 +254,7 @@ void CFGBuilder::processStatement(const Statement& stmt, BasicBlock* currentBloc
     ASTNodeType type = stmt.getType();
     
     // Don't add FUNCTION/SUB/DEF statements to main CFG - they define separate CFGs
+    // Add all statements to current block (except functions/subs)
     if (type != ASTNodeType::STMT_FUNCTION && type != ASTNodeType::STMT_SUB && type != ASTNodeType::STMT_DEF) {
         // Add statement to current block with its line number
         currentBlock->addStatement(&stmt, lineNumber);
@@ -455,9 +456,81 @@ void CFGBuilder::processIfStatement(const IfStatement& stmt, BasicBlock* current
         BasicBlock* nextBlock = createNewBlock();
         m_currentBlock = nextBlock;
     } else if (!stmt.thenStatements.empty() || !stmt.elseIfClauses.empty() || !stmt.elseStatements.empty()) {
-        // IF with structured statements - handled by structured IR opcodes
-        // Don't create separate blocks; the IR generator will emit structured IF opcodes
-        // Just continue with the current block
+        // IF with structured statements - recursively process nested control-flow statements
+        // The nested statements may contain WHILE, FOR, etc. that need proper CFG blocks
+        
+        // Get the line number for this IF statement (for nested statements that don't have their own line numbers)
+        int ifLineNumber = 0;
+        auto it = currentBlock->statementLineNumbers.find(&stmt);
+        if (it != currentBlock->statementLineNumbers.end()) {
+            ifLineNumber = it->second;
+        }
+        
+        // Process THEN branch
+        if (!stmt.thenStatements.empty()) {
+            processNestedStatements(stmt.thenStatements, m_currentBlock, ifLineNumber);
+        }
+        
+        // Process ELSEIF branches
+        for (const auto& elseIfClause : stmt.elseIfClauses) {
+            if (!elseIfClause.statements.empty()) {
+                processNestedStatements(elseIfClause.statements, m_currentBlock, ifLineNumber);
+            }
+        }
+        
+        // Process ELSE branch
+        if (!stmt.elseStatements.empty()) {
+            processNestedStatements(stmt.elseStatements, m_currentBlock, ifLineNumber);
+        }
+    }
+}
+
+// Helper method to recursively process nested statements (e.g., inside IF blocks)
+void CFGBuilder::processNestedStatements(const std::vector<StatementPtr>& statements, 
+                                         BasicBlock* currentBlock, int defaultLineNumber) {
+    for (const auto& nestedStmt : statements) {
+        // Get the line number for this nested statement
+        // For multi-line IF blocks, nested statements might not have their own line numbers
+        // so we use the parent IF's line number as a fallback
+        int lineNumber = defaultLineNumber;
+        
+        // Check if this is a control-flow statement that needs CFG processing
+        ASTNodeType type = nestedStmt->getType();
+        
+        bool isControlFlow = (type == ASTNodeType::STMT_IF ||
+                             type == ASTNodeType::STMT_WHILE ||
+                             type == ASTNodeType::STMT_FOR ||
+                             type == ASTNodeType::STMT_FOR_IN ||
+                             type == ASTNodeType::STMT_DO ||
+                             type == ASTNodeType::STMT_REPEAT ||
+                             type == ASTNodeType::STMT_CASE ||
+                             type == ASTNodeType::STMT_TRY_CATCH ||
+                             type == ASTNodeType::STMT_WEND ||
+                             type == ASTNodeType::STMT_NEXT ||
+                             type == ASTNodeType::STMT_LOOP ||
+                             type == ASTNodeType::STMT_UNTIL ||
+                             type == ASTNodeType::STMT_GOTO ||
+                             type == ASTNodeType::STMT_GOSUB ||
+                             type == ASTNodeType::STMT_ON_GOTO ||
+                             type == ASTNodeType::STMT_ON_GOSUB ||
+                             type == ASTNodeType::STMT_LABEL ||
+                             type == ASTNodeType::STMT_RETURN ||
+                             type == ASTNodeType::STMT_EXIT ||
+                             type == ASTNodeType::STMT_END ||
+                             type == ASTNodeType::STMT_THROW ||
+                             type == ASTNodeType::STMT_FUNCTION ||
+                             type == ASTNodeType::STMT_SUB ||
+                             type == ASTNodeType::STMT_DEF);
+        
+        if (isControlFlow) {
+            // Process control-flow statements through the regular processStatement method
+            // This ensures they create proper CFG blocks and edges
+            processStatement(*nestedStmt, m_currentBlock, lineNumber);
+        } else {
+            // For non-control-flow statements, just add them to the current block
+            // (don't call processStatement to avoid double-adding)
+            m_currentBlock->addStatement(nestedStmt.get(), lineNumber);
+        }
     }
 }
 
@@ -1346,28 +1419,39 @@ void CFGBuilder::buildEdges() {
                     // False condition: We need to find the exit block
                     // The exit block should be right after the matching WEND
                     // We need to count nesting levels to find the matching WEND
+                    // IMPORTANT: We must look at ALL blocks, including empty ones, and
+                    // check statements in the order they appear in blocks
                     int nestingLevel = 0;
+                    bool foundWend = false;
                     for (size_t i = block->id + 1; i < m_currentCFG->blocks.size(); i++) {
                         const auto& futureBlock = m_currentCFG->blocks[i];
-                        if (!futureBlock->statements.empty()) {
-                            for (const Statement* stmt : futureBlock->statements) {
-                                if (stmt->getType() == ASTNodeType::STMT_WHILE) {
-                                    nestingLevel++;
-                                } else if (stmt->getType() == ASTNodeType::STMT_WEND) {
-                                    if (nestingLevel == 0) {
-                                        // Found the matching WEND
-                                        // Exit is the block after WEND
-                                        if (i + 1 < m_currentCFG->blocks.size()) {
-                                            addConditionalEdge(block->id, i + 1, "false");
-                                        }
-                                        goto found_wend;
+                        
+                        // Check all statements in this block
+                        for (const Statement* stmt : futureBlock->statements) {
+                            if (stmt->getType() == ASTNodeType::STMT_WHILE) {
+                                nestingLevel++;
+                            } else if (stmt->getType() == ASTNodeType::STMT_WEND) {
+                                if (nestingLevel == 0) {
+                                    // Found the matching WEND
+                                    // The WEND statement is in block i
+                                    // After a WEND, the next block should be "After WHILE"
+                                    // which is the exit block for this loop
+                                    if (i + 1 < m_currentCFG->blocks.size()) {
+                                        addConditionalEdge(block->id, i + 1, "false");
+                                        foundWend = true;
                                     }
-                                    nestingLevel--;
+                                    goto found_wend;
                                 }
+                                nestingLevel--;
                             }
                         }
                     }
-                    found_wend:;
+                    found_wend:
+                    // If we didn't find a matching WEND, something is wrong
+                    if (!foundWend && block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
+                        // Fallback: exit to next block (shouldn't happen in well-formed code)
+                        addConditionalEdge(block->id, block->id + 1, "false");
+                    }
                 } else {
                     // Fallthrough if not a loop header
                     if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
@@ -1520,11 +1604,15 @@ void CFGBuilder::buildEdges() {
                 
                 // Find the matching WHILE by looking for loop context
                 // Search backwards to find the innermost (most recent) loop
+                // IMPORTANT: We need to find the loop that this WEND actually closes
                 LoopContext* loopCtx = nullptr;
-                for (auto it = m_loopStack.rbegin(); it != m_loopStack.rend(); ++it) {
-                    // The WEND block can be the same as or after the header block
-                    if (block->id >= it->headerBlock) {
-                        loopCtx = &(*it);
+                int loopCtxIndex = -1;
+                
+                for (int idx = m_loopStack.size() - 1; idx >= 0; --idx) {
+                    // The WEND block should be after the header block
+                    if (block->id > m_loopStack[idx].headerBlock) {
+                        loopCtx = &m_loopStack[idx];
+                        loopCtxIndex = idx;
                         break;
                     }
                 }
@@ -1534,9 +1622,10 @@ void CFGBuilder::buildEdges() {
                     addUnconditionalEdge(block->id, loopCtx->headerBlock);
                     
                     // Pop this loop context
-                    m_loopStack.erase(std::remove_if(m_loopStack.begin(), m_loopStack.end(),
-                        [loopCtx](const LoopContext& ctx) { return &ctx == loopCtx; }), 
-                        m_loopStack.end());
+                    // Use index-based erase to avoid iterator invalidation
+                    if (loopCtxIndex >= 0 && loopCtxIndex < static_cast<int>(m_loopStack.size())) {
+                        m_loopStack.erase(m_loopStack.begin() + loopCtxIndex);
+                    }
                 } else {
                     // WEND without WHILE - fallthrough
                     if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {

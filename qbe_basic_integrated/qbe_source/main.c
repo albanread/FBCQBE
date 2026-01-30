@@ -10,6 +10,7 @@
 /* FasterBASIC frontend integration */
 extern FILE* compile_basic_to_il(const char *basic_path);
 extern int is_basic_file(const char *filename);
+extern void set_trace_cfg(int enable);
 
 /* Get the directory where this executable is located */
 static char*
@@ -171,11 +172,12 @@ main(int ac, char *av[])
 	char cmd[2048];
 	int c, compile_only = 0, is_basic = 0, il_only = 0;
 	int need_linking = 0;
+	int trace_cfg = 0;
 
 	T = Deftgt;
 	outf = stdout;
 	
-	while ((c = getopt(ac, av, "hicd:o:t:")) != -1)
+	while ((c = getopt(ac, av, "hicd:o:t:G")) != -1)
 		switch (c) {
 		case 'i':
 			il_only = 1;
@@ -209,6 +211,9 @@ main(int ac, char *av[])
 				}
 			}
 			break;
+		case 'G':
+			trace_cfg = 1;
+			break;
 		case 'h':
 		default:
 			fprintf(stderr, "%s [OPTIONS] {file.ssa, file.bas, -}\n", av[0]);
@@ -216,6 +221,7 @@ main(int ac, char *av[])
 			fprintf(stderr, "\t%-11s output to file\n", "-o file");
 			fprintf(stderr, "\t%-11s output IL only (stop before assembly)\n", "-i");
 			fprintf(stderr, "\t%-11s compile only (stop at assembly)\n", "-c");
+			fprintf(stderr, "\t%-11s trace CFG and exit (BASIC files only)\n", "-G");
 			fprintf(stderr, "\t%-11s generate for a target among:\n", "-t <target>");
 			fprintf(stderr, "\t%-11s ", "");
 			for (t=tlist, sep=""; *t; t++, sep=", ") {
@@ -231,6 +237,11 @@ main(int ac, char *av[])
 	if (optind >= ac) {
 		fprintf(stderr, "error: no input file specified\n");
 		exit(1);
+	}
+	
+	/* Set trace-cfg flag before compilation */
+	if (trace_cfg) {
+		set_trace_cfg(1);
 	}
 
 	/* Process input files */
@@ -248,6 +259,12 @@ main(int ac, char *av[])
 				if (!inf) {
 					fprintf(stderr, "failed to compile BASIC file '%s'\n", f);
 					exit(1);
+				}
+				
+				/* If trace-cfg was enabled, compilation stops after CFG dump */
+				if (trace_cfg) {
+					fclose(inf);
+					exit(0);
 				}
 			} else {
 				inf = fopen(f, "r");
