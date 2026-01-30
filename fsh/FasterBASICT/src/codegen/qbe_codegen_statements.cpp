@@ -688,9 +688,10 @@ void QBECodeGenerator::emitIf(const IfStatement* stmt) {
     emit("    " + boolTemp + " =w cnew " + condTemp + ", 0\n");
     m_stats.instructionsGenerated++;
     
-    // Check if this is an inline IF (with thenStatements) or block-level IF (CFG-driven)
-    bool isInlineIF = !stmt->thenStatements.empty();
-    bool isBlockLevelIF = (m_currentBlock && m_currentBlock->successors.size() == 2);
+    // Check if this is an inline IF (single-line) or block-level IF (multi-line, CFG-driven)
+    // Multi-line IF statements should use CFG blocks, not inline emission
+    bool isInlineIF = !stmt->isMultiLine && !stmt->thenStatements.empty();
+    bool isBlockLevelIF = stmt->isMultiLine || (m_currentBlock && m_currentBlock->successors.size() == 2);
     
     if (isInlineIF) {
         // Inline IF/THEN/ELSE - emit complete structure with local labels

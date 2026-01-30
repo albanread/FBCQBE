@@ -475,9 +475,18 @@ void CFGBuilder::processIfStatement(const IfStatement& stmt, BasicBlock* current
         // IF ... THEN GOTO creates two-way branch
         BasicBlock* nextBlock = createNewBlock();
         m_currentBlock = nextBlock;
+    } else if (stmt.isMultiLine) {
+        // Multi-line IF...END IF: Use CFG-driven branching
+        // The nested statements are NOT added to the CFG blocks here.
+        // They exist in the AST (stmt.thenStatements, stmt.elseStatements)
+        // and will be emitted by codegen when processing the IF statement.
+        // The CFG successors will determine which branch to take.
+        
+        // Do NOT process nested statements - they should not be in CFG blocks
+        // The codegen will handle them using the AST structure
     } else if (!stmt.thenStatements.empty() || !stmt.elseIfClauses.empty() || !stmt.elseStatements.empty()) {
-        // IF with structured statements - recursively process nested control-flow statements
-        // The nested statements may contain WHILE, FOR, etc. that need proper CFG blocks
+        // Single-line IF with structured statements (unusual case)
+        // Process nested statements for cases like: IF x THEN : PRINT "hi" : END IF
         
         // Get the line number for this IF statement (for nested statements that don't have their own line numbers)
         int ifLineNumber = 0;

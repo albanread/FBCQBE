@@ -150,7 +150,6 @@
 2300 REM first i characters of str1 and first j characters of str2
 2310
 2340 FOR i = 0 TO len1
-2345     PRINT "DEBUG: First FOR loop i="; i
 2350     d(i + 1, 1) = i
 2360 NEXT i
 2370
