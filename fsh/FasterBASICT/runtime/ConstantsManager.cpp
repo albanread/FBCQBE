@@ -184,12 +184,10 @@ void ConstantsManager::addPredefinedConstants() {
     // NOTE: All constants are now stored in lowercase due to case-insensitive normalization.
     // Users can reference them in any case (PI, pi, Pi, etc.) and they will all resolve correctly.
     
-    // Mathematical constants
-    addConstant("pi", 3.14159265358979323846);
-    addConstant("e", 2.71828182845904523536);
-    addConstant("sqrt2", 1.41421356237309504880);
-    addConstant("sqrt3", 1.73205080756887729353);
-    addConstant("golden_ratio", 1.61803398874989484820);
+    // Mathematical constants are NOT predefined to avoid shadowing user variables.
+    // Users can define their own constants using the CONST statement:
+    //   CONST PI = 3.14159265358979323846
+    //   CONST E = 2.71828182845904523536
 
     // Boolean constants
     addConstant("true", static_cast<int64_t>(1));

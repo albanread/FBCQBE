@@ -5,14 +5,15 @@
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
-2. [Building the Compiler](#building-the-compiler)
-3. [Compiling BASIC Programs](#compiling-basic-programs)
-4. [Inspecting Generated Code](#inspecting-generated-code)
-5. [Running Tests](#running-tests)
-6. [Modifying the Runtime](#modifying-the-runtime)
-7. [Project Structure](#project-structure)
-8. [Development Workflow](#development-workflow)
-9. [Troubleshooting](#troubleshooting)
+2. [Type System](#type-system)
+3. [Building the Compiler](#building-the-compiler)
+4. [Compiling BASIC Programs](#compiling-basic-programs)
+5. [Inspecting Generated Code](#inspecting-generated-code)
+6. [Running Tests](#running-tests)
+7. [Modifying the Runtime](#modifying-the-runtime)
+8. [Project Structure](#project-structure)
+9. [Development Workflow](#development-workflow)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -46,6 +47,124 @@ gcc hello.s ../fsh/FasterBASICT/runtime_c/*.c -I../fsh/FasterBASICT/runtime_c -l
 **Output:**
 ```
 Hello, World!
+```
+
+---
+
+## Type System
+
+**Important:** FasterBASIC targets modern 64-bit systems (ARM64/x86-64). The type system is designed for native 64-bit performance.
+
+### Default Numeric Type
+
+**For 64-bit systems (ARM64/x86-64), the default numeric type is DOUBLE.**
+
+- Untyped variables (no suffix) default to **DOUBLE** (64-bit floating-point)
+- Modern CPUs handle 64-bit floats natively and efficiently
+- This avoids precision loss and unnecessary type conversions
+
+```basic
+' These are all DOUBLE by default:
+X = 3.14159
+Y = 100
+Result = X * Y
+```
+
+### Type Suffixes
+
+Use suffixes to specify exact types:
+
+| Suffix | Type    | Size    | QBE Type | Description                          |
+|--------|---------|---------|----------|--------------------------------------|
+| (none) | DOUBLE  | 64-bit  | `d`      | Default numeric type (64-bit float)  |
+| `%`    | INTEGER | 32/64   | `w`/`l`  | Integer (32 or 64-bit on modern systems) |
+| `!`    | SINGLE  | 32-bit  | `s`      | Single-precision float               |
+| `#`    | DOUBLE  | 64-bit  | `d`      | Double-precision float (explicit)    |
+| `$`    | STRING  | pointer | `l`      | String (heap-allocated)              |
+| `&`    | LONG    | 32/64   | `l`      | Long integer (same as INTEGER)       |
+
+**Example:**
+```basic
+A% = 42           ' INTEGER
+B! = 3.14         ' SINGLE (32-bit float)
+C# = 2.71828      ' DOUBLE (64-bit float)
+D$ = "Hello"      ' STRING
+E = 100           ' DOUBLE (default)
+```
+
+### Division Operators
+
+FasterBASIC distinguishes between two division operators:
+
+| Operator | Type                | Behavior                                    |
+|----------|---------------------|---------------------------------------------|
+| `/`      | Floating-point      | Always promotes operands to DOUBLE, returns DOUBLE |
+| `\`      | Integer division    | Rounds operands to integers, returns INTEGER |
+
+**Example:**
+```basic
+' Floating-point division (always returns DOUBLE)
+PRINT 7 / 2       ' Outputs: 3.5
+PRINT 7% / 2%     ' Outputs: 3.5 (operands promoted to DOUBLE)
+
+' Integer division (always returns INTEGER)
+PRINT 7 \ 2       ' Outputs: 3
+PRINT 7.8 \ 2.3   ' Outputs: 3 (operands rounded to 8 and 2, then divided)
+```
+
+### Type Promotion Rules
+
+In expressions with mixed types, the "highest" type wins:
+
+1. **DOUBLE** > **SINGLE** > **INTEGER**
+2. Operands are promoted to the highest type before the operation
+3. The result has the highest type
+
+**Example:**
+```basic
+A% = 10           ' INTEGER
+B! = 3.5          ' SINGLE
+C# = 2.0          ' DOUBLE
+
+Result = A% + B!  ' A% promoted to SINGLE, result is SINGLE
+Result = B! + C#  ' B! promoted to DOUBLE, result is DOUBLE
+Result = A% + C#  ' A% promoted to DOUBLE, result is DOUBLE
+```
+
+### Assignment and Type Coercion
+
+When assigning to a variable, the value is coerced to the target type:
+
+```basic
+' Demotion (truncation/rounding)
+X% = 3.7          ' X% becomes 4 (rounded to INTEGER)
+Y% = 9.2          ' Y% becomes 9 (rounded to INTEGER)
+
+' Promotion (no data loss)
+Z# = 42           ' Z# becomes 42.0 (promoted to DOUBLE)
+W! = 10           ' W! becomes 10.0 (promoted to SINGLE)
+```
+
+### Key Design Decisions
+
+1. **64-bit default:** DOUBLE is the natural type for modern 64-bit CPUs
+2. **No 16-bit integers:** `%` means 32/64-bit INTEGER, not 16-bit (we're not targeting C64/Apple II)
+3. **Operator-driven division:** `/` always returns DOUBLE, `\` always returns INTEGER
+4. **Explicit conversions:** Runtime functions handle type conversions as needed
+
+### Function Parameters and Return Values
+
+- Function parameters default to DOUBLE unless suffixed
+- Function return values default to DOUBLE unless the function name is suffixed
+
+```basic
+FUNCTION Add(A, B)           ' Parameters A and B are DOUBLE
+    Add = A + B              ' Return value is DOUBLE
+END FUNCTION
+
+FUNCTION Sum%(X%, Y%)        ' Parameters are INTEGER, return is INTEGER
+    Sum% = X% + Y%
+END FUNCTION
 ```
 
 ---

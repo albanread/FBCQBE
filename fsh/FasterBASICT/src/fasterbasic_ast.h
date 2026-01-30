@@ -89,6 +89,7 @@ enum class ASTNodeType {
     STMT_INC,
     STMT_DEC,
     STMT_LOCAL,
+    STMT_GLOBAL,
     STMT_SHARED,
     STMT_TYPE,
     STMT_DATA,
@@ -2296,6 +2297,57 @@ public:
     std::string toString(int indent = 0) const override {
         std::ostringstream oss;
         oss << makeIndent(indent) << "LOCAL\n";
+        for (const auto& var : variables) {
+            oss << makeIndent(indent + 1) << var.name;
+            if (var.typeSuffix != TokenType::UNKNOWN) {
+                oss << tokenTypeToString(var.typeSuffix);
+            }
+            if (var.hasAsType) {
+                oss << " AS " << var.asTypeName;
+            }
+            if (var.initialValue) {
+                oss << " = ";
+                oss << var.initialValue->toString(0);
+            }
+            oss << "\n";
+        }
+        return oss.str();
+    }
+};
+
+// GLOBAL statement (for declaring global variables accessible via SHARED)
+class GlobalStatement : public Statement {
+public:
+    struct GlobalVar {
+        std::string name;
+        TokenType typeSuffix;      // Type suffix from name ($, %, #, etc.) or AS type
+        ExpressionPtr initialValue; // Optional initialization
+        std::string asTypeName;    // For AS TypeName declarations (user-defined types)
+        bool hasAsType;            // true if AS TypeName was specified
+
+        GlobalVar(const std::string& n, TokenType suffix = TokenType::UNKNOWN)
+            : name(n), typeSuffix(suffix), hasAsType(false) {}
+    };
+
+    std::vector<GlobalVar> variables;
+
+    GlobalStatement() = default;
+
+    void addVariable(const std::string& name, TokenType suffix = TokenType::UNKNOWN) {
+        variables.emplace_back(name, suffix);
+    }
+
+    void setInitialValue(ExpressionPtr value) {
+        if (!variables.empty()) {
+            variables.back().initialValue = std::move(value);
+        }
+    }
+
+    ASTNodeType getType() const override { return ASTNodeType::STMT_GLOBAL; }
+
+    std::string toString(int indent = 0) const override {
+        std::ostringstream oss;
+        oss << makeIndent(indent) << "GLOBAL\n";
         for (const auto& var : variables) {
             oss << makeIndent(indent + 1) << var.name;
             if (var.typeSuffix != TokenType::UNKNOWN) {

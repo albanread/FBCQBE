@@ -597,6 +597,19 @@ void basic_restore(int64_t index);
 // Restore DATA pointer to the beginning
 void basic_restore_start(void);
 
+// ============================================================================
+// GLOBAL Variables Support
+// ============================================================================
+
+// Initialize global variable vector with specified number of slots
+void basic_global_init(int64_t count);
+
+// Get base pointer to global variable vector
+int64_t* basic_global_base(void);
+
+// Clean up global variable vector
+void basic_global_cleanup(void);
+
 #ifdef __cplusplus
 }
 #endif

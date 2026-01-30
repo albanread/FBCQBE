@@ -50,13 +50,10 @@ All variables stored as 64-bit values (8 bytes each):
 # 1. Load global vector base address
 %base =l call $basic_global_base()
 
-# 2. Calculate offset (slot * 8 bytes)
-%offset =l mul <slot>, 8
+# 2. Calculate address (offset pre-calculated at compile time: slot * 8)
+%addr =l add %base, <BYTE_OFFSET>
 
-# 3. Calculate address
-%addr =l add %base, %offset
-
-# 4. Load value into cache variable
+# 3. Load value into cache variable
 %cache =l loadl %addr
 ```
 
@@ -65,18 +62,17 @@ All variables stored as 64-bit values (8 bytes each):
 # 1. Load global vector base address
 %base =l call $basic_global_base()
 
-# 2. Calculate offset
-%offset =l mul <slot>, 8
+# 2. Calculate address (offset pre-calculated at compile time: slot * 8)
+%addr =l add %base, <BYTE_OFFSET>
 
-# 3. Calculate address
-%addr =l add %base, %offset
-
-# 4. Perform operations on cache variable
+# 3. Perform operations on cache variable
 %result =l add %cache, 5
 
-# 5. Write back to global
+# 4. Write back to global
 storel %result, %addr
 ```
+
+**Optimization Note:** The byte offset (slot * 8) is calculated at **compile time** as a constant, eliminating the runtime multiply instruction. This reduces each access from 4 instructions to 3 instructions.
 
 **For DOUBLE type:**
 ```qbe
@@ -121,7 +117,7 @@ void SemanticAnalyzer::collectGlobalStatements(Program& program) {
                     VariableSymbol varSym(var.name, legacyTypeToDescriptor(varType), true);
                     varSym.type = varType;
                     varSym.isGlobal = true;
-                    varSym.globalOffset = nextOffset++;  // Assign slot number
+                    varSym.globalOffset = nextOffset++;  // Assign slot number (used for compile-time offset calc)
                     varSym.functionScope = "";
                     
                     m_symbolTable.variables[var.name] = varSym;
@@ -152,15 +148,12 @@ std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
             std::string base = allocTemp("l");
             emit("    " + base + " =l call $basic_global_base()\n");
             
-            // 2. Calculate byte offset
-            std::string offset = allocTemp("l");
-            emit("    " + offset + " =l mul " + std::to_string(slot) + ", 8\n");
-            
-            // 3. Calculate address
+            // 2. Calculate address (pre-calculate byte offset at compile time)
+            int byteOffset = slot * 8;
             std::string addr = allocTemp("l");
-            emit("    " + addr + " =l add " + base + ", " + offset + "\n");
+            emit("    " + addr + " =l add " + base + ", " + std::to_string(byteOffset) + "\n");
             
-            // 4. Load into cache variable
+            // 3. Load into cache variable
             std::string cache = allocTemp(getQBEType(type));
             if (type == VariableType::DOUBLE) {
                 emit("    " + cache + " =d loadd " + addr + "\n");
@@ -168,7 +161,7 @@ std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
                 emit("    " + cache + " =l loadl " + addr + "\n");
             }
             
-            m_stats.instructionsGenerated += 4;
+            m_stats.instructionsGenerated += 3;
             return cache;  // Return cache temp
         }
     }
@@ -197,22 +190,19 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
             std::string base = allocTemp("l");
             emit("    " + base + " =l call $basic_global_base()\n");
             
-            // 2. Calculate byte offset
-            std::string offset = allocTemp("l");
-            emit("    " + offset + " =l mul " + std::to_string(slot) + ", 8\n");
-            
-            // 3. Calculate address
+            // 2. Calculate address (pre-calculate byte offset at compile time)
+            int byteOffset = slot * 8;
             std::string addr = allocTemp("l");
-            emit("    " + addr + " =l add " + base + ", " + offset + "\n");
+            emit("    " + addr + " =l add " + base + ", " + std::to_string(byteOffset) + "\n");
             
-            // 4. Store value
+            // 3. Store value
             if (type == VariableType::DOUBLE) {
                 emit("    stored " + valueTemp + ", " + addr + "\n");
             } else {
                 emit("    storel " + valueTemp + ", " + addr + "\n");
             }
             
-            m_stats.instructionsGenerated += 4;
+            m_stats.instructionsGenerated += 3;
             return;
         }
     }
@@ -253,34 +243,30 @@ export function w $main() {
     # Allocate global vector (2 slots)
     call $basic_global_init(l 2)
     
-    # x% = 10 (slot 0)
+    # x% = 10 (slot 0, offset 0)
     %t1 =l call $basic_global_base()
-    %t2 =l mul 0, 8
-    %t3 =l add %t1, %t2
-    storel 10, %t3
+    %t2 =l add %t1, 0
+    storel 10, %t2
     
-    # y# = 3.14 (slot 1)
-    %t4 =l call $basic_global_base()
-    %t5 =l mul 1, 8
-    %t6 =l add %t4, %t5
-    stored d_3.14, %t6
+    # y# = 3.14 (slot 1, offset 8)
+    %t3 =l call $basic_global_base()
+    %t4 =l add %t3, 8
+    stored d_3.14, %t4
     
     # CALL Test
     call $Test()
     
     # PRINT x%
-    %t7 =l call $basic_global_base()
-    %t8 =l mul 0, 8
-    %t9 =l add %t7, %t8
-    %t10 =l loadl %t9
-    call $basic_print_int(l %t10)
+    %t5 =l call $basic_global_base()
+    %t6 =l add %t5, 0
+    %t7 =l loadl %t6
+    call $basic_print_int(l %t7)
     
     # PRINT y#
-    %t11 =l call $basic_global_base()
-    %t12 =l mul 1, 8
-    %t13 =l add %t11, %t12
-    %t14 =d loadd %t13
-    call $basic_print_double(d %t14)
+    %t8 =l call $basic_global_base()
+    %t9 =l add %t8, 8
+    %t10 =d loadd %t9
+    call $basic_print_double(d %t10)
     
     call $basic_print_newline()
     jmp @exit
@@ -293,35 +279,31 @@ export function w $main() {
 
 export function w $Test() {
 @start
-    # SHARED x% - read (slot 0)
+    # SHARED x% - read (slot 0, offset 0)
     %t1 =l call $basic_global_base()
-    %t2 =l mul 0, 8
-    %t3 =l add %t1, %t2
-    %cache_x =l loadl %t3
+    %t2 =l add %t1, 0
+    %cache_x =l loadl %t2
     
     # x% + 5
-    %t4 =l add %cache_x, 5
+    %t3 =l add %cache_x, 5
     
     # Write back
-    %t5 =l call $basic_global_base()
-    %t6 =l mul 0, 8
-    %t7 =l add %t5, %t6
-    storel %t4, %t7
+    %t4 =l call $basic_global_base()
+    %t5 =l add %t4, 0
+    storel %t3, %t5
     
-    # SHARED y# - read (slot 1)
-    %t8 =l call $basic_global_base()
-    %t9 =l mul 1, 8
-    %t10 =l add %t8, %t9
-    %cache_y =d loadd %t10
+    # SHARED y# - read (slot 1, offset 8)
+    %t6 =l call $basic_global_base()
+    %t7 =l add %t6, 8
+    %cache_y =d loadd %t7
     
     # y# * 2.0
-    %t11 =d mul %cache_y, d_2.0
+    %t8 =d mul %cache_y, d_2.0
     
     # Write back
-    %t12 =l call $basic_global_base()
-    %t13 =l mul 1, 8
-    %t14 =l add %t12, %t13
-    stored %t11, %t14
+    %t9 =l call $basic_global_base()
+    %t10 =l add %t9, 8
+    stored %t8, %t10
     
     ret 0
 }
@@ -335,16 +317,16 @@ For multiple global accesses in a row, cache the base pointer:
 # Cache base at start of function
 %global_base =l call $basic_global_base()
 
-# Access global 0
-%offset0 =l mul 0, 8
-%addr0 =l add %global_base, %offset0
+# Access global 0 (offset 0)
+%addr0 =l add %global_base, 0
 %val0 =l loadl %addr0
 
-# Access global 1
-%offset1 =l mul 1, 8
-%addr1 =l add %global_base, %offset1
+# Access global 1 (offset 8)
+%addr1 =l add %global_base, 8
 %val1 =d loadd %addr1
 ```
+
+**Note:** Offsets are compile-time constants, so no multiply instruction is needed.
 
 ## Implementation Checklist
 
@@ -380,17 +362,17 @@ For multiple global accesses in a row, cache the base pointer:
 
 1. **Direct memory access** - Load base, add offset, load/store
 2. **No function call overhead** - Just pointer arithmetic and memory ops
-3. **Efficient** - 4 QBE instructions per access (base, offset, addr, load/store)
-4. **Type-safe** - Use `loadl`/`storel` for integers, `loadd`/`stored` for doubles
-5. **Works across scopes** - Same code pattern in main and functions
-6. **Cache-friendly** - Can cache base pointer for multiple accesses
+3. **Efficient** - 3 QBE instructions per access (base, addr, load/store)
+4. **Static offsets** - Byte offset calculated at compile time (slot * 8)
+5. **Type-safe** - Use `loadl`/`storel` for integers, `loadd`/`stored` for doubles
+6. **Works across scopes** - Same code pattern in main and functions
+7. **Cache-friendly** - Can cache base pointer for multiple accesses
 
 ## Summary
 
 GLOBALS use **efficient pointer arithmetic** to access a runtime vector:
 1. Get base pointer: `%base =l call $basic_global_base()`
-2. Calculate offset: `%off =l mul slot, 8`
-3. Calculate address: `%addr =l add %base, %off`
-4. Load/store: `%val =l loadl %addr` or `storel %val, %addr`
+2. Calculate address: `%addr =l add %base, BYTE_OFFSET` (offset = slot * 8, pre-calculated)
+3. Load/store: `%val =l loadl %addr` or `storel %val, %addr`
 
-This generates efficient machine code with minimal overhead.
+This generates efficient machine code with minimal overhead (3 instructions per access).

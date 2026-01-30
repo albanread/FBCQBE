@@ -250,6 +250,7 @@ private:
     StatementPtr parseDecStatement();
     StatementPtr parseTypeDeclarationStatement();
     StatementPtr parseLocalStatement();
+    StatementPtr parseGlobalStatement();
     StatementPtr parseSharedStatement();
     StatementPtr parseDataStatement();
     StatementPtr parseReadStatement();

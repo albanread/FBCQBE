@@ -914,15 +914,19 @@ void CFGBuilder::processFunctionStatement(const FunctionStatement& stmt, BasicBl
         // First check if there's an AS typename declaration
         if (i < stmt.parameterAsTypes.size() && !stmt.parameterAsTypes[i].empty()) {
             std::string asType = stmt.parameterAsTypes[i];
-            if (asType == "INTEGER" || asType == "INT") {
+            // Convert to uppercase for case-insensitive comparison
+            std::string upperType = asType;
+            std::transform(upperType.begin(), upperType.end(), upperType.begin(), ::toupper);
+            
+            if (upperType == "INTEGER" || upperType == "INT") {
                 vt = VariableType::INT;
-            } else if (asType == "DOUBLE") {
+            } else if (upperType == "DOUBLE") {
                 vt = VariableType::DOUBLE;
-            } else if (asType == "SINGLE" || asType == "FLOAT") {
+            } else if (upperType == "SINGLE" || upperType == "FLOAT") {
                 vt = VariableType::FLOAT;
-            } else if (asType == "STRING") {
+            } else if (upperType == "STRING") {
                 vt = VariableType::STRING;
-            } else if (asType == "LONG") {
+            } else if (upperType == "LONG") {
                 vt = VariableType::INT;
             }
             // TODO: Handle user-defined types
@@ -1078,15 +1082,19 @@ void CFGBuilder::processSubStatement(const SubStatement& stmt, BasicBlock* curre
         // First check if there's an AS typename declaration
         if (i < stmt.parameterAsTypes.size() && !stmt.parameterAsTypes[i].empty()) {
             std::string asType = stmt.parameterAsTypes[i];
-            if (asType == "INTEGER" || asType == "INT") {
+            // Convert to uppercase for case-insensitive comparison
+            std::string upperType = asType;
+            std::transform(upperType.begin(), upperType.end(), upperType.begin(), ::toupper);
+            
+            if (upperType == "INTEGER" || upperType == "INT") {
                 vt = VariableType::INT;
-            } else if (asType == "DOUBLE") {
+            } else if (upperType == "DOUBLE") {
                 vt = VariableType::DOUBLE;
-            } else if (asType == "SINGLE" || asType == "FLOAT") {
+            } else if (upperType == "SINGLE" || upperType == "FLOAT") {
                 vt = VariableType::FLOAT;
-            } else if (asType == "STRING") {
+            } else if (upperType == "STRING") {
                 vt = VariableType::STRING;
-            } else if (asType == "LONG") {
+            } else if (upperType == "LONG") {
                 vt = VariableType::INT;
             }
             // TODO: Handle user-defined types
@@ -1997,16 +2005,17 @@ std::string CFGBuilder::generateReport(const ControlFlowGraph& cfg) const {
 }
 
 // Helper function to infer type from variable name (suffix-based)
+// For 64-bit systems (ARM64/x86-64), DOUBLE is the natural numeric type
 VariableType CFGBuilder::inferTypeFromName(const std::string& name) {
-    if (name.empty()) return VariableType::DOUBLE;  // Default numeric type is DOUBLE
+    if (name.empty()) return VariableType::DOUBLE;  // Default for 64-bit systems
     
     char lastChar = name.back();
     switch (lastChar) {
-        case '%': return VariableType::INT;
-        case '!': return VariableType::FLOAT;
-        case '#': return VariableType::DOUBLE;
+        case '%': return VariableType::INT;      // Integer (32/64-bit on modern systems)
+        case '!': return VariableType::FLOAT;    // Single-precision (32-bit float)
+        case '#': return VariableType::DOUBLE;   // Double-precision (64-bit float)
         case '$': return VariableType::STRING;
-        default: return VariableType::DOUBLE;  // Default numeric type is DOUBLE (matches semantic analyzer)
+        default: return VariableType::DOUBLE;    // Default: DOUBLE for 64-bit systems (ARM64/x86-64)
     }
 }
 

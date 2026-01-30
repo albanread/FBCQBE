@@ -556,22 +556,19 @@ void QBECodeGenerator::emitLet(const LetStatement* stmt) {
             std::string base = allocTemp("l");
             emit("    " + base + " =l call $basic_global_base()\n");
             
-            // 2. Calculate byte offset (slot * 8)
-            std::string offset = allocTemp("l");
-            emit("    " + offset + " =l mul " + std::to_string(globalSlot) + ", 8\n");
-            
-            // 3. Calculate address
+            // 2. Calculate address (pre-calculate byte offset: slot * 8)
+            int byteOffset = globalSlot * 8;
             std::string addr = allocTemp("l");
-            emit("    " + addr + " =l add " + base + ", " + offset + "\n");
+            emit("    " + addr + " =l add " + base + ", " + std::to_string(byteOffset) + "\n");
             
-            // 4. Store value
+            // 3. Store value
             if (varType == VariableType::DOUBLE) {
                 emit("    stored " + finalValue + ", " + addr + "\n");
             } else {
                 emit("    storel " + finalValue + ", " + addr + "\n");
             }
             
-            m_stats.instructionsGenerated += 4;
+            m_stats.instructionsGenerated += 3;
         } else {
             // Local or regular variable assignment
             std::string varRef = getVariableRef(stmt->variable);

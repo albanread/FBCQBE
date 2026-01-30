@@ -78,6 +78,7 @@ void Lexer::initializeKeywords() {
         s_keywords["ENDFUNCTION"] = TokenType::ENDFUNCTION;
         s_keywords["CALL"] = TokenType::CALL;
         s_keywords["LOCAL"] = TokenType::LOCAL;
+        s_keywords["GLOBAL"] = TokenType::GLOBAL;
         s_keywords["SHARED"] = TokenType::SHARED;
         s_keywords["BYREF"] = TokenType::BYREF;
         s_keywords["BYVAL"] = TokenType::BYVAL;

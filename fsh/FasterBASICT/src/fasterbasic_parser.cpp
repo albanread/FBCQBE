@@ -745,6 +745,8 @@ StatementPtr Parser::parseStatement() {
             return parseTypeDeclarationStatement();
         case TokenType::LOCAL:
             return parseLocalStatement();
+        case TokenType::GLOBAL:
+            return parseGlobalStatement();
         case TokenType::SHARED:
             return parseSharedStatement();
         case TokenType::DATA:
@@ -2965,6 +2967,72 @@ StatementPtr Parser::parseLocalStatement() {
         stmt->addVariable(varName, suffix);
 
         // Check for optional initialization (LOCAL x = 10)
+        if (match(TokenType::EQUAL)) {
+            stmt->setInitialValue(parseExpression());
+        }
+
+        // Check for AS type declaration
+        if (current().type == TokenType::AS) {
+            advance(); // consume AS
+            
+            // Check if it's a built-in type or user-defined type
+            if (isTypeKeyword(current().type)) {
+                // Built-in type keyword (INT, FLOAT, DOUBLE, STRING)
+                TokenType asType = current().type;
+                advance();
+                
+                // Convert AS type keyword to type suffix
+                TokenType convertedType = asTypeToSuffix(asType);
+                
+                // Validate and merge types
+                if (!stmt->variables.empty()) {
+                    stmt->variables.back().typeSuffix = mergeTypes(suffix, convertedType, varName);
+                }
+            } else if (current().type == TokenType::IDENTIFIER) {
+                // User-defined type
+                std::string userTypeName = current().value;
+                advance();
+                
+                // Set user-defined type
+                if (!stmt->variables.empty()) {
+                    stmt->variables.back().asTypeName = userTypeName;
+                    stmt->variables.back().hasAsType = true;
+                    
+                    // Validate: if explicit suffix was given, it conflicts with user type
+                    if (suffix != TokenType::UNKNOWN) {
+                        error("Cannot use type suffix with user-defined type AS " + userTypeName);
+                    }
+                }
+            } else {
+                error("Expected type name after AS");
+            }
+        }
+
+    } while (match(TokenType::COMMA));
+
+    return stmt;
+}
+
+StatementPtr Parser::parseGlobalStatement() {
+    auto stmt = std::make_unique<GlobalStatement>();
+    advance(); // consume GLOBAL
+
+    // Reserve capacity for common case (1-4 global variables)
+    stmt->variables.reserve(4);
+
+    // Parse global variable declarations (similar to LOCAL)
+    do {
+        if (current().type != TokenType::IDENTIFIER) {
+            error("Expected variable name in GLOBAL statement");
+            break;
+        }
+
+        TokenType suffix = TokenType::UNKNOWN;
+        std::string varName = parseVariableName(suffix);
+
+        stmt->addVariable(varName, suffix);
+
+        // Check for optional initialization (GLOBAL x = 10)
         if (match(TokenType::EQUAL)) {
             stmt->setInitialValue(parseExpression());
         }

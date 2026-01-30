@@ -466,15 +466,12 @@ std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
             std::string base = allocTemp("l");
             emit("    " + base + " =l call $basic_global_base()\n");
             
-            // 2. Calculate byte offset (slot * 8)
-            std::string offset = allocTemp("l");
-            emit("    " + offset + " =l mul " + std::to_string(slot) + ", 8\n");
-            
-            // 3. Calculate address
+            // 2. Calculate address (pre-calculate byte offset: slot * 8)
+            int byteOffset = slot * 8;
             std::string addr = allocTemp("l");
-            emit("    " + addr + " =l add " + base + ", " + offset + "\n");
+            emit("    " + addr + " =l add " + base + ", " + std::to_string(byteOffset) + "\n");
             
-            // 4. Load value into cache variable
+            // 3. Load value into cache variable
             std::string cache = allocTemp(getQBEType(type));
             if (type == VariableType::DOUBLE) {
                 emit("    " + cache + " =d loadd " + addr + "\n");
@@ -482,7 +479,7 @@ std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
                 emit("    " + cache + " =l loadl " + addr + "\n");
             }
             
-            m_stats.instructionsGenerated += 4;
+            m_stats.instructionsGenerated += 3;
             return cache;  // Return cache temp
         }
     }

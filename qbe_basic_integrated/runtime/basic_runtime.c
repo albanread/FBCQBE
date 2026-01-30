@@ -367,3 +367,44 @@ int32_t basic_setjmp(void) {
     
     return setjmp(ctx->jump_buffer);
 }
+
+// =============================================================================
+// GLOBAL Variables Support
+// =============================================================================
+
+// Global variable vector
+static int64_t* g_global_vector = NULL;
+static size_t g_global_vector_size = 0;
+
+// Initialize global variable vector with specified number of slots
+void basic_global_init(int64_t count) {
+    if (count <= 0) {
+        g_global_vector = NULL;
+        g_global_vector_size = 0;
+        return;
+    }
+    
+    // Allocate vector and zero-initialize all slots
+    g_global_vector_size = (size_t)count;
+    g_global_vector = (int64_t*)calloc(g_global_vector_size, sizeof(int64_t));
+    
+    if (!g_global_vector) {
+        fprintf(stderr, "FATAL: Failed to allocate global variable vector (%lld slots)\n", 
+                (long long)count);
+        exit(1);
+    }
+}
+
+// Get base pointer to global variable vector
+int64_t* basic_global_base(void) {
+    return g_global_vector;
+}
+
+// Clean up global variable vector
+void basic_global_cleanup(void) {
+    if (g_global_vector) {
+        free(g_global_vector);
+        g_global_vector = NULL;
+    }
+    g_global_vector_size = 0;
+}
