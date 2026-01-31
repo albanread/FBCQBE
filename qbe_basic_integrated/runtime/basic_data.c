@@ -89,11 +89,10 @@ double basic_read_double(void) {
     } else {
         basic_throw(ERR_TYPE_MISMATCH);
     }
-    return 0.0; // Silence warning
 }
 
 // Read a string value from DATA
-StringDescriptor* basic_read_string(void) {
+const char* basic_read_string(void) {
     // Check bounds
     if (__basic_data_ptr < 0) {
         basic_throw(ERR_ILLEGAL_CALL);
@@ -111,8 +110,7 @@ StringDescriptor* basic_read_string(void) {
     const char* str = (const char*)__basic_data[idx];
     __basic_data_ptr++;
     
-    // Create StringDescriptor from C string
-    return string_new_utf8(str);
+    return str;
 }
 
 // =============================================================================

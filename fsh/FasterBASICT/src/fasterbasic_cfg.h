@@ -566,11 +566,21 @@ private:
         int headerBlock;
         int exitBlock;
         std::string variable;  // For FOR loops
+        std::vector<int> pendingExitBlocks;  // Blocks containing EXIT FOR (wired when exit block is created)
     };
     std::vector<LoopContext> m_loopStack;
     
     // Map from NEXT statement block ID to loop header block ID (for back-edges)
     std::map<int, int> m_nextToHeaderMap;
+    
+    // IF/THEN/ELSE tracking
+    struct IfContext {
+        int ifBlock;           // Block containing the IF statement
+        int thenBlock;         // THEN branch block
+        int elseBlock;         // ELSE branch block  
+        int afterIfBlock;      // Block after END IF
+    };
+    std::vector<IfContext> m_ifStack;
     
     struct SelectCaseContext {
         int selectBlock;                 // Block that evaluates the SELECT expression

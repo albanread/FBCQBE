@@ -1,4 +1,0 @@
-10 X = 1
-20 ON X GOTO 30, 40
-30 PRINT "Target 1"
-40 PRINT "Target 2"

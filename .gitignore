@@ -6,6 +6,10 @@ a.out
 test
 test_*
 !test_*.bas
+!test_programs/
+
+# Build artifacts directory
+build_artifacts/
 
 # Object files
 *.o
@@ -26,6 +30,9 @@ build/
 bin/
 obj/
 
+# Test scratch area
+test_programs/scratch/
+
 # IDE and editor files
 .vscode/
 .idea/
@@ -42,6 +49,9 @@ obj/
 # Test output
 output/
 results/
+
+# QBE IL output
+*.qbe
 
 # C/C++ compilation artifacts
 *.d

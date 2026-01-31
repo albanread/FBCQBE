@@ -690,6 +690,14 @@ void CoreCommandRegistry::registerStringFunctions(CommandRegistry& registry) {
     // LEN - String length (handled in code generator for Unicode awareness)
     // Not registered here to allow proper unicode.len vs string.len selection
     
+    // __STRING_SLICE - Internal slice operation (used by parser for slice syntax)
+    CommandDefinition string_slice("__STRING_SLICE", "Return string slice (internal function)", "string_slice", "string");
+    string_slice.addParameter("str", ParameterType::STRING, "Input string")
+                .addParameter("start", ParameterType::INT, "Starting position (1-based)")
+                .addParameter("end", ParameterType::INT, "Ending position (1-based, -1 for end)")
+                .setReturnType(ReturnType::STRING);
+    registry.registerFunction(std::move(string_slice));
+    
     // LEFT$ - Left substring
     CommandDefinition left("LEFT$", "Return leftmost characters of string", "string_left", "string");
     left.addParameter("str", ParameterType::STRING, "Input string")
