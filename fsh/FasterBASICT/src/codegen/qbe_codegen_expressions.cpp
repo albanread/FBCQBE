@@ -110,17 +110,29 @@ std::string QBECodeGenerator::emitNumberLiteral(const NumberExpression* expr) {
         return temp;
     }
     
-    // All numeric literals default to DOUBLE (like Lua)
-    // Only use INT when explicitly marked with % suffix or in integer contexts
     double value = expr->value;
     
-    // Always emit as double - simplifies type system
-    std::string temp = allocTemp("d");
-    std::ostringstream oss;
-    oss << std::fixed << value;
-    emit("    " + temp + " =d copy d_" + oss.str() + "\n");
-    m_stats.instructionsGenerated++;
-    return temp;
+    // Check if this is an integer literal (no decimal point, no exponent)
+    bool isInteger = (value == std::floor(value)) && 
+                     (value >= std::numeric_limits<int64_t>::min()) && 
+                     (value <= std::numeric_limits<int64_t>::max());
+    
+    if (isInteger) {
+        // Emit as 64-bit integer (long)
+        std::string temp = allocTemp("l");
+        int64_t intValue = static_cast<int64_t>(value);
+        emit("    " + temp + " =l copy " + std::to_string(intValue) + "\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    } else {
+        // Emit as double for floating-point values
+        std::string temp = allocTemp("d");
+        std::ostringstream oss;
+        oss << std::fixed << value;
+        emit("    " + temp + " =d copy d_" + oss.str() + "\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
 }
 
 // =============================================================================

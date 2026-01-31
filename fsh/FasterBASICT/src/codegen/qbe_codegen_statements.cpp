@@ -2308,6 +2308,12 @@ void QBECodeGenerator::emitLocal(const LocalStatement* stmt) {
             
             if (typeName == "INTEGER" || typeName == "INT") {
                 varType = VariableType::INT;
+            } else if (typeName == "LONG") {
+                varType = VariableType::INT;  // LONG is 64-bit integer
+            } else if (typeName == "BYTE") {
+                varType = VariableType::INT;  // BYTE promotes to INT
+            } else if (typeName == "SHORT") {
+                varType = VariableType::INT;  // SHORT promotes to INT
             } else if (typeName == "SINGLE" || typeName == "FLOAT") {
                 varType = VariableType::FLOAT;
             } else if (typeName == "DOUBLE") {
@@ -2319,15 +2325,26 @@ void QBECodeGenerator::emitLocal(const LocalStatement* stmt) {
             // Use type suffix
             switch (var.typeSuffix) {
                 case TokenType::TYPE_INT: varType = VariableType::INT; break;
+                case TokenType::PERCENT: varType = VariableType::INT; break;  // % integer suffix
+                case TokenType::AMPERSAND: varType = VariableType::INT; break;  // & long suffix (64-bit)
                 case TokenType::TYPE_FLOAT: varType = VariableType::FLOAT; break;
+                case TokenType::EXCLAMATION: varType = VariableType::FLOAT; break;  // ! float suffix
                 case TokenType::TYPE_DOUBLE: varType = VariableType::DOUBLE; break;
+                case TokenType::HASH: varType = VariableType::DOUBLE; break;  // # double suffix
                 case TokenType::TYPE_STRING: varType = VariableType::STRING; break;
+                case TokenType::TYPE_BYTE: varType = VariableType::INT; break;  // @ byte suffix (promote to INT)
+                case TokenType::AT_SUFFIX: varType = VariableType::INT; break;  // @ byte suffix (promote to INT)
+                case TokenType::TYPE_SHORT: varType = VariableType::INT; break;  // ^ short suffix (promote to INT)
+                case TokenType::CARET: varType = VariableType::INT; break;  // ^ short suffix (promote to INT)
                 default: varType = VariableType::FLOAT; break;
             }
         } else {
             // Default to INT (most common for untyped LOCAL variables)
             varType = VariableType::INT;
         }
+        
+        // Store the type in the map for later lookups
+        m_localVariableTypes[var.name] = varType;
         
         // Get QBE type
         std::string qbeType = getQBEType(varType);
@@ -2346,7 +2363,8 @@ void QBECodeGenerator::emitLocal(const LocalStatement* stmt) {
             } else if (varType == VariableType::DOUBLE || varType == VariableType::FLOAT) {
                 emit("    " + varRef + " =d copy d_0.0\n");
             } else {
-                emit("    " + varRef + " =w copy 0\n");
+                // Use the correct QBE type for integer types (l for 64-bit LONG/INT)
+                emit("    " + varRef + " =" + qbeType + " copy 0\n");
             }
         }
         m_stats.instructionsGenerated++;

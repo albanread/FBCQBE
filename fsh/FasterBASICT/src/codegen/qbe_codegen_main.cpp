@@ -451,6 +451,7 @@ void QBECodeGenerator::enterFunctionContext(const std::string& functionName) {
     m_inFunction = true;
     m_currentFunction = functionName;
     m_localVariables.clear();
+    m_localVariableTypes.clear();
     m_sharedVariables.clear();
     m_cachedGlobalBase.clear();  // Reset cached global base for new function scope
     
@@ -480,6 +481,7 @@ void QBECodeGenerator::exitFunctionContext() {
     m_inFunction = false;
     m_currentFunction = "";
     m_localVariables.clear();
+    m_localVariableTypes.clear();
     m_sharedVariables.clear();
 }
 

@@ -384,6 +384,14 @@ VariableType QBECodeGenerator::getVariableType(const std::string& varName) {
         return VariableType::INT;
     }
     
+    // Check if this is a LOCAL variable in the current function
+    if (m_inFunction) {
+        auto localIt = m_localVariableTypes.find(varName);
+        if (localIt != m_localVariableTypes.end()) {
+            return localIt->second;
+        }
+    }
+    
     // Check if this is a function return variable (function name = return variable)
     if (m_inFunction && m_cfg && varName == m_currentFunction) {
         return m_cfg->returnType;
@@ -762,9 +770,20 @@ VariableType QBECodeGenerator::inferExpressionType(const Expression* expr) {
     switch (nodeType) {
         case ASTNodeType::EXPR_NUMBER: {
             const NumberExpression* numExpr = static_cast<const NumberExpression*>(expr);
-            // Numbers default to DOUBLE unless explicitly marked with % suffix
-            // This matches Lua behavior and simplifies type handling
-            return VariableType::DOUBLE;
+            // Check if this is an integer literal (no decimal point, no exponent)
+            double value = numExpr->value;
+            bool isInteger = (value == std::floor(value)) && 
+                             (value >= std::numeric_limits<int64_t>::min()) && 
+                             (value <= std::numeric_limits<int64_t>::max());
+            
+            if (isInteger) {
+                // Integer literals without decimal point are INT type
+                // This allows "2 * x&" to be an integer operation
+                return VariableType::INT;
+            } else {
+                // Floating point literals are DOUBLE
+                return VariableType::DOUBLE;
+            }
         }
         
         case ASTNodeType::EXPR_STRING:

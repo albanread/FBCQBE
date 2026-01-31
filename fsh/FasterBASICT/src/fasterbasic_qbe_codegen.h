@@ -115,6 +115,7 @@ private:
     std::string m_currentFunction;
     bool m_inFunction = false;
     std::unordered_set<std::string> m_localVariables;  // Local variables in current function
+    std::unordered_map<std::string, VariableType> m_localVariableTypes;  // Types of LOCAL variables
     std::unordered_set<std::string> m_sharedVariables; // Shared (global) variables accessed in function
     std::unordered_set<std::string> m_forLoopVariables; // FOR loop indices (always INTEGER)
     std::unordered_map<std::string, std::string> m_defFnParams; // DEF FN parameter name -> QBE temp mapping
