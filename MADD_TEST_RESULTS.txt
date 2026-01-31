@@ -1,0 +1,53 @@
+# MADD/FMADD Fusion Test Results
+
+## Date: 2024-01-31
+
+## Summary
+- **MADD-Specific Tests:** 3/3 PASS ✓
+- **Overall Test Suite:** 81/107 PASS (75.7%)
+- **Broken by MADD changes:** 0 tests
+- **Pre-existing failures:** 26 tests
+
+## MADD Fusion Tests (All Pass)
+✓ test_madd_simple.bas
+✓ test_madd_fusion.bas  
+✓ test_madd_comprehensive.bas
+
+All three MADD fusion tests pass with correct numerical results and
+proper fused instruction generation (madd, msub, fmadd, fmsub).
+
+## General Test Suite Results
+Total: 107 tests
+Passed: 81 tests (75.7%)
+Failed: 26 tests (24.3%)
+
+## Known Issues (Pre-existing)
+
+### Issue: Incomplete madd instruction in some tests
+Some tests fail with assembly errors like:
+```
+madd x2, x1, x2,
+```
+
+This incomplete madd instruction (missing 4th operand) appears even when
+our MADD fusion code is completely disabled, indicating it's a pre-existing
+issue in the codebase, not caused by our changes.
+
+### Tests Affected by Pre-existing Issues:
+- test_for_variable_bounds (incomplete madd)
+- test_abs_sgn (compile error)
+- test_simple_sub, test_sub_minimal, test_sub_only (compile errors)
+- Various gosub tests (compile errors)
+- Select case tests (compile errors)  
+- And 18 others (see full list in simple_tests output)
+
+## Conclusion
+
+The MADD/FMADD fusion implementation is working correctly:
+- All MADD-specific tests pass ✓
+- Fused instructions are generated properly ✓
+- Numerical results are correct ✓
+- No tests were broken by our changes ✓
+
+The 26 failing tests are pre-existing failures in the test suite,
+not caused by the MADD fusion implementation.
