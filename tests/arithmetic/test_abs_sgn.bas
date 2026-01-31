@@ -1,12 +1,12 @@
 10 REM Test optimized ABS and SGN
 20 PRINT "=== ABS & SGN Optimization Tests ==="
 30 PRINT ""
-40 test_abs_basic
-50 test_sgn_basic
-60 test_abs_double
-70 test_sgn_double
-80 test_nested
-90 test_loop
+40 CALL test_abs_basic()
+50 CALL test_sgn_basic()
+60 CALL test_abs_double()
+70 CALL test_sgn_double()
+80 CALL test_nested()
+90 CALL test_loop()
 100 PRINT ""
 110 PRINT "=== ALL TESTS PASSED ==="
 120 END

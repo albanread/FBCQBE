@@ -1105,7 +1105,7 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
         VariableType argType = inferExpressionType(expr->arguments[0].get());
         
         if (argType == VariableType::INT) {
-            // For integers: use comparisons
+            // For integers: branchless using (x > 0) - (x < 0)
             std::string zero = allocTemp("w");
             emit("    " + zero + " =w copy 0\n");
             
@@ -1115,36 +1115,11 @@ std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* exp
             std::string isPos = allocTemp("w");
             emit("    " + isPos + " =w csgtw " + argTemp + ", " + zero + "\n");
             
-            std::string negOne = allocTemp("w");
-            emit("    " + negOne + " =w copy -1\n");
-            
-            std::string posOne = allocTemp("w");
-            emit("    " + posOne + " =w copy 1\n");
-            
-            // Use conditional branches: if negative return -1, else if positive return 1, else return 0
-            std::string negLabel = allocLabel();
-            std::string posLabel = allocLabel();
-            std::string zeroLabel = allocLabel();
-            std::string endLabel = allocLabel();
+            // SGN(x) = (x > 0) - (x < 0)
             std::string result = allocTemp("w");
+            emit("    " + result + " =w sub " + isPos + ", " + isNeg + "\n");
             
-            emit("    jnz " + isNeg + ", @" + negLabel + ", @" + posLabel + "\n");
-            emit("@" + negLabel + "\n");
-            emit("    " + result + " =w copy " + negOne + "\n");
-            emit("    jmp @" + endLabel + "\n");
-            emit("@" + posLabel + "\n");
-            std::string finalResult = allocTemp("w");
-            emit("    jnz " + isPos + ", @" + zeroLabel + ", @" + endLabel + "\n");
-            emit("@" + zeroLabel + "\n");
-            emit("    " + result + " =w copy " + posOne + "\n");
-            emit("    jmp @" + endLabel + "\n");
-            emit("@" + endLabel + "\n");
-            if (finalResult.empty()) {
-                emit("    " + result + " =w copy " + zero + "\n");
-            }
-            
-            m_stats.instructionsGenerated += 13;
-            m_stats.labelsGenerated += 4;
+            m_stats.instructionsGenerated += 4;
             return result;
         } else {
             // For doubles: use runtime function
