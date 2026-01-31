@@ -513,6 +513,17 @@ void CFGBuilder::processGosubStatement(const GosubStatement& stmt, BasicBlock* c
     // GOSUB is like a call - execution continues after it in a new block
     // Create a new block for the return point (statement after GOSUB)
     BasicBlock* nextBlock = createNewBlock();
+    
+    // Record the mapping from GOSUB block to its return continuation block
+    // This is needed because blocks may not be sequential when GOSUB is inside IF/WHILE
+    m_gosubReturnMap[currentBlock->id] = nextBlock->id;
+    
+    // Track this block as a GOSUB return point for optimization
+    // This allows RETURN statements to only check reachable return blocks
+    if (m_currentCFG) {
+        m_currentCFG->gosubReturnBlocks.insert(nextBlock->id);
+    }
+    
     m_currentBlock = nextBlock;
     
     // Edge will be added in buildEdges phase when we know target block IDs
@@ -1473,9 +1484,17 @@ void CFGBuilder::buildEdges() {
                 if (targetBlock >= 0) {
                     addCallEdge(block->id, targetBlock);
                 }
-                // Also continue to next block
-                if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
-                    addFallthroughEdge(block->id, block->id + 1);
+                // Continue to the return block that was created by processGosubStatement
+                // Use the mapping instead of assuming block->id + 1
+                auto it = m_gosubReturnMap.find(block->id);
+                if (it != m_gosubReturnMap.end()) {
+                    // Found the recorded return block
+                    addFallthroughEdge(block->id, it->second);
+                } else {
+                    // Fallback to old behavior (shouldn't happen with proper processing)
+                    if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
+                        addFallthroughEdge(block->id, block->id + 1);
+                    }
                 }
                 break;
             }

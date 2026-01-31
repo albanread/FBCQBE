@@ -1486,16 +1486,27 @@ void QBECodeGenerator::emitReturn(const ReturnStatement* stmt) {
         emit("    " + returnBlockIdTemp + " =w loadw " + stackAddr + "\n");
         m_stats.instructionsGenerated += 7;
 
-        size_t blockCount = (m_cfg) ? m_cfg->blocks.size() : 0;
-        if (blockCount > 0) {
+        // Optimization: Only check blocks that are GOSUB return points (sparse jump table)
+        // This dramatically reduces the number of comparisons from O(total blocks) to O(return blocks)
+        if (m_cfg && !m_cfg->gosubReturnBlocks.empty()) {
+            emitComment("Sparse RETURN dispatch - only checking " + 
+                       std::to_string(m_cfg->gosubReturnBlocks.size()) + 
+                       " return blocks (out of " + 
+                       std::to_string(m_cfg->blocks.size()) + " total)");
+            
             std::string fallbackLabel = allocLabel();
-            for (size_t i = 0; i < blockCount; ++i) {
+            std::vector<int> returnBlocks(m_cfg->gosubReturnBlocks.begin(), 
+                                         m_cfg->gosubReturnBlocks.end());
+            std::sort(returnBlocks.begin(), returnBlocks.end());
+            
+            for (size_t i = 0; i < returnBlocks.size(); ++i) {
+                int blockId = returnBlocks[i];
                 std::string caseValue = allocTemp("w");
-                emit("    " + caseValue + " =w copy " + std::to_string(i) + "\n");
+                emit("    " + caseValue + " =w copy " + std::to_string(blockId) + "\n");
                 std::string isMatch = allocTemp("w");
                 emit("    " + isMatch + " =w ceqw " + returnBlockIdTemp + ", " + caseValue + "\n");
-                std::string targetLabel = getBlockLabel(static_cast<int>(i));
-                bool isLast = (i + 1 == blockCount);
+                std::string targetLabel = getBlockLabel(blockId);
+                bool isLast = (i + 1 == returnBlocks.size());
                 std::string falseLabel = isLast ? fallbackLabel : allocLabel();
                 emit("    jnz " + isMatch + ", @" + targetLabel + ", @" + falseLabel + "\n");
                 m_stats.instructionsGenerated += 3;
@@ -1504,6 +1515,8 @@ void QBECodeGenerator::emitReturn(const ReturnStatement* stmt) {
                 }
             }
             emitLabel(fallbackLabel);
+        } else {
+            emitComment("WARNING: No GOSUB return blocks found, using fallback");
         }
 
         emitComment("RETURN stack underflow or invalid target - falling back to program exit");

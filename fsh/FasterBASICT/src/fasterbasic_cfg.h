@@ -275,6 +275,9 @@ public:
     std::map<int, int> repeatLoopHeaders;   // REPEAT statement → block ID
     std::map<int, int> doLoopHeaders;       // DO statement → block ID
     
+    // GOSUB return optimization: track which blocks are return points
+    std::set<int> gosubReturnBlocks;        // Block IDs that are GOSUB return points
+    
     ControlFlowGraph()
         : returnType(VariableType::UNKNOWN), entryBlock(0), exitBlock(-1), defStatement(nullptr)
     {}
@@ -572,6 +575,9 @@ private:
     
     // Map from NEXT statement block ID to loop header block ID (for back-edges)
     std::map<int, int> m_nextToHeaderMap;
+    
+    // Map from GOSUB block ID to its return continuation block ID
+    std::map<int, int> m_gosubReturnMap;
     
     // IF/THEN/ELSE tracking
     struct IfContext {
