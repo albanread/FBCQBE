@@ -55,18 +55,18 @@ PRINT "  A(3, 4) = 125     (expected: 125)"
 
 END
 
-FUNCTION Ack(mm AS INTEGER, nn AS INTEGER) AS INTEGER
+FUNCTION Ack(m AS INTEGER, n AS INTEGER) AS INTEGER
     LOCAL temp AS INTEGER
 
-    IF mm = 0 THEN
-        Ack = nn + 1
+    IF m = 0 THEN
+        Ack = n + 1
     ELSE
-        IF nn = 0 THEN
-            temp = Ack(mm - 1, 1)
+        IF n = 0 THEN
+            temp = Ack(m - 1, 1)
             Ack = temp
         ELSE
-            temp = Ack(mm, nn - 1)
-            Ack = Ack(mm - 1, temp)
+            temp = Ack(m, n - 1)
+            Ack = Ack(m - 1, temp)
         END IF
     END IF
 END FUNCTION

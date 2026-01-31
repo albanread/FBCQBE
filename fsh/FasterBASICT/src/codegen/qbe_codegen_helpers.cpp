@@ -462,31 +462,8 @@ std::string QBECodeGenerator::sanitizeQBEVariableName(const std::string& varName
 }
 
 std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
-    // Check if this is a GLOBAL variable first
-    if (m_symbols) {
-        auto it = m_symbols->variables.find(varName);
-        if (it != m_symbols->variables.end() && it->second.isGlobal) {
-            // Generate efficient pointer arithmetic load sequence for global variable
-            int slot = it->second.globalOffset;
-            VariableType type = it->second.type;
-            
-            // Calculate address using global vector label directly (pre-calculate byte offset: slot * 8)
-            int byteOffset = slot * 8;
-            std::string addr = allocTemp("l");
-            emit("    " + addr + " =l add $__global_vector, " + std::to_string(byteOffset) + "\n");
-            
-            // Load value into cache variable
-            std::string cache = allocTemp(getQBEType(type));
-            if (type == VariableType::DOUBLE) {
-                emit("    " + cache + " =d loadd " + addr + "\n");
-            } else {
-                emit("    " + cache + " =l loadl " + addr + "\n");
-            }
-            
-            m_stats.instructionsGenerated += 2;
-            return cache;  // Return cache temp
-        }
-    }
+    // Sanitize the variable name first
+    std::string safeName = sanitizeQBEVariableName(varName);
     
     // Check if this is a FOR EACH loop variable
     LoopContext* loop = getCurrentLoop();
@@ -520,16 +497,8 @@ std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
         return elemVal;
     }
     
-    // Sanitize the variable name first
-    std::string safeName = sanitizeQBEVariableName(varName);
-    
-    // FOR loop variables use plain names without suffix
-    std::string plainName = stripTypeSuffix(safeName);
-    if (m_forLoopVariables.count(plainName) > 0) {
-        return "%var_" + plainName;
-    }
-    
-    // Check if we're in a function and if this is a parameter
+    // IMPORTANT: Check function scope FIRST to implement proper variable shadowing
+    // Function parameters and local variables should shadow globals and FOR loop variables
     if (m_inFunction && m_cfg) {
         // First check DEF FN parameters (these have priority for DEF FN functions)
         if (!m_defFnParams.empty()) {
@@ -564,16 +533,47 @@ std::string QBECodeGenerator::getVariableRef(const std::string& varName) {
             return "%local_" + safeName;
         }
         
-        // Check if this is explicitly shared (or default to shared if not local)
-        // In functions, variables are local unless declared SHARED
+        // Check if this is explicitly shared
+        // If SHARED, we need to fall through to load from global storage below
         if (m_sharedVariables.count(varName) > 0 || m_sharedVariables.count(safeName) > 0) {
-            // Shared (global) variable - use %var_ prefix
+            // Fall through to global variable loading below
+        } else {
+            // Not a parameter, not local, not shared - default to shared for backward compatibility
+            // (In proper BASIC, undeclared vars in functions should error, but we're lenient)
             return "%var_" + safeName;
         }
-        
-        // Default: if not local and not shared, treat as shared for backward compatibility
-        // (In proper BASIC, undeclared vars in functions should error, but we're lenient)
-        return "%var_" + safeName;
+    }
+    
+    // FOR loop variables use plain names without suffix (but only outside functions)
+    std::string plainName = stripTypeSuffix(safeName);
+    if (m_forLoopVariables.count(plainName) > 0) {
+        return "%var_" + plainName;
+    }
+    
+    // Check if this is a GLOBAL variable (only after checking function scope)
+    if (m_symbols) {
+        auto it = m_symbols->variables.find(varName);
+        if (it != m_symbols->variables.end() && it->second.isGlobal) {
+            // Generate efficient pointer arithmetic load sequence for global variable
+            int slot = it->second.globalOffset;
+            VariableType type = it->second.type;
+            
+            // Calculate address using global vector label directly (pre-calculate byte offset: slot * 8)
+            int byteOffset = slot * 8;
+            std::string addr = allocTemp("l");
+            emit("    " + addr + " =l add $__global_vector, " + std::to_string(byteOffset) + "\n");
+            
+            // Load value into cache variable
+            std::string cache = allocTemp(getQBEType(type));
+            if (type == VariableType::DOUBLE) {
+                emit("    " + cache + " =d loadd " + addr + "\n");
+            } else {
+                emit("    " + cache + " =l loadl " + addr + "\n");
+            }
+            
+            m_stats.instructionsGenerated += 2;
+            return cache;  // Return cache temp
+        }
     }
     
     // Outside functions, all variables are global
