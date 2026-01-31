@@ -261,6 +261,10 @@ sel(Ins i, Fn *fn)
 				fused_op = (KBASE(i.cls) == 0) ? Oamsub : Oafmsub;
 			}
 			
+			/* Don't fuse if accumulator is empty (R) */
+			if (req(acc, R))
+				continue;
+			
 			/* Emit fused instruction: result = acc +/- (mul_a * mul_b) */
 			emit3(fused_op, i.cls, i.to, mul_a, mul_b, acc);
 			

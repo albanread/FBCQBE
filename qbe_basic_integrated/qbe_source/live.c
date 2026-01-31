@@ -107,7 +107,7 @@ Again:
 				bsset(b->gen, t);
 				bsclr(b->in, t);
 			}
-			for (k=0; k<2; k++)
+			for (k=0; k<3; k++)
 				switch (rtype(i->arg[k])) {
 				case RMem:
 					ma = &f->mem[i->arg[k].val];

@@ -391,7 +391,7 @@ phicopyref(Fn *fn, Blk *b, Phi *p)
 		return R;
 
 	s = (Blk*[]){0, 0};
-	for (n=0; n<2; n++)
+	for (n=0; n<3; n++)
 		for (c=0; c<2; c++)
 			if (req(p->arg[n], con01[c]))
 				s[c] = p->blk[n];
