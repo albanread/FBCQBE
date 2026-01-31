@@ -2,6 +2,11 @@
 
 **Welcome!** This guide will help you build, use, and develop the FasterBASIC QBE compiler.
 
+> **⚠️ Important Build Note:** This project has a single build location at `qbe_basic_integrated/build_qbe_basic.sh`. 
+> The `qbe_basic` executable at the project root is a **symlink** to `qbe_basic_integrated/qbe_basic`.
+> Always build using `cd qbe_basic_integrated && ./build_qbe_basic.sh` to ensure you have the latest code.
+> See [BUILD.md](BUILD.md) for detailed build instructions.
+
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
@@ -28,19 +33,22 @@
 ### 30-Second Build & Run
 
 ```bash
-# 1. Build the compiler
+# 1. Build the compiler (IMPORTANT: Always build from qbe_basic_integrated/)
 cd qbe_basic_integrated
 ./build_qbe_basic.sh
 
-# 2. Create a test program
+# 2. Return to project root
+cd ..
+
+# 3. Create a test program
 cat > hello.bas << 'EOF'
 PRINT "Hello, World!"
 END
 EOF
 
-# 3. Compile and run
+# 4. Compile and run (using the symlink at project root)
 ./qbe_basic hello.bas > hello.s
-gcc hello.s ../fsh/FasterBASICT/runtime_c/*.c -I../fsh/FasterBASICT/runtime_c -lm -o hello
+gcc hello.s fsh/FasterBASICT/runtime_c/*.c -Ifsh/FasterBASICT/runtime_c -lm -o hello
 ./hello
 ```
 

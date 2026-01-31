@@ -4,6 +4,13 @@
 
 A native-code ahead-of-time (AOT) compiler backend for FasterBASIC using the QBE intermediate language.
 
+> **⚠️ Important Build Note:** This project has a single build location. Always build using:
+> ```bash
+> cd qbe_basic_integrated && ./build_qbe_basic.sh
+> ```
+> The `qbe_basic` executable at the project root is a **symlink** to `qbe_basic_integrated/qbe_basic`.
+> See [BUILD.md](BUILD.md) for detailed build instructions.
+
 ## Overview
 
 FBCQBE compiles FasterBASIC programs to native machine code through the QBE (Quick Backend) SSA-based intermediate representation. This provides:

@@ -737,9 +737,9 @@ void QBECodeGenerator::emitIf(const IfStatement* stmt) {
     m_stats.instructionsGenerated++;
     
     // Check if this is an inline IF (single-line) or block-level IF (multi-line, CFG-driven)
-    // Multi-line IF statements should use CFG blocks, not inline emission
+    // Single-line IF: emit inline with labels
+    // Multi-line IF: nested statements should be in separate CFG blocks
     bool isInlineIF = !stmt->isMultiLine && !stmt->thenStatements.empty();
-    bool isBlockLevelIF = stmt->isMultiLine || (m_currentBlock && m_currentBlock->successors.size() == 2);
     
     if (isInlineIF) {
         // Inline IF/THEN/ELSE - emit complete structure with local labels
@@ -780,13 +780,11 @@ void QBECodeGenerator::emitIf(const IfStatement* stmt) {
         emit("@" + endLabel + "\n");
         m_stats.labelsGenerated++;
         m_lastStatementWasTerminator = false;
-    } else if (isBlockLevelIF) {
-        // Block-level IF - store condition for block emitter to use with CFG successors
-        m_lastCondition = boolTemp;
-        emitComment("Condition stored for CFG-driven branch to successors");
     } else {
-        // Fallback: store condition anyway
+        // Multi-line IF - store condition for CFG-driven branching
+        // The nested statements should be in separate CFG blocks
         m_lastCondition = boolTemp;
+        emitComment("Multi-line IF: condition stored for CFG branching");
     }
 }
 

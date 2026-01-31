@@ -97,7 +97,8 @@ void dumpStatement(const Statement& stmt, int indentLevel, std::ostream& os) {
     switch (type) {
         case ASTNodeType::STMT_IF: {
             const auto& ifStmt = static_cast<const IfStatement&>(stmt);
-            os << " (hasGoto=" << ifStmt.hasGoto 
+            os << " (isMultiLine=" << ifStmt.isMultiLine
+               << ", hasGoto=" << ifStmt.hasGoto 
                << ", thenStmts=" << ifStmt.thenStatements.size()
                << ", elseIfClauses=" << ifStmt.elseIfClauses.size()
                << ", elseStmts=" << ifStmt.elseStatements.size() << ")\n";

@@ -269,6 +269,7 @@ void CFGBuilder::processStatement(const Statement& stmt, BasicBlock* currentBloc
     // Handle control flow statements
     ASTNodeType type = stmt.getType();
     
+
     // Don't add FUNCTION/SUB/DEF statements to main CFG - they define separate CFGs
     // Add all statements to current block (except functions/subs)
     if (type != ASTNodeType::STMT_FUNCTION && type != ASTNodeType::STMT_SUB && type != ASTNodeType::STMT_DEF) {
@@ -349,9 +350,8 @@ void CFGBuilder::processStatement(const Statement& stmt, BasicBlock* currentBloc
             
         case ASTNodeType::STMT_NEXT:
             {
-                // NEXT creates a back-edge to the loop header
-                // Set current block to the loop's exit block (already created by FOR)
-                // Find the matching loop context
+                // NEXT creates the incrementor block and the exit block
+                // This is "The Closer" - where the loop structure is finalized
                 const NextStatement& nextStmt = static_cast<const NextStatement&>(stmt);
                 LoopContext* matchingLoop = nullptr;
                 
@@ -363,14 +363,60 @@ void CFGBuilder::processStatement(const Statement& stmt, BasicBlock* currentBloc
                     }
                 }
                 
-                if (matchingLoop && matchingLoop->exitBlock >= 0) {
-                    // Record the mapping from this NEXT's block to the loop header for buildEdges
-                    m_nextToHeaderMap[currentBlock->id] = matchingLoop->headerBlock;
+                if (matchingLoop) {
+                    // 1. Create the NEXT block itself (the incrementor block)
+                    BasicBlock* nextBlock = createNewBlock("FOR Next/Increment");
                     
-                    // Use the exit block that was created by processForStatement
-                    m_currentBlock = m_currentCFG->getBlock(matchingLoop->exitBlock);
+                    // 2. Move the NEXT statement from current block to NEXT block
+                    //    (it was already added to currentBlock at line 276)
+                    if (!currentBlock->statements.empty() && currentBlock->statements.back() == &stmt) {
+                        // Get the line number for this statement
+                        int lineNum = 0;
+                        auto it = currentBlock->statementLineNumbers.find(&stmt);
+                        if (it != currentBlock->statementLineNumbers.end()) {
+                            lineNum = it->second;
+                        }
+                        
+                        // Remove from current block and add to NEXT block
+                        currentBlock->statements.pop_back();
+                        currentBlock->statementLineNumbers.erase(&stmt);
+                        nextBlock->addStatement(&stmt, lineNum);
+                    }
                     
-                    // Pop this loop context now - we're done with this loop
+                    // 3. Current block (end of loop body) flows into NEXT block
+                    //    (unless it's a terminator)
+                    if (!currentBlock->isTerminator && currentBlock->successors.empty()) {
+                        addFallthroughEdge(currentBlock->id, nextBlock->id);
+                    }
+                    
+                    // 4. Record the mapping from NEXT block to loop header for buildEdges
+                    //    (NEXT block always jumps back to the Check block)
+                    m_nextToHeaderMap[nextBlock->id] = matchingLoop->headerBlock;
+                    
+                    // 5. NOW create the Exit block - its ID will be higher than everything in the body
+                    BasicBlock* loopExit = createNewBlock("After FOR");
+                    loopExit->isLoopExit = true;
+                    
+                    // 6. Update the loop context with the exit block ID
+                    matchingLoop->exitBlock = loopExit->id;
+                    
+                    // 7. Wire all pending EXIT FOR blocks to the exit block
+                    for (int exitBlockId : matchingLoop->pendingExitBlocks) {
+                        addFallthroughEdge(exitBlockId, loopExit->id);
+                    }
+                    
+                    // 8. Update the FOR loop structure if it exists
+                    for (auto& pair : m_currentCFG->forLoopStructure) {
+                        if (pair.second.checkBlock == matchingLoop->headerBlock) {
+                            pair.second.exitBlock = loopExit->id;
+                            break;
+                        }
+                    }
+                    
+                    // 9. Switch to the exit block for subsequent statements
+                    m_currentBlock = loopExit;
+                    
+                    // 10. Pop this loop context - we're done with this loop
                     m_loopStack.erase(std::remove_if(m_loopStack.begin(), m_loopStack.end(),
                         [matchingLoop](const LoopContext& ctx) { return &ctx == matchingLoop; }), 
                         m_loopStack.end());
@@ -413,11 +459,39 @@ void CFGBuilder::processStatement(const Statement& stmt, BasicBlock* currentBloc
             
         case ASTNodeType::STMT_RETURN:
         case ASTNodeType::STMT_END:
-        case ASTNodeType::STMT_EXIT:
             // Only mark as terminator if we're not processing nested statements
             // (nested statements in IF branches shouldn't terminate the parent block)
             if (!m_processingNestedStatements) {
                 currentBlock->isTerminator = true;
+            }
+            break;
+            
+        case ASTNodeType::STMT_EXIT:
+            {
+                // EXIT handling: for EXIT FOR, track pending exit blocks
+                const ExitStatement& exitStmt = static_cast<const ExitStatement&>(stmt);
+                
+                if (exitStmt.exitType == ExitStatement::ExitType::FOR_LOOP) {
+                    // EXIT FOR - add to pending exits for the innermost FOR loop
+                    if (!m_loopStack.empty()) {
+                        // Find innermost FOR loop
+                        for (auto it = m_loopStack.rbegin(); it != m_loopStack.rend(); ++it) {
+                            if (!it->variable.empty()) {  // FOR loops have a variable
+                                it->pendingExitBlocks.push_back(currentBlock->id);
+                                break;
+                            }
+                        }
+                    }
+                    // Create a new block after the EXIT FOR statement
+                    // (this block will be unreachable but maintains CFG structure)
+                    BasicBlock* afterExit = createNewBlock("After EXIT FOR");
+                    m_currentBlock = afterExit;
+                }
+                
+                // Mark as terminator if not processing nested statements
+                if (!m_processingNestedStatements) {
+                    currentBlock->isTerminator = true;
+                }
             }
             break;
             
@@ -470,20 +544,76 @@ void CFGBuilder::processLabelStatement(const LabelStatement& stmt, BasicBlock* c
 
 void CFGBuilder::processIfStatement(const IfStatement& stmt, BasicBlock* currentBlock) {
     // IF creates conditional branch
-    
+    std::cerr << "[DEBUG] processIfStatement called: isMultiLine=" << stmt.isMultiLine 
+              << ", hasGoto=" << stmt.hasGoto 
+              << ", thenStmts=" << stmt.thenStatements.size()
+              << ", elseStmts=" << stmt.elseStatements.size() << "\n";
+
     if (stmt.hasGoto) {
         // IF ... THEN GOTO creates two-way branch
         BasicBlock* nextBlock = createNewBlock();
         m_currentBlock = nextBlock;
     } else if (stmt.isMultiLine) {
-        // Multi-line IF...END IF: Use CFG-driven branching
-        // The nested statements are NOT added to the CFG blocks here.
-        // They exist in the AST (stmt.thenStatements, stmt.elseStatements)
-        // and will be emitted by codegen when processing the IF statement.
-        // The CFG successors will determine which branch to take.
+        // Multi-line IF...END IF: Create separate blocks for THEN/ELSE branches
+        // Use proper block ordering: create convergence point AFTER nested statements
+        std::cerr << "[DEBUG] Creating THEN/ELSE blocks for multiline IF\n";
         
-        // Do NOT process nested statements - they should not be in CFG blocks
-        // The codegen will handle them using the AST structure
+        // 1. Create the branch targets
+        BasicBlock* thenBlock = createNewBlock("IF THEN");
+        BasicBlock* elseBlock = createNewBlock("IF ELSE");
+        std::cerr << "[DEBUG] Created thenBlock=" << thenBlock->id << ", elseBlock=" << elseBlock->id << "\n";
+        
+        // 2. Link the IF header to both branches immediately
+        addConditionalEdge(currentBlock->id, thenBlock->id, "true");
+        addConditionalEdge(currentBlock->id, elseBlock->id, "false");
+        
+        // 3. Process the THEN branch
+        // This might create many internal blocks if there are nested loops
+        m_currentBlock = thenBlock;
+        std::cerr << "[DEBUG] Processing THEN branch with " << stmt.thenStatements.size() << " statements\n";
+        if (!stmt.thenStatements.empty()) {
+            processNestedStatements(stmt.thenStatements, thenBlock, stmt.location.line);
+        }
+        std::cerr << "[DEBUG] THEN branch processed, m_currentBlock=" << m_currentBlock->id << "\n";
+        // Capture the "exit tip" of the THEN branch
+        BasicBlock* thenExitTip = m_currentBlock;
+        
+        // 4. Process the ELSE branch
+        m_currentBlock = elseBlock;
+        if (!stmt.elseStatements.empty()) {
+            processNestedStatements(stmt.elseStatements, elseBlock, stmt.location.line);
+        }
+        // Capture the "exit tip" of the ELSE branch
+        BasicBlock* elseExitTip = m_currentBlock;
+        
+        // 5. Create the convergence point (After IF)
+        // By creating this AFTER the nested statements, it will naturally
+        // have a higher ID than anything inside the THEN/ELSE blocks
+        BasicBlock* afterIfBlock = createNewBlock("After IF");
+        
+        // 6. Bridge the exit tips to the convergence point
+        // Only bridge if the branch didn't end in a terminator
+        bool thenHasTerminator = !thenExitTip->statements.empty() && 
+                                (thenExitTip->statements.back()->getType() == ASTNodeType::STMT_EXIT ||
+                                 thenExitTip->statements.back()->getType() == ASTNodeType::STMT_RETURN ||
+                                 thenExitTip->statements.back()->getType() == ASTNodeType::STMT_GOTO ||
+                                 thenExitTip->statements.back()->getType() == ASTNodeType::STMT_END);
+        
+        bool elseHasTerminator = !elseExitTip->statements.empty() && 
+                                (elseExitTip->statements.back()->getType() == ASTNodeType::STMT_EXIT ||
+                                 elseExitTip->statements.back()->getType() == ASTNodeType::STMT_RETURN ||
+                                 elseExitTip->statements.back()->getType() == ASTNodeType::STMT_GOTO ||
+                                 elseExitTip->statements.back()->getType() == ASTNodeType::STMT_END);
+        
+        if (!thenHasTerminator) {
+            addFallthroughEdge(thenExitTip->id, afterIfBlock->id);
+        }
+        if (!elseHasTerminator) {
+            addFallthroughEdge(elseExitTip->id, afterIfBlock->id);
+        }
+        
+        // 7. Update the builder's state
+        m_currentBlock = afterIfBlock;
     } else {
         // Single-line IF: IF x THEN statement
         // Do NOT process nested statements here - leave them in the AST
@@ -501,6 +631,7 @@ void CFGBuilder::processNestedStatements(const std::vector<StatementPtr>& statem
     // Set flag to indicate we're processing nested statements
     bool wasProcessingNested = m_processingNestedStatements;
     m_processingNestedStatements = true;
+
     
     for (const auto& nestedStmt : statements) {
         // Get the line number for this nested statement
@@ -541,10 +672,12 @@ void CFGBuilder::processNestedStatements(const std::vector<StatementPtr>& statem
         if (isControlFlow) {
             // Process control-flow statements through the regular processStatement method
             // This ensures they create proper CFG blocks and edges
+
             processStatement(*nestedStmt, m_currentBlock, lineNumber);
         } else {
             // For non-control-flow statements, just add them to the current block
             // (don't call processStatement to avoid double-adding)
+
             m_currentBlock->addStatement(nestedStmt.get(), lineNumber);
         }
     }
@@ -554,7 +687,8 @@ void CFGBuilder::processNestedStatements(const std::vector<StatementPtr>& statem
 }
 
 void CFGBuilder::processForStatement(const ForStatement& stmt, BasicBlock* currentBlock) {
-    // FOR creates: init block (with FOR statement), check block, body block, exit block
+    // FOR creates: init block (with FOR statement), check block, body block
+    // Exit block is created later by NEXT to ensure proper block ordering
     // Structure: FOR init → check (condition) → body → NEXT (increment) → check
     
     // Init block contains the FOR statement (initialization)
@@ -586,22 +720,21 @@ void CFGBuilder::processForStatement(const ForStatement& stmt, BasicBlock* curre
     loopCheck->isLoopHeader = true;  // The check block is the actual loop header
     
     BasicBlock* loopBody = createNewBlock("FOR Loop Body");
-    BasicBlock* loopExit = createNewBlock("After FOR");
-    loopExit->isLoopExit = true;
     
     // Track loop context - stores check block as header (for NEXT to jump back to)
+    // Exit block will be set to -1 initially and created by NEXT
     LoopContext ctx;
     ctx.headerBlock = loopCheck->id;  // NEXT jumps back to check block
-    ctx.exitBlock = loopExit->id;
+    ctx.exitBlock = -1;  // Will be created by NEXT processing
     ctx.variable = stmt.variable;
     m_loopStack.push_back(ctx);
     
-    // Store FOR loop structure for buildEdges to use
+    // Store FOR loop structure for buildEdges to use (exit block added later)
     ControlFlowGraph::ForLoopBlocks forBlocks;
     forBlocks.initBlock = initBlock->id;
     forBlocks.checkBlock = loopCheck->id;
     forBlocks.bodyBlock = loopBody->id;
-    forBlocks.exitBlock = loopExit->id;
+    forBlocks.exitBlock = -1;  // Will be set by NEXT
     forBlocks.variable = stmt.variable;
     m_currentCFG->forLoopStructure[initBlock->id] = forBlocks;
     
@@ -1210,8 +1343,10 @@ void CFGBuilder::buildEdges() {
                 // FOR check block: conditional branch
                 // True condition: go to body
                 addConditionalEdge(block->id, forBlocks.bodyBlock, "true");
-                // False condition: go to exit
-                addConditionalEdge(block->id, forBlocks.exitBlock, "false");
+                // False condition: go to exit (should be set by NEXT processing)
+                if (forBlocks.exitBlock >= 0) {
+                    addConditionalEdge(block->id, forBlocks.exitBlock, "false");
+                }
                 break;
             }
         }
@@ -1308,8 +1443,9 @@ void CFGBuilder::buildEdges() {
         }
         
         if (block->statements.empty()) {
-            // Empty block - fallthrough to next
-            if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
+            // Empty block - fallthrough to next only if no explicit successors
+            if (block->successors.empty() && 
+                block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
                 addFallthroughEdge(block->id, block->id + 1);
             }
             continue;
@@ -1428,6 +1564,10 @@ void CFGBuilder::buildEdges() {
                     if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
                         addConditionalEdge(block->id, block->id + 1, "false");
                     }
+                } else if (ifStmt.isMultiLine) {
+                    // Multi-line IF...END IF
+                    // The successors were already set up in processIfStatement
+                    // Nothing to do here - edges are already correct
                 }
                 break;
             }
@@ -1727,10 +1867,34 @@ void CFGBuilder::buildEdges() {
             
             case ASTNodeType::STMT_RETURN:
             case ASTNodeType::STMT_END:
-            case ASTNodeType::STMT_EXIT:
                 // Terminators - no outgoing edges (or return edge)
                 if (m_currentCFG->exitBlock >= 0) {
                     addReturnEdge(block->id, m_currentCFG->exitBlock);
+                }
+                break;
+                
+            case ASTNodeType::STMT_EXIT:
+                {
+                    // EXIT statement handling
+                    // For EXIT FOR, edges are already added by NEXT processing (pendingExitBlocks)
+                    // For EXIT FUNCTION/SUB, add return edge to function exit
+                    const ExitStatement* exitStmt = nullptr;
+                    for (const Statement* stmt : block->statements) {
+                        if (stmt->getType() == ASTNodeType::STMT_EXIT) {
+                            exitStmt = static_cast<const ExitStatement*>(stmt);
+                            break;
+                        }
+                    }
+                    
+                    if (exitStmt && 
+                        (exitStmt->exitType == ExitStatement::ExitType::FUNCTION ||
+                         exitStmt->exitType == ExitStatement::ExitType::SUB)) {
+                        // EXIT FUNCTION/SUB - jump to function exit
+                        if (m_currentCFG->exitBlock >= 0) {
+                            addReturnEdge(block->id, m_currentCFG->exitBlock);
+                        }
+                    }
+                    // EXIT FOR edges are already handled by pendingExitBlocks mechanism
                 }
                 break;
                 
@@ -1761,7 +1925,9 @@ void CFGBuilder::buildEdges() {
                 
                 if (!handledBySelectCase) {
                     // Regular statement - fallthrough to next block
-                    if (block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
+                    // Only add fallthrough if block doesn't already have explicit successors
+                    if (block->successors.empty() && 
+                        block->id + 1 < static_cast<int>(m_currentCFG->blocks.size())) {
                         addFallthroughEdge(block->id, block->id + 1);
                     }
                 }
