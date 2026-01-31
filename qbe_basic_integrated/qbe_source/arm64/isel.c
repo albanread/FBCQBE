@@ -224,62 +224,6 @@ sel(Ins i, Fn *fn)
 		emiti(i);
 		return;
 	}
-	
-	/* MADD/FMADD Fusion: Detect add(acc, mul(a,b)) or sub(acc, mul(a,b)) */
-	if ((i.op == Oadd || i.op == Osub) && i.cls != Kw) {
-		int idx;
-		for (idx = 0; idx < 2; idx++) {
-			Ref r = i.arg[idx];
-			if (rtype(r) != RTmp)
-				continue;
-			
-			Tmp *t = &fn->tmp[r.val];
-			if (!t->def || t->nuse != 1)
-				continue;
-			
-			Ins *def = t->def;
-			if (def->op != Omul || def->cls != i.cls)
-				continue;
-			
-			/* Found a fusable pattern! */
-			int fused_op;
-			Ref acc, mul_a, mul_b;
-			
-			if (i.op == Oadd) {
-				/* add(acc, mul(a,b)) or add(mul(a,b), acc) */
-				acc = i.arg[1 - idx];
-				mul_a = def->arg[0];
-				mul_b = def->arg[1];
-				fused_op = (KBASE(i.cls) == 0) ? Oamadd : Oafmadd;
-			} else {
-				/* sub(acc, mul(a,b)) - mul must be arg[1] */
-				if (idx != 1)
-					continue;
-				acc = i.arg[0];
-				mul_a = def->arg[0];
-				mul_b = def->arg[1];
-				fused_op = (KBASE(i.cls) == 0) ? Oamsub : Oafmsub;
-			}
-			
-			/* Don't fuse if accumulator is empty (R) */
-			if (req(acc, R))
-				continue;
-			
-			/* Fix arguments BEFORE emitting to avoid pointer invalidation */
-			fixarg(&mul_a, i.cls, 0, fn);
-			fixarg(&mul_b, i.cls, 0, fn);
-			fixarg(&acc, i.cls, 0, fn);
-			
-			/* Emit fused instruction: result = acc +/- (mul_a * mul_b) */
-			emit3(fused_op, i.cls, i.to, mul_a, mul_b, acc);
-			
-			/* Mark multiply as nop since it's been fused */
-			def->op = Onop;
-			
-			return;
-		}
-	}
-	
 	if (i.op != Onop) {
 		emiti(i);
 		iarg = curi->arg; /* fixarg() can change curi */

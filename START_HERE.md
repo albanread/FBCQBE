@@ -2,6 +2,16 @@
 
 **Welcome!** This guide will help you build, use, and develop the FasterBASIC QBE compiler.
 
+> **⚠️ CRITICAL: TEST RUNNER LOCATION**
+> 
+> **USE THIS COMMAND TO RUN TESTS:**
+> ```bash
+> ./run_tests.sh
+> ```
+> 
+> **DO NOT** use `./test_basic_suite.sh` or other test scripts - they may not exist or may be outdated.
+> The **ONLY** correct test runner is `./run_tests.sh` at the project root.
+
 > **⚠️ Important Build Note:** This project has a single build location at `qbe_basic_integrated/build_qbe_basic.sh`. 
 > The `qbe_basic` executable at the project root is a **symlink** to `qbe_basic_integrated/qbe_basic`.
 > Always build using `cd qbe_basic_integrated && ./build_qbe_basic.sh` to ensure you have the latest code.
@@ -401,46 +411,63 @@ diff -y program.qbe program.s | less
 
 ## Running Tests
 
-### Full Test Suite
+### Full Test Suite (CORRECT WAY)
 
-Run all 56 tests (arithmetic, loops, strings, arrays, types, etc.):
+⚠️ **USE THIS COMMAND:**
 
 ```bash
-./test_basic_suite.sh
+./run_tests.sh
 ```
+
+Run all **107 tests** (arithmetic, loops, strings, arrays, types, functions, exceptions, etc.):
 
 **Output:**
 ```
-═══════════════════════════════════════════════════════════
-  ARITHMETIC TESTS
-═══════════════════════════════════════════════════════════
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  FasterBASIC Test Runner
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Searching for tests...
+
+═══ ARITHMETIC TESTS ═══
+Testing: bench_abs_sgn ... PASS
+Testing: test_abs_sgn ... PASS
+Testing: test_bitwise_basic ... PASS
+Testing: test_double_basic ... PASS
+Testing: test_function ... PASS
+Testing: test_integer_basic ... PASS
+Testing: test_madd_comprehensive ... PASS
+Testing: test_madd_fusion ... PASS
+Testing: test_madd_simple ... PASS
+...
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ℹ INFO: Testing: test_integer_basic
+  TEST SUMMARY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  [1/4] Compiling BASIC to QBE IL...
-  [2/4] Compiling QBE IL to Assembly...
-  [3/4] Linking with runtime...
-  [4/4] Running executable...
-✓ PASS: test_integer_basic
-    Output:
-      === Integer Arithmetic Tests ===
-      10 + 20 = 30
-      PASS: Addition
-      ...
 
-╔════════════════════════════════════════════════════════════╗
-║                    TEST SUMMARY                            ║
-╚════════════════════════════════════════════════════════════╝
+Total Tests:   107
+Passed:        81
+Failed:        26
+Timeout:       0
 
-Total Tests:   56
-Passed:        56
-Failed:        0
-Skipped:       0
+Failed Tests:
+  ✗ test_gosub (compile error)
+  ✗ test_on_gosub (compile error)
+  ...
 
-═══════════════════════════════════════════════════════════
-  ✓ ALL TESTS PASSED!
-═══════════════════════════════════════════════════════════
+✗ SOME TESTS FAILED
+```
+
+**Current baseline:** ~81/107 tests passing (75.7%)
+
+### Quick Test Check
+
+```bash
+# See just the summary
+./run_tests.sh | tail -20
+
+# Run tests and save output
+./run_tests.sh > test_results.txt 2>&1
 ```
 
 ### Run a Single Test
@@ -882,10 +909,13 @@ gcc program.s fsh/FasterBASICT/runtime_c/*.c -I fsh/FasterBASICT/runtime_c -lm -
 
 ### Testing
 ```bash
-# Run all tests
-./test_basic_suite.sh
+# Run all tests (CORRECT COMMAND - USE THIS!)
+./run_tests.sh
 
-# Run specific test
+# Run tests and see summary only
+./run_tests.sh | tail -20
+
+# Run specific test manually
 ./qbe_basic_integrated/qbe_basic tests/arithmetic/test_not_basic.bas > /tmp/t.s
 gcc /tmp/t.s fsh/FasterBASICT/runtime_c/*.c -I fsh/FasterBASICT/runtime_c -lm -o /tmp/t
 /tmp/t

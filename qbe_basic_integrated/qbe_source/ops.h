@@ -12,14 +12,7 @@
 
 #define T(a,b,c,d,e,f,g,h) {                          \
 	{[Kw]=K##a, [Kl]=K##b, [Ks]=K##c, [Kd]=K##d}, \
-	{[Kw]=K##e, [Kl]=K##f, [Ks]=K##g, [Kd]=K##h}, \
-	{[Kw]=Kx, [Kl]=Kx, [Ks]=Kx, [Kd]=Kx}  \
-}
-
-#define T3(a,b,c,d,e,f,g,h,i,j,k,l) {                 \
-	{[Kw]=K##a, [Kl]=K##b, [Ks]=K##c, [Kd]=K##d}, \
-	{[Kw]=K##e, [Kl]=K##f, [Ks]=K##g, [Kd]=K##h}, \
-	{[Kw]=K##i, [Kl]=K##j, [Ks]=K##k, [Kd]=K##l}  \
+	{[Kw]=K##e, [Kl]=K##f, [Ks]=K##g, [Kd]=K##h}  \
 }
 
 /*********************/
@@ -225,14 +218,7 @@ O(xselfne,  T(e,e,s,d, e,e,s,d), F(0,0,0,0,0,0,0,0,0,0)) X(0,0,0) V(0)
 O(xselfo,   T(e,e,s,d, e,e,s,d), F(0,0,0,0,0,0,0,0,0,0)) X(0,0,0) V(0)
 O(xselfuo,  T(e,e,s,d, e,e,s,d), F(0,0,0,0,0,0,0,0,0,0)) X(0,0,0) V(0)
 
-/* Fused Multiply-Add/Subtract (ARM64) - at end to avoid shifting other opcodes */
-O(amadd,   T3(w,l,e,e, w,l,e,e, w,l,e,e), F(0,0,0,0,0,0,0,0,0,0)) X(0,0,0) V(0)
-O(amsub,   T3(w,l,e,e, w,l,e,e, w,l,e,e), F(0,0,0,0,0,0,0,0,0,0)) X(0,0,0) V(0)
-O(afmadd,  T3(e,e,s,d, e,e,s,d, e,e,s,d), F(0,0,0,0,0,0,0,0,0,0)) X(0,0,0) V(0)
-O(afmsub,  T3(e,e,s,d, e,e,s,d, e,e,s,d), F(0,0,0,0,0,0,0,0,0,0)) X(0,0,0) V(0)
-
 #undef T
-#undef T3
 #undef X
 #undef V
 #undef O

@@ -848,7 +848,7 @@ typecheck(Fn *fn)
 				err("predecessors not matched in phi %%%s", t->name);
 		}
 		for (i=b->ins; i<&b->ins[b->nins]; i++)
-			for (n=0; n<3; n++) {
+			for (n=0; n<2; n++) {
 				k = optab[i->op].argcls[n][i->cls];
 				r = i->arg[n];
 				t = &fn->tmp[r.val];

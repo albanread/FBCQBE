@@ -1040,37 +1040,27 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
                     std::string startTemp = emitExpression(clause.rangeStart.get());
                     std::string endTemp = emitExpression(clause.rangeEnd.get());
                     
+                    // Get types of range expressions
+                    VariableType startType = inferExpressionType(clause.rangeStart.get());
+                    VariableType endType = inferExpressionType(clause.rangeEnd.get());
+                    
+                    // Convert range values to match SELECT type
+                    std::string startConverted = promoteToType(startTemp, startType, selectType);
+                    std::string endConverted = promoteToType(endTemp, endType, selectType);
+                    
                     // Check: selectValue >= start AND selectValue <= end
                     std::string cmpGE = allocTemp("w");
                     std::string cmpLE = allocTemp("w");
                     
                     if (selectQBEType == "d") {
-                        std::string selectD = allocTemp("d");
-                        emit("    " + selectD + " =d sltof " + selectValue + "\n");
+                        emit("    " + cmpGE + " =w cged " + selectValue + ", " + startConverted + "\n");
                         m_stats.instructionsGenerated++;
-                        emit("    " + cmpGE + " =w cged " + selectD + ", " + startTemp + "\n");
-                        m_stats.instructionsGenerated++;
-                        emit("    " + cmpLE + " =w cled " + selectD + ", " + endTemp + "\n");
+                        emit("    " + cmpLE + " =w cled " + selectValue + ", " + endConverted + "\n");
                         m_stats.instructionsGenerated++;
                     } else {
-                        // Convert start and end to word if needed
-                        std::string startWord = startTemp;
-                        std::string endWord = endTemp;
-                        if (selectQBEType == "w" || selectQBEType == "l") {
-                            // Need to convert double to int
-                            std::string tempStart = allocTemp("w");
-                            emit("    " + tempStart + " =w dtosi " + startTemp + "\n");
-                            m_stats.instructionsGenerated++;
-                            startWord = tempStart;
-                            
-                            std::string tempEnd = allocTemp("w");
-                            emit("    " + tempEnd + " =w dtosi " + endTemp + "\n");
-                            m_stats.instructionsGenerated++;
-                            endWord = tempEnd;
-                        }
-                        emit("    " + cmpGE + " =w csgew " + selectValue + ", " + startWord + "\n");
+                        emit("    " + cmpGE + " =w csgew " + selectValue + ", " + startConverted + "\n");
                         m_stats.instructionsGenerated++;
-                        emit("    " + cmpLE + " =w cslew " + selectValue + ", " + endWord + "\n");
+                        emit("    " + cmpLE + " =w cslew " + selectValue + ", " + endConverted + "\n");
                         m_stats.instructionsGenerated++;
                     }
                     
@@ -1082,43 +1072,36 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
                 } else if (clause.isCaseIs) {
                     // CASE IS condition - evaluate right expression and compare
                     std::string rightTemp = emitExpression(clause.caseIsRightExpr.get());
+                    VariableType rightType = inferExpressionType(clause.caseIsRightExpr.get());
+                    
+                    // Convert right side to match SELECT type
+                    std::string rightConverted = promoteToType(rightTemp, rightType, selectType);
+                    
                     std::string cmpTemp = allocTemp("w");
                     std::string opStr;
                     if (selectQBEType == "d") {
-                        std::string selectD = allocTemp("d");
-                        emit("    " + selectD + " =d sltof " + selectValue + "\n");
-                        m_stats.instructionsGenerated++;
                         opStr = getComparisonOpDouble(clause.caseIsOperator);
-                        emit("    " + cmpTemp + " =w " + opStr + " " + selectD + ", " + rightTemp + "\n");
+                        emit("    " + cmpTemp + " =w " + opStr + " " + selectValue + ", " + rightConverted + "\n");
                     } else {
-                        // Convert to word
-                        std::string rightWord = rightTemp;
-                        std::string temp = allocTemp("w");
-                        emit("    " + temp + " =w dtosi " + rightTemp + "\n");
-                        m_stats.instructionsGenerated++;
-                        rightWord = temp;
                         opStr = getComparisonOp(clause.caseIsOperator);
-                        emit("    " + cmpTemp + " =w " + opStr + " " + selectValue + ", " + rightWord + "\n");
+                        emit("    " + cmpTemp + " =w " + opStr + " " + selectValue + ", " + rightConverted + "\n");
                     }
                     m_stats.instructionsGenerated++;
                     m_lastCondition = cmpTemp;
                 } else if (clause.values.size() == 1) {
                     // Single value comparison
                     std::string valueTemp = emitExpression(clause.values[0].get());
+                    VariableType valueType = inferExpressionType(clause.values[0].get());
+                    
+                    // Convert value to match SELECT type
+                    std::string valueConverted = promoteToType(valueTemp, valueType, selectType);
+                    
                     std::string cmpTemp = allocTemp("w");
                     if (selectQBEType == "d") {
-                        std::string selectD = allocTemp("d");
-                        emit("    " + selectD + " =d sltof " + selectValue + "\n");
-                        m_stats.instructionsGenerated++;
                         std::string opStr = "ceqd"; // equal for double
-                        emit("    " + cmpTemp + " =w " + opStr + " " + selectD + ", " + valueTemp + "\n");
+                        emit("    " + cmpTemp + " =w " + opStr + " " + selectValue + ", " + valueConverted + "\n");
                     } else {
-                        std::string valueWord = valueTemp;
-                        std::string temp = allocTemp("w");
-                        emit("    " + temp + " =w dtosi " + valueTemp + "\n");
-                        m_stats.instructionsGenerated++;
-                        valueWord = temp;
-                        emit("    " + cmpTemp + " =w ceqw " + selectValue + ", " + valueWord + "\n");
+                        emit("    " + cmpTemp + " =w ceqw " + selectValue + ", " + valueConverted + "\n");
                     }
                     m_stats.instructionsGenerated++;
                     m_lastCondition = cmpTemp;
@@ -1127,20 +1110,17 @@ void QBECodeGenerator::emitBlock(const BasicBlock* block) {
                     std::vector<std::string> comparisons;
                     for (const auto& valueExpr : clause.values) {
                         std::string valueTemp = emitExpression(valueExpr.get());
+                        VariableType valueType = inferExpressionType(valueExpr.get());
+                        
+                        // Convert value to match SELECT type
+                        std::string valueConverted = promoteToType(valueTemp, valueType, selectType);
+                        
                         std::string cmpTemp = allocTemp("w");
                         if (selectQBEType == "d") {
-                            std::string selectD = allocTemp("d");
-                            emit("    " + selectD + " =d sltof " + selectValue + "\n");
-                            m_stats.instructionsGenerated++;
                             std::string opStr = "ceqd";
-                            emit("    " + cmpTemp + " =w " + opStr + " " + selectD + ", " + valueTemp + "\n");
+                            emit("    " + cmpTemp + " =w " + opStr + " " + selectValue + ", " + valueConverted + "\n");
                         } else {
-                            std::string valueWord = valueTemp;
-                            std::string temp = allocTemp("w");
-                            emit("    " + temp + " =w dtosi " + valueTemp + "\n");
-                            m_stats.instructionsGenerated++;
-                            valueWord = temp;
-                            emit("    " + cmpTemp + " =w ceqw " + selectValue + ", " + valueWord + "\n");
+                            emit("    " + cmpTemp + " =w ceqw " + selectValue + ", " + valueConverted + "\n");
                         }
                         m_stats.instructionsGenerated++;
                         comparisons.push_back(cmpTemp);

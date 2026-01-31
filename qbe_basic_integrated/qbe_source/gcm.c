@@ -318,7 +318,7 @@ schedins(Fn *fn, Blk *b, Ins *i, Ins **pvins, uint *pnins)
 
 	igroup(b, i, &i0, &i1);
 	for (i=i0; i<i1; i++)
-		for (n=0; n<3; n++) {
+		for (n=0; n<2; n++) {
 			if (rtype(i->arg[n]) != RTmp)
 				continue;
 			t = &fn->tmp[i->arg[n].val];

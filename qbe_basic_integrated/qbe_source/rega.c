@@ -402,7 +402,7 @@ doblk(Blk *b, RMap *cur)
 			}
 			break;
 		}
-		for (x=0, nr=0; x<3; x++)
+		for (x=0, nr=0; x<2; x++)
 			switch (rtype(i->arg[x])) {
 			case RMem:
 				m = &mem[i->arg[x].val];

@@ -2,6 +2,21 @@
 
 This directory contains utility scripts for building, testing, and maintaining the FasterBASIC QBE compiler.
 
+---
+
+## ⚠️ IMPORTANT: TEST RUNNER LOCATION
+
+**THE MAIN TEST RUNNER IS AT PROJECT ROOT:**
+
+```bash
+cd /path/to/FBCQBE
+./run_tests.sh
+```
+
+**DO NOT** look for test runners in this scripts directory. The primary test script has been moved to the project root for visibility.
+
+---
+
 ## Available Scripts
 
 ### Build Scripts
@@ -13,14 +28,17 @@ This directory contains utility scripts for building, testing, and maintaining t
 
 ### Test Scripts
 
-- **run_tests_simple.sh** - Run simple test suite
-  - Quick smoke tests for basic functionality
-  - Useful for rapid iteration during development
+**⚠️ PRIMARY TEST RUNNER:** Use `./run_tests.sh` from the project root (not in this directory)
+
+- **run_tests_simple.sh** - Source for main test runner
+  - This file is copied to `../run_tests.sh` at project root
+  - DO NOT run from this scripts directory
+  - Always use `./run_tests.sh` from project root
 
 - **verify_implementation.sh** - Comprehensive verification
-  - Runs full test suite
-  - Validates all language features
-  - Use before committing changes
+  - Alternative verification script
+  - Less commonly used
+  - Use `./run_tests.sh` instead for standard testing
 
 ### Utility Scripts
 
@@ -34,15 +52,20 @@ This directory contains utility scripts for building, testing, and maintaining t
 
 ## Usage
 
-All scripts should be run from the project root directory:
+**CORRECT WAY TO RUN TESTS:**
 
 ```bash
-# From project root
-./scripts/run_tests_simple.sh
+# From project root - THIS IS THE ONLY CORRECT COMMAND
+./run_tests.sh
+```
 
-# Or with full path
-cd /path/to/FBCQBE
-./scripts/verify_implementation.sh
+**DO NOT** run test scripts from the scripts directory. The main test runner is at the project root for easy access.
+
+If you need to run other utility scripts:
+
+```bash
+# Run from project root
+./scripts/generate_tests.sh
 ```
 
 ## Building the Compiler

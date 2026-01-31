@@ -442,10 +442,10 @@ spill(Fn *fn)
 				}
 			}
 			j = T.memargs(i->op);
-			for (n=0; n<3; n++)
+			for (n=0; n<2; n++)
 				if (rtype(i->arg[n]) == RMem)
 					j--;
-			for (n=0; n<3; n++)
+			for (n=0; n<2; n++)
 				switch (rtype(i->arg[n])) {
 				case RMem:
 					t = i->arg[n].val;
@@ -469,7 +469,7 @@ spill(Fn *fn)
 				}
 			bscopy(u, v);
 			limit2(v, 0, 0, w);
-			for (n=0; n<3; n++)
+			for (n=0; n<2; n++)
 				if (rtype(i->arg[n]) == RTmp) {
 					t = i->arg[n].val;
 					if (!bshas(v, t)) {

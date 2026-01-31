@@ -1,0 +1,41 @@
+================================================================================
+HOW TO RUN TESTS
+================================================================================
+
+FROM THE PROJECT ROOT, RUN:
+
+    ./run_tests.sh
+
+
+THAT'S IT. DON'T USE ANY OTHER TEST COMMAND.
+
+
+NOT:  ./test_basic_suite.sh  (doesn't exist)
+NOT:  ./scripts/run_tests_simple.sh  (wrong location)
+NOT:  anything else
+
+ONLY:  ./run_tests.sh
+
+
+For more details, see TESTING.md
+
+
+================================================================================
+QUICK COMMANDS
+================================================================================
+
+Run all tests:
+    ./run_tests.sh
+
+See just the summary:
+    ./run_tests.sh | tail -20
+
+Run and save results:
+    ./run_tests.sh > results.txt 2>&1
+
+Run a single test manually:
+    ./qbe_basic -o /tmp/test tests/arithmetic/test_name.bas
+    /tmp/test
+
+
+================================================================================

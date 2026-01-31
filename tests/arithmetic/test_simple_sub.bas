@@ -1,5 +1,5 @@
 10 PRINT "Testing simple SUB"
-20 test_abs_basic
+CALL test_abs_basic()
 30 PRINT "Done"
 40 END
 50

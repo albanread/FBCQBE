@@ -95,7 +95,7 @@ filluse(Fn *fn)
 				tmp[t].ndef++;
 				tmp[t].cls = i->cls;
 			}
-			for (m=0; m<3; m++)
+			for (m=0; m<2; m++)
 				if (rtype(i->arg[m]) == RTmp) {
 					t = i->arg[m].val;
 					adduse(&tmp[t], UIns, b, i);
@@ -281,7 +281,7 @@ renblk(Blk *b, Name **stk, Fn *fn)
 	for (p=b->phi; p; p=p->link)
 		rendef(&p->to, b, stk, fn);
 	for (i=b->ins; i<&b->ins[b->nins]; i++) {
-		for (m=0; m<3; m++) {
+		for (m=0; m<2; m++) {
 			t = i->arg[m].val;
 			if (rtype(i->arg[m]) == RTmp)
 			if (fn->tmp[t].visit)

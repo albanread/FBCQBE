@@ -217,7 +217,7 @@ enum {
 
 struct Op {
 	char *name;
-	short argcls[3][4];  /* Extended to 3 for MADD/FMADD */
+	short argcls[2][4];
 	uint canfold:1;
 	uint hasid:1;     /* op identity value? */
 	uint idval:1;     /* identity value 0/1 */
@@ -234,7 +234,7 @@ struct Ins {
 	uint op:30;
 	uint cls:2;
 	Ref to;
-	Ref arg[3];  /* Extended to 3 for MADD/FMADD fusion */
+	Ref arg[2];
 };
 
 struct Phi {
@@ -495,7 +495,6 @@ int isreg(Ref);
 int iscmp(int, int *, int *);
 void igroup(Blk *, Ins *, Ins **, Ins **);
 void emit(int, int, Ref, Ref, Ref);
-void emit3(int, int, Ref, Ref, Ref, Ref);
 void emiti(Ins);
 void idup(Blk *, Ins *, ulong);
 Ins *icpy(Ins *, Ins *, ulong);
