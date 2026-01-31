@@ -4,13 +4,36 @@ This directory contains implementations of Rosetta Code challenges in FasterBASI
 
 ## Tests
 
-### 1. Levenshtein Distance
+### 1. 100 Doors
+**File:** `hundred_doors.bas`
+**Challenge:** https://rosettacode.org/wiki/100_doors
+
+Classic problem: 100 doors, all initially closed. Make 100 passes:
+- Pass 1: Toggle every door (1, 2, 3, ...)
+- Pass 2: Toggle every 2nd door (2, 4, 6, ...)
+- Pass 3: Toggle every 3rd door (3, 6, 9, ...)
+- Pass N: Toggle every Nth door
+
+Question: Which doors are open after all passes?
+
+**Algorithm:** A door is toggled once for each divisor it has. Only perfect squares have an odd number of divisors, so only doors 1, 4, 9, 16, 25, 36, 49, 64, 81, and 100 end up open.
+
+**Features demonstrated:**
+- Arrays (100-element integer array)
+- Nested loops (100 passes × variable doors per pass)
+- WHILE loops for stepping through doors
+- Mathematical verification using SQR() function
+- Pattern recognition and algorithm analysis
+
+**Expected Output:** `hundred_doors.expected`
+
+### 2. Levenshtein Distance
 **File:** `levenshtein_distance.bas`  
 **Challenge:** https://rosettacode.org/wiki/Levenshtein_distance
 
 Calculates the minimum edit distance between two strings using dynamic programming.
 
-### 2. GOSUB/RETURN Control Flow
+### 3. GOSUB/RETURN Control Flow
 **File:** `gosub_if_control_flow.bas`  
 **Purpose:** Regression test for GOSUB/RETURN in multiline IF blocks
 
@@ -24,7 +47,7 @@ This test validates the fix for a compiler bug where RETURN would incorrectly ju
 
 **Expected Output:** `gosub_if_control_flow.expected`
 
-### 3. Mersenne Number Factors
+### 4. Mersenne Number Factors
 **File:** `mersenne_factors.bas`  
 **Challenge:** https://rosettacode.org/wiki/Factors_of_a_Mersenne_number
 
