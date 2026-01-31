@@ -535,6 +535,164 @@ try_msub_fusion(Ins *i, Ins *prev, E *e)
 	return 1; /* Successfully fused */
 }
 
+/* Check if shifted operand fusion is enabled via environment variable
+ * Returns 1 if enabled, 0 if disabled (default: enabled)
+ */
+static int
+is_shift_fusion_enabled(void)
+{
+	static int checked = 0;
+	static int enabled = 1;  /* Default: enabled */
+	
+	if (!checked) {
+		const char *env = getenv("ENABLE_SHIFT_FUSION");
+		if (env) {
+			enabled = (strcmp(env, "1") == 0 || strcmp(env, "true") == 0);
+		}
+		checked = 1;
+	}
+	
+	return enabled;
+}
+
+/* Try to fuse shift + arithmetic patterns into single instructions with shifted operands.
+ * ARM64 supports shifted operands in many instructions: ADD, SUB, AND, OR, EOR, etc.
+ * Pattern: SHIFT dest, src, #imm
+ *          followed by: OP result, arg1, dest
+ * Emits:   OP result, arg1, src, SHIFT #imm
+ * Returns: 1 if fused, 0 if not fusible
+ */
+static int
+try_shift_fusion(Ins *i, Ins *prev, E *e)
+{
+	char *shift_mnemonic = NULL;
+	char *op_prefix = "";
+	int shift_amount;
+	Ref shift_src, other_operand;
+	int shift_in_arg0, shift_in_arg1;
+
+	/* Only fuse integer operations */
+	if (KBASE(i->cls) != 0 || KBASE(prev->cls) != 0)
+		return 0;
+
+	/* Check if prev is a shift instruction */
+	if (prev->op != Oshl && prev->op != Oshr && prev->op != Osar)
+		return 0;
+
+	/* Shift amount must be a constant immediate */
+	if (prev->arg[1].type != RCon)
+		return 0;
+
+	/* Get the shift constant value */
+	Con *shift_con = &e->fn->con[prev->arg[1].val];
+	if (shift_con->type != CBits)
+		return 0;
+	
+	shift_amount = (int)shift_con->bits.i;
+
+	/* Shift amount must be reasonable (0-63 for 64-bit, 0-31 for 32-bit) */
+	if (shift_amount < 0 || shift_amount > 63)
+		return 0;
+
+	/* Current instruction must be ADD, SUB, AND, OR, or XOR */
+	if (i->op != Oadd && i->op != Osub && i->op != Oand && i->op != Oor && i->op != Oxor)
+		return 0;
+
+	/* Check which operand of current instruction uses the shift result */
+	shift_in_arg0 = req(i->arg[0], prev->to);
+	shift_in_arg1 = req(i->arg[1], prev->to);
+
+	if (!shift_in_arg0 && !shift_in_arg1)
+		return 0;  /* Current instruction doesn't use shift result */
+
+	if (shift_in_arg0 && shift_in_arg1)
+		return 0;  /* Both operands use shift result - shouldn't happen but be safe */
+
+	/* All operands must be registers */
+	if (!isreg(prev->arg[0]) || !isreg(i->arg[0]) || !isreg(i->arg[1]))
+		return 0;
+
+	/* Determine the non-shift operand */
+	other_operand = shift_in_arg0 ? i->arg[1] : i->arg[0];
+	shift_src = prev->arg[0];
+
+	/* SUB doesn't support shifted operand in arg[0], only arg[1] */
+	if (i->op == Osub && shift_in_arg0)
+		return 0;
+
+	/* Determine shift mnemonic */
+	switch (prev->op) {
+	case Oshl:
+		shift_mnemonic = "lsl";
+		break;
+	case Oshr:
+		shift_mnemonic = "lsr";
+		break;
+	case Osar:
+		shift_mnemonic = "asr";
+		break;
+	default:
+		return 0;
+	}
+
+	/* Determine operation prefix (for wide vs long) */
+	if (KWIDE(i->cls)) {
+		op_prefix = "W";
+	} else {
+		op_prefix = "";
+	}
+
+	/* Emit fused instruction with shifted operand */
+	switch (i->op) {
+	case Oadd:
+		fprintf(e->f, "\tadd\t%s%s, %s%s, %s%s, %s #%d\n",
+			op_prefix, rname(i->to.val, i->cls),
+			op_prefix, rname(other_operand.val, i->cls),
+			op_prefix, rname(shift_src.val, i->cls),
+			shift_mnemonic, shift_amount);
+		break;
+	case Osub:
+		/* For SUB, the shifted operand is always arg[1] */
+		fprintf(e->f, "\tsub\t%s%s, %s%s, %s%s, %s #%d\n",
+			op_prefix, rname(i->to.val, i->cls),
+			op_prefix, rname(other_operand.val, i->cls),
+			op_prefix, rname(shift_src.val, i->cls),
+			shift_mnemonic, shift_amount);
+		break;
+	case Oand:
+		fprintf(e->f, "\tand\t%s%s, %s%s, %s%s, %s #%d\n",
+			op_prefix, rname(i->to.val, i->cls),
+			op_prefix, rname(other_operand.val, i->cls),
+			op_prefix, rname(shift_src.val, i->cls),
+			shift_mnemonic, shift_amount);
+		break;
+	case Oor:
+		fprintf(e->f, "\torr\t%s%s, %s%s, %s%s, %s #%d\n",
+			op_prefix, rname(i->to.val, i->cls),
+			op_prefix, rname(other_operand.val, i->cls),
+			op_prefix, rname(shift_src.val, i->cls),
+			shift_mnemonic, shift_amount);
+		break;
+	case Oxor:
+		fprintf(e->f, "\teor\t%s%s, %s%s, %s%s, %s #%d\n",
+			op_prefix, rname(i->to.val, i->cls),
+			op_prefix, rname(other_operand.val, i->cls),
+			op_prefix, rname(shift_src.val, i->cls),
+			shift_mnemonic, shift_amount);
+		break;
+	default:
+		return 0;
+	}
+
+	if (getenv("DEBUG_SHIFT_FUSION"))
+		fprintf(stderr, "SHIFT: Fused %s + %s into single instruction\n",
+			shift_mnemonic, i->op == Oadd ? "ADD" : 
+			i->op == Osub ? "SUB" : i->op == Oand ? "AND" :
+			i->op == Oor ? "OR" : "XOR");
+
+	return 1; /* Successfully fused */
+}
+
 static void
 emitins(Ins *i, E *e)
 {
@@ -768,34 +926,50 @@ arm64_emitfn(Fn *fn, FILE *out)
 		if (lbl || b->npred > 1)
 			fprintf(e->f, "%s%d:\n", T.asloc, id0+b->id);
 		for (i=b->ins; i!=&b->ins[b->nins]; i++) {
-			/* If we have a pending MUL, try to fuse with current instruction */
-			if (is_madd_fusion_enabled() && prev) {
-				if (try_madd_fusion(i, prev, e)) {
-					/* Fused! Both MUL and ADD emitted as MADD, continue */
-					prev = NULL;
-					continue;
+			/* If we have a pending instruction, try to fuse with current instruction */
+			if (prev) {
+				/* Try MADD/MSUB fusion if previous was MUL */
+				if (is_madd_fusion_enabled() && prev->op == Omul) {
+					if (try_madd_fusion(i, prev, e)) {
+						/* Fused! Both MUL and ADD emitted as MADD, continue */
+						prev = NULL;
+						continue;
+					}
+					if (try_msub_fusion(i, prev, e)) {
+						/* Fused! Both MUL and SUB emitted as MSUB, continue */
+						prev = NULL;
+						continue;
+					}
 				}
-				if (try_msub_fusion(i, prev, e)) {
-					/* Fused! Both MUL and SUB emitted as MSUB, continue */
-					prev = NULL;
-					continue;
+				
+				/* Try shift fusion if previous was a shift */
+				if (is_shift_fusion_enabled() && 
+				    (prev->op == Oshl || prev->op == Oshr || prev->op == Osar)) {
+					if (try_shift_fusion(i, prev, e)) {
+						/* Fused! Both SHIFT and OP emitted as single instruction */
+						prev = NULL;
+						continue;
+					}
 				}
-				/* Couldn't fuse - emit the pending MUL now */
+				
+				/* Couldn't fuse - emit the pending instruction now */
 				emitins(prev, e);
 				prev = NULL;
 			}
 			
-			/* Check if this is a MUL - defer emission to see if next instruction fuses */
-			if (is_madd_fusion_enabled() && i->op == Omul) {
+			/* Check if this is a fusible instruction - defer emission */
+			if ((is_madd_fusion_enabled() && i->op == Omul) ||
+			    (is_shift_fusion_enabled() && 
+			     (i->op == Oshl || i->op == Oshr || i->op == Osar))) {
 				prev = i;
 				continue;
 			}
 			
-			/* Not a MUL, emit normally */
+			/* Not a fusible instruction, emit normally */
 			emitins(i, e);
 		}
 		
-		/* If we have a pending MUL at end of block, emit it now */
+		/* If we have a pending instruction at end of block, emit it now */
 		if (prev) {
 			emitins(prev, e);
 			prev = NULL;
