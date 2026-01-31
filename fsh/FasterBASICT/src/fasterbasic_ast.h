@@ -2193,7 +2193,8 @@ public:
         ASCII,
         DETECTSTRING,
         ERROR,
-        CANCELLABLE
+        CANCELLABLE,
+        BOUNDS_CHECK
     };
 
     OptionType type;
@@ -2216,6 +2217,7 @@ public:
             case OptionType::DETECTSTRING: oss << "DETECTSTRING"; break;
             case OptionType::ERROR: oss << "ERROR"; break;
             case OptionType::CANCELLABLE: oss << "CANCELLABLE"; break;
+            case OptionType::BOUNDS_CHECK: oss << "BOUNDS_CHECK"; break;
         }
         oss << "\n";
         return oss.str();

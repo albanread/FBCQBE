@@ -2406,10 +2406,14 @@ void QBECodeGenerator::emitRead(const ReadStatement* stmt) {
         VariableType varType = getVariableType(varName);
         
         if (varType == VariableType::STRING) {
+            // basic_read_string() returns a raw C string pointer (const char*)
+            // We need to wrap it in a StringDescriptor using string_new_utf8
             std::string strPtr = allocTemp("l");
             emit("    " + strPtr + " =l call $basic_read_string()\n");
-            emit("    " + varRef + " =l copy " + strPtr + "\n");
-            m_stats.instructionsGenerated += 2;
+            std::string desc = allocTemp("l");
+            emit("    " + desc + " =l call $string_new_utf8(l " + strPtr + ")\n");
+            emit("    " + varRef + " =l copy " + desc + "\n");
+            m_stats.instructionsGenerated += 3;
         } else if (varType == VariableType::INT) {
             // Runtime returns 32-bit int, but INT variables are 64-bit
             std::string intVal = allocTemp("w");

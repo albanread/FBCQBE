@@ -217,6 +217,7 @@ void Lexer::initializeKeywords() {
         s_keywords["INCLUDE"] = TokenType::INCLUDE;
         s_keywords["ONCE"] = TokenType::ONCE;
         s_keywords["CANCELLABLE"] = TokenType::CANCELLABLE;
+        s_keywords["BOUNDS_CHECK"] = TokenType::BOUNDS_CHECK;
         s_keywords["FORCE_YIELD"] = TokenType::FORCE_YIELD;
         s_keywords["OFF"] = TokenType::OFF;
     });

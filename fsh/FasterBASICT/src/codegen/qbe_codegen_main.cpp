@@ -191,6 +191,18 @@ void QBECodeGenerator::emitDataSection() {
         emit("\n");
     }
     
+    // Emit array descriptors as global data (64 bytes each, 8-byte aligned)
+    if (m_symbols && !m_symbols->arrays.empty()) {
+        emitComment("Array descriptors (64 bytes each)");
+        for (const auto& [name, arraySym] : m_symbols->arrays) {
+            emit("export data $arr_" + name + "_global = align 8 { ");
+            // 64 bytes initialized to zero (8 longs = 64 bytes)
+            emit("l 0, l 0, l 0, l 0, l 0, l 0, l 0, l 0");
+            emit(" }\n");
+        }
+        emit("\n");
+    }
+    
     // Emit DATA values if present
     if (!m_dataValues.empty()) {
         emitComment("DATA values");
@@ -359,8 +371,8 @@ void QBECodeGenerator::emitMainFunction() {
             std::string arrayRef = "%arr_" + name;
             m_arrays[name] = m_arrays.size();
             
-            // Allocate descriptor on stack (64 bytes, 8-byte aligned)
-            emit("    " + arrayRef + " =l alloc8 64\n");
+            // Load address of global array descriptor
+            emit("    " + arrayRef + " =l copy $arr_" + name + "_global\n");
             m_stats.instructionsGenerated++;
             
             // Initialize descriptor to null/zero state
@@ -390,7 +402,7 @@ void QBECodeGenerator::emitMainFunction() {
             m_stats.instructionsGenerated += 10;
             m_stats.arraysUsed++;
             
-            emitComment("Array descriptor " + name + " allocated (40 bytes)");
+            emitComment("Array descriptor " + name + " initialized from global");
         }
     }
     emit("\n");

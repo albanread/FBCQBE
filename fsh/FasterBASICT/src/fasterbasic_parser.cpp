@@ -331,6 +331,14 @@ void Parser::collectOptionsFromTokens() {
                 } else {
                     error("Expected ON or OFF after OPTION CANCELLABLE");
                 }
+            } else if (match(TokenType::BOUNDS_CHECK)) {
+                if (match(TokenType::ON)) {
+                    m_options.boundsChecking = true;
+                } else if (match(TokenType::OFF)) {
+                    m_options.boundsChecking = false;
+                } else {
+                    error("Expected ON or OFF after OPTION BOUNDS_CHECK");
+                }
             } else if (match(TokenType::FORCE_YIELD)) {
                 m_options.forceYieldEnabled = true;
                 // Check for optional instruction budget
@@ -3535,8 +3543,18 @@ StatementPtr Parser::parseOptionStatement() {
             error("Expected ON or OFF after OPTION CANCELLABLE");
             return nullptr;
         }
+    } else if (match(TokenType::BOUNDS_CHECK)) {
+        // Parse ON/OFF for OPTION BOUNDS_CHECK
+        if (match(TokenType::ON)) {
+            return std::make_unique<OptionStatement>(OptionStatement::OptionType::BOUNDS_CHECK, 1);
+        } else if (match(TokenType::OFF)) {
+            return std::make_unique<OptionStatement>(OptionStatement::OptionType::BOUNDS_CHECK, 0);
+        } else {
+            error("Expected ON or OFF after OPTION BOUNDS_CHECK");
+            return nullptr;
+        }
     } else {
-        error("Unknown OPTION type. Expected BITWISE, LOGICAL, BASE, EXPLICIT, UNICODE, ASCII, DETECTSTRING, ERROR, or CANCELLABLE");
+        error("Unknown OPTION type. Expected BITWISE, LOGICAL, BASE, EXPLICIT, UNICODE, ASCII, DETECTSTRING, ERROR, CANCELLABLE, or BOUNDS_CHECK");
         return nullptr;
     }
 }

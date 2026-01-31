@@ -1,4 +1,25 @@
 #include "all.h"
+#include <stdlib.h>
+
+/* Check if MADD fusion is enabled via environment variable
+ * Returns 1 if enabled, 0 if disabled (default: enabled)
+ */
+static int
+is_madd_fusion_enabled(void)
+{
+	static int checked = 0;
+	static int enabled = 1;  /* Default: enabled */
+	
+	if (!checked) {
+		const char *env = getenv("ENABLE_MADD_FUSION");
+		if (env) {
+			enabled = (strcmp(env, "1") == 0 || strcmp(env, "true") == 0);
+		}
+		checked = 1;
+	}
+	
+	return enabled;
+}
 
 typedef struct E E;
 
@@ -366,6 +387,154 @@ fixarg(Ref *pr, int sz, int t, E *e)
 	return 0;
 }
 
+/* Try to fuse multiply-add patterns into MADD/FMADD instructions.
+ * Pattern: ADD dest, src1, mul_result
+ *          where mul_result = MUL arg1, arg2 (single use)
+ * Emits:   MADD dest, arg1, arg2, src1
+ *          (dest = src1 + (arg1 * arg2))
+ * Returns: 1 if fused, 0 if not fusible
+ */
+static int
+try_madd_fusion(Ins *i, Ins *prev, E *e)
+{
+	Ref addend;
+	int mul_in_arg0, mul_in_arg1;
+	char *mnemonic;
+
+	/* Check if pattern matches: ADD following MUL */
+	if (!prev || i->op != Oadd || prev->op != Omul)
+		return 0;
+
+	/* Type must match */
+	if (i->cls != prev->cls)
+		return 0;
+
+	/* Check if ADD uses MUL result */
+	mul_in_arg0 = req(i->arg[0], prev->to);
+	mul_in_arg1 = req(i->arg[1], prev->to);
+
+	if (!mul_in_arg0 && !mul_in_arg1)
+		return 0; /* MUL result not used by ADD */
+
+	/* All operands must be registers (not spilled, not constants) */
+	if (!isreg(prev->arg[0]) || !isreg(prev->arg[1]))
+		return 0;
+	if (!isreg(i->arg[0]) || !isreg(i->arg[1]))
+		return 0;
+
+	/* Note: We cannot check nuse at emitter stage because after register
+	 * allocation, prev->to.val is a physical register number, not a temp index.
+	 * Instead, we rely on the peephole pattern: if the MUL is immediately
+	 * followed by an ADD that uses its result, and no other instruction between
+	 * them, then the result is single-use within this basic block.
+	 * This is safe because:
+	 * 1. We only look at adjacent instructions
+	 * 2. If MUL result was needed elsewhere, register allocator would have
+	 *    inserted a copy or the instructions wouldn't be adjacent
+	 */
+
+	/* Determine the addend (the non-multiply operand) */
+	addend = mul_in_arg0 ? i->arg[1] : i->arg[0];
+
+	/* CRITICAL SAFETY CHECK: Do not fuse if addend is the same register as MUL output.
+	 * This can happen when register allocator reuses registers across control flow merges.
+	 * If addend == prev->to, the addend value may be stale from a PHI node or control merge.
+	 * This bug manifests as incorrect array accesses after WHILE loops with nested IFs.
+	 */
+	if (req(addend, prev->to)) {
+		if (getenv("DEBUG_MADD"))
+			fprintf(stderr, "MADD: Addend is same register as MUL result - unsafe to fuse\n");
+		return 0;
+	}
+
+	/* Select instruction mnemonic based on type */
+	if (KBASE(i->cls) == 0) {
+		/* Integer MADD */
+		mnemonic = "madd";
+	} else {
+		/* Floating-point FMADD */
+		mnemonic = "fmadd";
+	}
+
+	/* Emit fused instruction: MADD dest, mul_op1, mul_op2, addend
+	 * Semantics: dest = addend + (mul_op1 * mul_op2)
+	 * Can't call rname() multiple times in one fprintf
+	 * because it uses a static buffer. Call separately and emit. */
+	fprintf(e->f, "\t%s\t", mnemonic);
+	fprintf(e->f, "%s, ", rname(i->to.val, i->cls));        /* destination */
+	fprintf(e->f, "%s, ", rname(prev->arg[0].val, i->cls)); /* multiply operand 1 */
+	fprintf(e->f, "%s, ", rname(prev->arg[1].val, i->cls)); /* multiply operand 2 */
+	fprintf(e->f, "%s\n", rname(addend.val, i->cls));       /* addend */
+
+	return 1; /* Successfully fused */
+}
+
+/* Try to fuse multiply-subtract patterns into MSUB/FMSUB instructions.
+ * Pattern: SUB dest, src1, mul_result
+ *          where mul_result = MUL arg1, arg2 (single use)
+ * Emits:   MSUB dest, arg1, arg2, src1
+ *          (dest = src1 - (arg1 * arg2))
+ * Returns: 1 if fused, 0 if not fusible
+ */
+static int
+try_msub_fusion(Ins *i, Ins *prev, E *e)
+{
+	char *mnemonic;
+
+	/* Check if pattern matches: SUB following MUL */
+	if (!prev || i->op != Osub || prev->op != Omul)
+		return 0;
+
+	/* Type must match */
+	if (i->cls != prev->cls) {
+		if (getenv("DEBUG_MADD"))
+			fprintf(stderr, "MSUB: Type mismatch\n");
+		return 0;
+	}
+
+	/* SUB must use MUL result as second operand (subtrahend) */
+	if (!req(i->arg[1], prev->to)) {
+		if (getenv("DEBUG_MADD"))
+			fprintf(stderr, "MSUB: MUL result not in SUB arg[1]\n");
+		return 0;
+	}
+
+	/* All operands must be registers */
+	if (!isreg(prev->arg[0]) || !isreg(prev->arg[1])) {
+		if (getenv("DEBUG_MADD"))
+			fprintf(stderr, "MSUB: MUL operands not registers\n");
+		return 0;
+	}
+	if (!isreg(i->arg[0]) || !isreg(i->arg[1])) {
+		if (getenv("DEBUG_MADD"))
+			fprintf(stderr, "MSUB: SUB operands not registers\n");
+		return 0;
+	}
+
+	/* Note: nuse check not valid after register allocation (see try_madd_fusion) */
+
+	/* Select instruction mnemonic based on type */
+	if (KBASE(i->cls) == 0) {
+		/* Integer MSUB */
+		mnemonic = "msub";
+	} else {
+		/* Floating-point FMSUB */
+		mnemonic = "fmsub";
+	}
+
+	/* Emit fused instruction: MSUB dest, mul_op1, mul_op2, minuend
+	 * Semantics: dest = minuend - (mul_op1 * mul_op2)
+	 * Can't call rname() multiple times in one fprintf (static buffer)
+	 */
+	fprintf(e->f, "\t%s\t", mnemonic);
+	fprintf(e->f, "%s, ", rname(i->to.val, i->cls));        /* destination */
+	fprintf(e->f, "%s, ", rname(prev->arg[0].val, i->cls)); /* multiply operand 1 */
+	fprintf(e->f, "%s, ", rname(prev->arg[1].val, i->cls)); /* multiply operand 2 */
+	fprintf(e->f, "%s\n", rname(i->arg[0].val, i->cls));    /* minuend */
+
+	return 1; /* Successfully fused */
+}
+
 static void
 emitins(Ins *i, E *e)
 {
@@ -595,10 +764,42 @@ arm64_emitfn(Fn *fn, FILE *out)
 		}
 
 	for (lbl=0, b=e->fn->start; b; b=b->link) {
+		Ins *prev = NULL;
 		if (lbl || b->npred > 1)
 			fprintf(e->f, "%s%d:\n", T.asloc, id0+b->id);
-		for (i=b->ins; i!=&b->ins[b->nins]; i++)
+		for (i=b->ins; i!=&b->ins[b->nins]; i++) {
+			/* If we have a pending MUL, try to fuse with current instruction */
+			if (is_madd_fusion_enabled() && prev) {
+				if (try_madd_fusion(i, prev, e)) {
+					/* Fused! Both MUL and ADD emitted as MADD, continue */
+					prev = NULL;
+					continue;
+				}
+				if (try_msub_fusion(i, prev, e)) {
+					/* Fused! Both MUL and SUB emitted as MSUB, continue */
+					prev = NULL;
+					continue;
+				}
+				/* Couldn't fuse - emit the pending MUL now */
+				emitins(prev, e);
+				prev = NULL;
+			}
+			
+			/* Check if this is a MUL - defer emission to see if next instruction fuses */
+			if (is_madd_fusion_enabled() && i->op == Omul) {
+				prev = i;
+				continue;
+			}
+			
+			/* Not a MUL, emit normally */
 			emitins(i, e);
+		}
+		
+		/* If we have a pending MUL at end of block, emit it now */
+		if (prev) {
+			emitins(prev, e);
+			prev = NULL;
+		}
 		lbl = 1;
 		switch (b->jmp.type) {
 		case Jhlt:

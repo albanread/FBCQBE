@@ -38,6 +38,12 @@ struct CompilerOptions {
     // Default is true for safety (allows users to turn off for maximum speed)
     bool cancellableLoops = true;
     
+    // Array bounds checking: OPTION BOUNDS_CHECK ON/OFF
+    // When true, emit runtime bounds checking for array accesses
+    // When false, skip bounds checks (faster but unsafe)
+    // Default is true for safety
+    bool boundsChecking = true;
+    
     // Error tracking: OPTION ERROR
     // When true, emit _LINE tracking for better error messages
     // Default is true for better UX (shows BASIC line numbers in runtime errors)
@@ -67,6 +73,7 @@ struct CompilerOptions {
         arrayBase = 1;
         stringMode = StringMode::DETECTSTRING;
         cancellableLoops = true;   // Default to enabled for safety
+        boundsChecking = true;     // Default to enabled for safety
         errorTracking = true;      // Default to enabled for better UX
         bitwiseOperators = false;
         explicitDeclarations = false;

@@ -58,6 +58,8 @@ void printUsage(const char* programName) {
     std::cerr << "  -h, --help     Show this help message\n";
     std::cerr << "  --profile      Show detailed timing for each compilation phase\n";
     std::cerr << "  --keep-temps   Keep intermediate files (.qbe, .s)\n";
+    std::cerr << "  --enable-madd-fusion   Enable MADD/MSUB fusion optimization (default)\n";
+    std::cerr << "  --disable-madd-fusion  Disable MADD/MSUB fusion optimization\n";
     std::cerr << "\nTarget Options:\n";
     std::cerr << "  --target=<t>   Target architecture (default: auto-detect)\n";
     std::cerr << "                 amd64_apple, amd64_sysv, arm64_apple, arm64, rv64\n";
@@ -117,6 +119,7 @@ int main(int argc, char** argv) {
     bool runAfterCompile = false;
     bool traceAST = false;
     bool traceCFG = false;
+    bool enableMaddFusion = true;  // Enable MADD fusion by default
     
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -146,6 +149,10 @@ int main(int argc, char** argv) {
             traceAST = true;
         } else if (strcmp(argv[i], "--trace-cfg") == 0) {
             traceCFG = true;
+        } else if (strcmp(argv[i], "--enable-madd-fusion") == 0) {
+            enableMaddFusion = true;
+        } else if (strcmp(argv[i], "--disable-madd-fusion") == 0) {
+            enableMaddFusion = false;
         } else if (strcmp(argv[i], "-o") == 0) {
             if (i + 1 < argc) {
                 outputFile = argv[++i];
@@ -412,6 +419,13 @@ int main(int argc, char** argv) {
             qbePath = "./qbe";
         } else {
             qbePath = "qbe";  // Try PATH as last resort
+        }
+        
+        // Set environment variable to control MADD fusion in QBE backend
+        if (enableMaddFusion) {
+            setenv("ENABLE_MADD_FUSION", "1", 1);
+        } else {
+            setenv("ENABLE_MADD_FUSION", "0", 1);
         }
         
         std::string qbeCmd = qbePath + " " + qbeFile + " > " + asmFile;

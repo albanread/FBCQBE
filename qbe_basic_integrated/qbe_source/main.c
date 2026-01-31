@@ -12,6 +12,9 @@ extern FILE* compile_basic_to_il(const char *basic_path);
 extern int is_basic_file(const char *filename);
 extern void set_trace_cfg(int enable);
 
+/* Global flag for MADD fusion control */
+static int enable_madd_fusion = 1;  /* Enabled by default */
+
 /* Get the directory where this executable is located */
 static char*
 get_exe_dir(void)
@@ -173,11 +176,35 @@ main(int ac, char *av[])
 	int c, compile_only = 0, is_basic = 0, il_only = 0;
 	int need_linking = 0;
 	int trace_cfg = 0;
+	int i, j;
+	char **filtered_av;
+	int filtered_ac;
 
 	T = Deftgt;
 	outf = stdout;
 	
-	while ((c = getopt(ac, av, "hicd:o:t:G")) != -1)
+	/* Parse and filter long options before getopt */
+	filtered_av = malloc(ac * sizeof(char*));
+	filtered_av[0] = av[0];
+	filtered_ac = 1;
+	
+	for (i = 1; i < ac; i++) {
+		if (strcmp(av[i], "--enable-madd-fusion") == 0) {
+			enable_madd_fusion = 1;
+			/* Skip this argument */
+		} else if (strcmp(av[i], "--disable-madd-fusion") == 0) {
+			enable_madd_fusion = 0;
+			/* Skip this argument */
+		} else {
+			/* Keep this argument */
+			filtered_av[filtered_ac++] = av[i];
+		}
+	}
+	
+	/* Reset optind for getopt */
+	optind = 1;
+	
+	while ((c = getopt(filtered_ac, filtered_av, "hicd:o:t:G")) != -1)
 		switch (c) {
 		case 'i':
 			il_only = 1;
@@ -222,6 +249,8 @@ main(int ac, char *av[])
 			fprintf(stderr, "\t%-11s output IL only (stop before assembly)\n", "-i");
 			fprintf(stderr, "\t%-11s compile only (stop at assembly)\n", "-c");
 			fprintf(stderr, "\t%-11s trace CFG and exit (BASIC files only)\n", "-G");
+			fprintf(stderr, "\t%-11s enable MADD/MSUB fusion (default)\n", "--enable-madd-fusion");
+			fprintf(stderr, "\t%-11s disable MADD/MSUB fusion\n", "--disable-madd-fusion");
 			fprintf(stderr, "\t%-11s generate for a target among:\n", "-t <target>");
 			fprintf(stderr, "\t%-11s ", "");
 			for (t=tlist, sep=""; *t; t++, sep=", ") {
@@ -234,8 +263,9 @@ main(int ac, char *av[])
 			exit(c != 'h');
 		}
 
-	if (optind >= ac) {
+	if (optind >= filtered_ac) {
 		fprintf(stderr, "error: no input file specified\n");
+		free(filtered_av);
 		exit(1);
 	}
 	
@@ -243,10 +273,17 @@ main(int ac, char *av[])
 	if (trace_cfg) {
 		set_trace_cfg(1);
 	}
+	
+	/* Set MADD fusion environment variable for ARM64 backend */
+	if (enable_madd_fusion) {
+		setenv("ENABLE_MADD_FUSION", "1", 1);
+	} else {
+		setenv("ENABLE_MADD_FUSION", "0", 1);
+	}
 
 	/* Process input files */
 	do {
-		f = av[optind];
+		f = filtered_av[optind];
 		if (!f || strcmp(f, "-") == 0) {
 			inf = stdin;
 			f = "-";

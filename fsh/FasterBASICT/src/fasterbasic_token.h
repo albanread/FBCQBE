@@ -88,6 +88,7 @@ enum class TokenType {
     INCLUDE,         // INCLUDE (file inclusion)
     ONCE,            // ONCE (for OPTION ONCE)
     CANCELLABLE,     // CANCELLABLE (for OPTION CANCELLABLE - loop cancellation)
+    BOUNDS_CHECK,    // BOUNDS_CHECK (for OPTION BOUNDS_CHECK - array bounds checking)
     FORCE_YIELD,     // FORCE_YIELD (for OPTION FORCE_YIELD - quasi-preemptive handlers)
     
     // Keywords - Functions and Procedures
