@@ -276,6 +276,7 @@ private:
     bool isNumberLiteral(const Expression* expr, double& value);
     bool areNumberLiterals(const Expression* expr1, const Expression* expr2, double& val1, double& val2);
     std::string emitIntConstant(int64_t value);
+    int getPowerOf2ShiftAmount(const Expression* expr);
     
     // Helper for function mapping
     std::string mapToRuntimeFunction(const std::string& basicFunc);

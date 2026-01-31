@@ -34,6 +34,38 @@ bool QBECodeGenerator::isNumberLiteral(const Expression* expr, double& value) {
     return true;
 }
 
+// Check if a value is a power of 2 and return the shift amount
+// Returns -1 if not a power of 2
+int QBECodeGenerator::getPowerOf2ShiftAmount(const Expression* expr) {
+    double value;
+    if (!isNumberLiteral(expr, value)) {
+        return -1;
+    }
+    
+    // Check if it's a positive integer
+    if (value <= 0 || value != std::floor(value)) {
+        return -1;
+    }
+    
+    int64_t intValue = static_cast<int64_t>(value);
+    
+    // Check if it's a power of 2 using bit manipulation
+    // A number is power of 2 if it has exactly one bit set
+    if ((intValue & (intValue - 1)) != 0) {
+        return -1;
+    }
+    
+    // Calculate the shift amount (log2)
+    int shiftAmount = 0;
+    int64_t temp = intValue;
+    while (temp > 1) {
+        temp >>= 1;
+        shiftAmount++;
+    }
+    
+    return shiftAmount;
+}
+
 // Check if two expressions are both number literals
 bool QBECodeGenerator::areNumberLiterals(const Expression* expr1, const Expression* expr2, double& val1, double& val2) {
     return isNumberLiteral(expr1, val1) && isNumberLiteral(expr2, val2);
@@ -349,18 +381,42 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
             emit("    " + resultTemp + " =" + typeSuffix + " sub " + leftTemp + ", " + rightTemp + "\n");
             break;
             
-        case TokenType::MULTIPLY:
+        case TokenType::MULTIPLY: {
+            // Optimize multiplication by power of 2 to left shift (for integers)
+            if (opType == VariableType::INT) {
+                int shiftAmount = getPowerOf2ShiftAmount(expr->right.get());
+                if (shiftAmount >= 0) {
+                    // x * 2^n  =>  x << n
+                    std::string shiftTemp = allocTemp("w");
+                    emit("    " + shiftTemp + " =w copy " + std::to_string(shiftAmount) + "\n");
+                    emit("    " + resultTemp + " =l shl " + leftTemp + ", " + shiftTemp + "\n");
+                    m_stats.instructionsGenerated += 2;
+                    break;
+                }
+            }
             emit("    " + resultTemp + " =" + typeSuffix + " mul " + leftTemp + ", " + rightTemp + "\n");
             break;
+        }
             
         case TokenType::DIVIDE:
             emit("    " + resultTemp + " =" + typeSuffix + " div " + leftTemp + ", " + rightTemp + "\n");
             break;
             
-        case TokenType::INT_DIVIDE:
+        case TokenType::INT_DIVIDE: {
             // Integer division: operands already promoted to integer (l) by requiresInteger flag
+            // Optimize division by power of 2 to arithmetic right shift
+            int shiftAmount = getPowerOf2ShiftAmount(expr->right.get());
+            if (shiftAmount >= 0) {
+                // x \ 2^n  =>  x >> n  (arithmetic shift right)
+                std::string shiftTemp = allocTemp("w");
+                emit("    " + shiftTemp + " =w copy " + std::to_string(shiftAmount) + "\n");
+                emit("    " + resultTemp + " =l sar " + leftTemp + ", " + shiftTemp + "\n");
+                m_stats.instructionsGenerated += 2;
+                break;
+            }
             emit("    " + resultTemp + " =l div " + leftTemp + ", " + rightTemp + "\n");
             break;
+        }
             
         case TokenType::POWER: {
             // Exponentiation: call C pow() function

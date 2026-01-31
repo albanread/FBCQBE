@@ -150,7 +150,7 @@ FUNCTION ModularPower&(basenum AS LONG, exponent AS LONG, m AS LONG) AS LONG
             LET res& = (res& * b&) MOD m
         END IF
         LET b& = (b& * b&) MOD m
-        LET e& = e& / 2
+        LET e& = e& \ 2
     WEND
 
     RETURN res&
