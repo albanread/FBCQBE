@@ -435,7 +435,7 @@ coalesce(Fn *fn)
 			}
 			assert(u->type == UIns);
 			arg = u->u.ins->arg;
-			for (n=0; n<2; n++)
+			for (n=0; n<3; n++)
 				if (req(arg[n], TMP(s->t)))
 					arg[n] = TMP(s->s->t);
 		}

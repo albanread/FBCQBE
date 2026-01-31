@@ -53,6 +53,10 @@ static struct {
 	{ Oshl,    Ki, "lsl %=, %0, %1" },
 	{ Omul,    Ki, "mul %=, %0, %1" },
 	{ Omul,    Ka, "fmul %=, %0, %1" },
+	{ Oamadd,  Ki, "madd %=, %0, %1, %2" },
+	{ Oamsub,  Ki, "msub %=, %0, %1, %2" },
+	{ Oafmadd, Ka, "fmadd %=, %0, %1, %2" },
+	{ Oafmsub, Ka, "fmsub %=, %0, %1, %2" },
 	{ Odiv,    Ki, "sdiv %=, %0, %1" },
 	{ Odiv,    Ka, "fdiv %=, %0, %1" },
 	{ Oudiv,   Ki, "udiv %=, %0, %1" },
@@ -216,10 +220,11 @@ emitf(char *s, Ins *i, E *e)
 			fputs(rname(r.val, k), e->f);
 			break;
 		case '1':
-			r = i->arg[1];
+		case '2':
+			r = c == '1' ? i->arg[1] : i->arg[2];
 			switch (rtype(r)) {
 			default:
-				die("invalid second argument");
+				die("invalid argument");
 			case RTmp:
 				assert(isreg(r));
 				fputs(rname(r.val, k), e->f);

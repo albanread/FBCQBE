@@ -321,9 +321,25 @@ emit(int op, int k, Ref to, Ref arg0, Ref arg1)
 }
 
 void
+emit3(int op, int k, Ref to, Ref arg0, Ref arg1, Ref arg2)
+{
+	if (curi == insb)
+		die("emit, too many instructions");
+	*--curi = (Ins){
+		.op = op, .cls = k,
+		.to = to, .arg = {arg0, arg1, arg2}
+	};
+}
+
+void
 emiti(Ins i)
 {
-	emit(i.op, i.cls, i.to, i.arg[0], i.arg[1]);
+	if (curi == insb)
+		die("emit, too many instructions");
+	*--curi = (Ins){
+		.op = i.op, .cls = i.cls,
+		.to = i.to, .arg = {i.arg[0], i.arg[1], i.arg[2]}
+	};
 }
 
 void

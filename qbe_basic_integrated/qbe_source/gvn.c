@@ -88,7 +88,7 @@ replaceuse(Fn *fn, Use *u, Ref r1, Ref r2)
 		break;
 	case UIns:
 		i = u->u.ins;
-		for (n=0; n<2; n++)
+		for (n=0; n<3; n++)
 			if (req(i->arg[n], r1))
 				i->arg[n] = r2;
 		if (t2)
@@ -152,7 +152,7 @@ normins(Fn *fn, Ins *i)
 
 	/* truncate constant bits to
 	 * 32 bits for s/w uses */
-	for (n=0; n<2; n++) {
+	for (n=0; n<3; n++) {
 		if (!KWIDE(argcls(i, n)))
 		if (isconbits(fn, i->arg[n], &v))
 		if ((v & 0xffffffff) != v)
