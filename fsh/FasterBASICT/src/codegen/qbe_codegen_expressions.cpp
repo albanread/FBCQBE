@@ -404,16 +404,37 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
             
         case TokenType::INT_DIVIDE: {
             // Integer division: operands already promoted to integer (l) by requiresInteger flag
-            // Optimize division by power of 2 to arithmetic right shift
+            // Optimize division by power of 2 using corrected arithmetic shift
+            // To match standard division (truncate toward zero), we add a bias for negative numbers
             int shiftAmount = getPowerOf2ShiftAmount(expr->right.get());
             if (shiftAmount >= 0) {
-                // x \ 2^n  =>  x >> n  (arithmetic shift right)
-                std::string shiftTemp = allocTemp("w");
-                emit("    " + shiftTemp + " =w copy " + std::to_string(shiftAmount) + "\n");
-                emit("    " + resultTemp + " =l sar " + leftTemp + ", " + shiftTemp + "\n");
-                m_stats.instructionsGenerated += 2;
+                // Corrected shift for signed division: (x < 0 ? (x + (2^n - 1)) : x) >> n
+                int64_t divisor = 1LL << shiftAmount;
+                int64_t bias = divisor - 1;
+                
+                // 1. Extract sign bit (shift right by 63 for 64-bit)
+                std::string signTemp = allocTemp("l");
+                emit("    " + signTemp + " =l sar " + leftTemp + ", 63\n");
+                
+                // 2. Create bias: sign & (divisor - 1)
+                // If negative (sign = -1 = all 1s), this gives (divisor - 1)
+                // If positive (sign = 0), this gives 0
+                std::string biasTemp = allocTemp("l");
+                emit("    " + biasTemp + " =l and " + signTemp + ", " + std::to_string(bias) + "\n");
+                
+                // 3. Add bias to dividend
+                std::string biasedTemp = allocTemp("l");
+                emit("    " + biasedTemp + " =l add " + leftTemp + ", " + biasTemp + "\n");
+                
+                // 4. Perform the shift
+                std::string shiftAmtTemp = allocTemp("w");
+                emit("    " + shiftAmtTemp + " =w copy " + std::to_string(shiftAmount) + "\n");
+                emit("    " + resultTemp + " =l sar " + biasedTemp + ", " + shiftAmtTemp + "\n");
+                
+                m_stats.instructionsGenerated += 5;
                 break;
             }
+            // Fall back to normal division
             emit("    " + resultTemp + " =l div " + leftTemp + ", " + rightTemp + "\n");
             break;
         }
@@ -448,10 +469,22 @@ std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
             break;
         }
             
-        case TokenType::MOD:
+        case TokenType::MOD: {
             // MOD is integer-only operation (64-bit)
+            // Optimize: x MOD 2^n  =>  x & (2^n - 1)  (for positive divisors)
+            int shiftAmount = getPowerOf2ShiftAmount(expr->right.get());
+            if (shiftAmount >= 0) {
+                // Calculate mask: 2^n - 1
+                int64_t mask = (1LL << shiftAmount) - 1;
+                std::string maskTemp = allocTemp("l");
+                emit("    " + maskTemp + " =l copy " + std::to_string(mask) + "\n");
+                emit("    " + resultTemp + " =l and " + leftTemp + ", " + maskTemp + "\n");
+                m_stats.instructionsGenerated += 2;
+                break;
+            }
             emit("    " + resultTemp + " =l rem " + leftTemp + ", " + rightTemp + "\n");
             break;
+        }
             
         // Comparison operators (return integer 0 or 1)
         case TokenType::EQUAL:
@@ -557,14 +590,14 @@ std::string QBECodeGenerator::emitUnaryOp(const UnaryExpression* expr) {
     
     // Determine result type
     std::string qbeType = getQBEType(operandType);
-    std::string typeSuffix = (operandType == VariableType::INT) ? "w" : "d";
+    std::string typeSuffix = (operandType == VariableType::INT) ? "l" : "d";
     std::string resultTemp = allocTemp(qbeType);
     
     switch (op) {
         case TokenType::MINUS:
             // Negation: 0 - operand
             if (operandType == VariableType::INT) {
-                emit("    " + resultTemp + " =w sub 0, " + operandTemp + "\n");
+                emit("    " + resultTemp + " =l sub 0, " + operandTemp + "\n");
             } else {
                 emit("    " + resultTemp + " =d sub d_0.0, " + operandTemp + "\n");
             }

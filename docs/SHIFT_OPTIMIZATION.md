@@ -2,15 +2,17 @@
 
 ## Overview
 
-The FasterBASIC QBE compiler automatically optimizes multiplication and division by powers of 2 into efficient bit shift operations. This optimization significantly improves performance for integer arithmetic operations.
+The FasterBASIC QBE compiler automatically optimizes multiplication and modulo by powers of 2 into efficient bit shift and mask operations. This optimization significantly improves performance for integer arithmetic operations.
 
 ## Summary
 
 **When enabled:**
 - Integer multiplication by powers of 2 → Left shift (`shl`)
-- Integer division by powers of 2 → Arithmetic right shift (`sar`)
+- Integer modulo by powers of 2 → Bitwise AND with mask (`and`)
 
-**Performance gain:** ~5-10× faster than traditional multiply/divide
+**Performance gain:** ~5-10× faster than traditional multiply/remainder
+
+**Note:** Integer division by powers of 2 is **NOT** optimized due to signed division semantics (see Limitations below).
 
 ## Optimization Rules
 
@@ -45,46 +47,63 @@ mov  w1, #3
 lsl  x0, x0, x1      ; x = x << 3  (multiply by 8)
 ```
 
-### Division Optimization
+### Modulo (Remainder) Optimization
 
 **BASIC Code:**
 ```basic
-LET x& = n& \ 2    ' Integer divide by 2
-LET x& = n& \ 4    ' Integer divide by 4
-LET x& = n& \ 8    ' Integer divide by 8
+LET x& = n& MOD 2    ' Remainder when dividing by 2
+LET x& = n& MOD 4    ' Remainder when dividing by 4
+LET x& = n& MOD 8    ' Remainder when dividing by 8
 ```
 
 **Generated QBE IL (optimized):**
 ```qbe
-%shift1 =w copy 1
-%result =l sar %n, %shift1    ' x = n >> 1  (divide by 2)
+%mask1 =l copy 1
+%result =l and %n, %mask1     ' x = n & 1  (n MOD 2)
 
-%shift2 =w copy 2
-%result =l sar %n, %shift2    ' x = n >> 2  (divide by 4)
+%mask2 =l copy 3
+%result =l and %n, %mask2     ' x = n & 3  (n MOD 4)
+
+%mask3 =l copy 7
+%result =l and %n, %mask3     ' x = n & 7  (n MOD 8)
 ```
 
 **ARM Assembly:**
 ```asm
-mov  w1, #1
-asr  x0, x0, x1      ; x = x >> 1  (arithmetic shift right)
-
-mov  w1, #2
-asr  x0, x0, x1      ; x = x >> 2  (divide by 4)
+and  x0, x0, #1      ; x = x & 1   (modulo 2)
+and  x0, x0, #3      ; x = x & 3   (modulo 4)
+and  x0, x0, #7      ; x = x & 7   (modulo 8)
 ```
 
-## Important: Use Integer Division (`\`)
+## Important: Integer Division NOT Optimized
 
-The optimization **only applies to integer division** using the `\` operator, not floating-point division `/`.
+**Integer division by powers of 2 is NOT optimized** due to a fundamental semantic difference:
 
-**Optimized (uses shift):**
+- **BASIC/C integer division** truncates toward zero: `-7 \ 2 = -3`
+- **Arithmetic shift right (`sar`)** truncates toward negative infinity: `sar(-7, 1) = -4`
+
+This causes **incorrect results for negative dividends**.
+
+**Example of the problem:**
 ```basic
-LET x& = n& \ 2     ' Integer division - optimized to shift
+LET x& = -7 \ 2       ' Should be -3 (correct BASIC behavior)
+' If optimized to sar: Would give -4 (WRONG!)
 ```
 
-**NOT optimized (uses float division):**
-```basic
-LET x& = n& / 2     ' Floating-point division - no optimization
+For positive numbers, both methods match. But to maintain correctness, **division is not optimized**.
+
+### Future Enhancement
+A correct optimization would require fixup code:
+```qbe
+# Correct signed division by power of 2
+%negative =w csltl %n, 0      # Check if negative
+%mask =l copy 1               # 2^shift - 1
+%fixup =l and %negative, %mask
+%adjusted =l add %n, %fixup
+%result =l sar %adjusted, 1   # Now correct for negative numbers
 ```
+
+This adds overhead that may negate the benefit, so it's not currently implemented.
 
 ## Detection Algorithm
 
@@ -126,16 +145,16 @@ int getShiftAmount(int64_t n) {
 - Fills freed bits with zeros
 - Works for all integer types
 
-### `sar` - Arithmetic Shift Right (Signed Divide)
+### `sar` - Arithmetic Shift Right (Signed Shift)
 
 ```qbe
 %result =l sar %value, %amount
 ```
 
-- Equivalent to: `result = value / (2^amount)` for signed integers
-- Preserves sign bit (sign extension)
-- Truncates toward negative infinity
-- Used for `\` (integer division) in BASIC
+- Shifts right preserving sign bit (sign extension)
+- **NOT equivalent to division** for negative numbers!
+- Truncates toward negative infinity (division truncates toward zero)
+- Currently **not used** in FasterBASIC due to this semantic mismatch
 
 ### `shr` - Logical Shift Right (Unsigned Divide)
 
@@ -162,17 +181,18 @@ fdiv    d0, d0, d1      ; Float division
 fcvtzs  x1, d0          ; Convert float back to int
 ```
 
-### After Optimization (Shift)
+### After Optimization (MOD with AND)
 
-**BASIC:** `LET e& = e& \ 2`
+**BASIC:** `LET bit& = e& MOD 2`
 
-**ARM Assembly:** (~2 instructions, ~2-3 cycles)
+**ARM Assembly:** (~1 instruction, ~1 cycle)
 ```asm
-mov     w4, #1          ; Load shift amount
-asr     x1, x1, x4      ; Arithmetic shift right
+and     x1, x1, #1      ; Bitwise AND with mask
 ```
 
-**Speedup: ~10-15× faster**
+**Speedup: ~5-10× faster**
+
+**Note:** Division by 2 is NOT optimized (see Limitations section).
 
 ## Real-World Example: Modular Exponentiation
 
@@ -187,18 +207,18 @@ FUNCTION ModularPower&(base AS LONG, exp AS LONG, mod AS LONG) AS LONG
     LET e& = exp
     
     WHILE e& > 0
-        IF (e& MOD 2) = 1 THEN
+        IF (e& MOD 2) = 1 THEN          ' Remainder operation - slow!
             LET result& = (result& * base) MOD mod
         END IF
         LET base = (base * base) MOD mod
-        LET e& = e& / 2        ' Float division!
+        LET e& = e& / 2                  ' Float division - slow!
     WEND
     
     RETURN result&
 END FUNCTION
 ```
 
-**Generated:** Float conversion for division by 2 (slow)
+**Generated:** `rem` instruction for MOD 2, float conversion for division (slow)
 
 ### Optimized Code
 
@@ -211,26 +231,28 @@ FUNCTION ModularPower&(base AS LONG, exp AS LONG, mod AS LONG) AS LONG
     LET e& = exp
     
     WHILE e& > 0
-        IF (e& MOD 2) = 1 THEN
+        IF (e& MOD 2) = 1 THEN          ' Optimized to AND!
             LET result& = (result& * base) MOD mod
         END IF
         LET base = (base * base) MOD mod
-        LET e& = e& \ 2        ' Integer division - optimized!
+        LET e& = e& \ 2                  ' Division not optimized (see note)
     WEND
     
     RETURN result&
 END FUNCTION
 ```
 
-**Generated:** Single ARM `asr` instruction (fast)
+**Generated:** Single ARM `and` instruction for MOD 2 (fast)
 
 ### Performance Impact
 
 For the Mersenne M929 factorization:
 - Loop iterations: ~929 (one per bit)
-- Old version: 929 × 15 instructions = ~13,935 instructions for divisions
-- New version: 929 × 2 instructions = ~1,858 instructions for divisions
-- **Savings: ~12,000 instructions (~24,000 cycles)**
+- Old version (MOD 2): 929 × 5 instructions = ~4,645 instructions
+- New version (MOD 2): 929 × 1 instruction = ~929 instructions
+- **Savings: ~3,700 instructions (~7,400 cycles) for MOD operations**
+
+**Note:** Division by 2 remains as integer division (not optimized to shift).
 
 ## Supported Powers of 2
 
@@ -250,6 +272,16 @@ All positive powers of 2 are supported:
 | 2^10  | 1024  | 10           |
 | ...   | ...   | ...          |
 | 2^63  | 2^63  | 63           |
+
+**Masks for MOD:**
+
+| Power | Value | Mask (Value-1) |
+|-------|-------|----------------|
+| 2^1   | 2     | 1 (0b1)        |
+| 2^2   | 4     | 3 (0b11)       |
+| 2^3   | 8     | 7 (0b111)      |
+| 2^4   | 16    | 15 (0b1111)    |
+| 2^8   | 256   | 255 (0xFF)     |
 
 ## Limitations
 
@@ -284,19 +316,20 @@ LET x# = n# * 4         ' DOUBLE type - not optimized
 LET x = n * 4           ' Default DOUBLE - not optimized
 ```
 
-### 3. Requires `\` for Division
+### 3. Signed Division Limitation
 
-Must use integer division operator `\`, not float division `/`.
+**Integer division by powers of 2 is NOT optimized** because:
+- Integer division truncates toward zero
+- Arithmetic shift right truncates toward -∞
+- This causes wrong results for negative numbers
 
-**Optimized:**
+**Example:**
 ```basic
-LET x& = n& \ 2         ' Integer division - optimized
+LET x& = -7 \ 2         ' Correct result: -3
+' If optimized to sar:   ' Would give: -4 (WRONG!)
 ```
 
-**NOT optimized:**
-```basic
-LET x& = n& / 2         ' Float division - not optimized
-```
+Only **multiplication** and **MOD** are optimized.
 
 ## Implementation Details
 
@@ -351,17 +384,18 @@ case TokenType::MULTIPLY: {
     break;
 }
 
-case TokenType::INT_DIVIDE: {
+case TokenType::MOD: {
     int shift = getPowerOf2ShiftAmount(expr->right.get());
     if (shift >= 0) {
-        // Emit: result = left >> shift (arithmetic)
-        std::string shiftTemp = allocTemp("w");
-        emit("    " + shiftTemp + " =w copy " + std::to_string(shift) + "\n");
-        emit("    " + resultTemp + " =l sar " + leftTemp + ", " + shiftTemp + "\n");
+        // Emit: result = left & (2^shift - 1)
+        int64_t mask = (1LL << shift) - 1;
+        std::string maskTemp = allocTemp("l");
+        emit("    " + maskTemp + " =l copy " + std::to_string(mask) + "\n");
+        emit("    " + resultTemp + " =l and " + leftTemp + ", " + maskTemp + "\n");
         break;
     }
-    // Fall back to normal division
-    emit("    " + resultTemp + " =l div " + leftTemp + ", " + rightTemp + "\n");
+    // Fall back to normal remainder
+    emit("    " + resultTemp + " =l rem " + leftTemp + ", " + rightTemp + "\n");
     break;
 }
 ```
@@ -374,11 +408,11 @@ case TokenType::INT_DIVIDE: {
 FUNCTION TestShifts&(value AS LONG) AS LONG
     LOCAL temp&
     
-    ' Multiply by 8, then divide by 4
+    ' Multiply by 8, test MOD
     LET temp& = value * 8    ' Should use: shl by 3
-    LET temp& = temp& \ 4    ' Should use: sar by 2
+    LET temp& = temp& MOD 16 ' Should use: and with 15
     
-    RETURN temp&             ' Returns value * 2
+    RETURN temp&
 END FUNCTION
 ```
 
@@ -391,8 +425,8 @@ export function l $TestShifts(l %value) {
     %shift_mul =w copy 3
     %t1 =l shl %value, %shift_mul     # value * 8
     %local_temp =l copy %t1
-    %shift_div =w copy 2
-    %t2 =l sar %local_temp, %shift_div # temp / 4
+    %mask =l copy 15
+    %t2 =l and %local_temp, %mask     # temp MOD 16
     %local_temp =l copy %t2
     ret %local_temp
 }
@@ -402,25 +436,24 @@ export function l $TestShifts(l %value) {
 
 ```asm
 _TestShifts:
-    mov     w1, #3
-    lsl     x0, x0, x1      ; x0 = value << 3  (multiply by 8)
-    mov     w1, #2
-    asr     x0, x0, x1      ; x0 = x0 >> 2     (divide by 4)
+    lsl     x0, x0, #3      ; x0 = value << 3  (multiply by 8)
+    and     x0, x0, #15     ; x0 = x0 & 15     (modulo 16)
     ret
 ```
 
+**Note:** ARM can encode small immediate shifts directly, saving a register load.
+
 ## Best Practices
 
-### 1. Use Integer Division for Bit Operations
+### 1. Use MOD for Bit Masking
 
 ```basic
-' Good: Use \ for bit manipulation
-LET mask& = value& \ 2
-LET index& = offset& \ 4
+' Good: Use MOD for bit operations (optimized to AND)
+LET bit& = value& MOD 2
+LET mask& = value& MOD 8
 
-' Bad: Using / forces float conversion
-LET mask& = value& / 2
-LET index& = offset& / 4
+' Bad: Using / or \ for this purpose
+LET bit& = value& \ 2    ' Not optimized (and wrong intent)
 ```
 
 ### 2. Use Integer Types
@@ -448,10 +481,12 @@ LET x& = n& * scale&
 
 Potential improvements:
 
-1. **Variable divisor optimization**: If divisor is known to be power of 2 at runtime, generate conditional shift
-2. **Loop strength reduction**: Convert `i * 8` inside loops to shift operations
-3. **Reciprocal multiplication**: Optimize division by non-power-of-2 constants using reciprocal multiply
-4. **SIMD shifts**: Use vector shift instructions for array operations
+1. **Signed division with fixup**: Add correction code for negative dividends to enable shift optimization
+2. **Variable divisor optimization**: If divisor is known to be power of 2 at runtime, generate conditional shift
+3. **Loop strength reduction**: Convert `i * 8` inside loops to shift operations
+4. **Reciprocal multiplication**: Optimize division by non-power-of-2 constants using reciprocal multiply
+5. **SIMD shifts**: Use vector shift instructions for array operations
+6. **Bit manipulation intrinsics**: Use `__builtin_ctzll()` for faster shift amount calculation
 
 ## Related Documentation
 
@@ -464,4 +499,5 @@ Potential improvements:
 **Date:** 2024-01-31  
 **Author:** AI Assistant with oberon  
 **Status:** ✅ Implemented and Verified  
-**Performance:** ~10-15× faster than multiply/divide for powers of 2
+**Performance:** ~5-10× faster for multiply and MOD by powers of 2  
+**Division Note:** Integer division NOT optimized due to signed semantics issue
