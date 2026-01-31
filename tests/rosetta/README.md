@@ -47,7 +47,36 @@ This test validates the fix for a compiler bug where RETURN would incorrectly ju
 
 **Expected Output:** `gosub_if_control_flow.expected`
 
-### 4. Mersenne Number Factors
+### 4. Ackermann Function
+**File:** `ackermann.bas`
+**Challenge:** https://rosettacode.org/wiki/Ackermann_function
+
+The Ackermann function is a classic example of a recursive function that is not primitive recursive. It demonstrates deep recursion and extremely rapid growth.
+
+**Definition:**
+```
+A(m, n) = n + 1                  if m = 0
+A(m, n) = A(m-1, 1)              if m > 0 and n = 0
+A(m, n) = A(m-1, A(m, n-1))      if m > 0 and n > 0
+```
+
+**Features demonstrated:**
+- Recursive FUNCTION calls
+- Deep recursion (function calls itself multiple times)
+- LOCAL variables in functions
+- Nested IF/THEN/ELSE logic
+- Pattern verification with computed results
+
+**Test Case:** Computes A(m,n) for m=0 to 3, n=0 to 4
+**Notable Results:**
+- A(0, n) = n + 1
+- A(1, n) = n + 2
+- A(2, n) = 2*n + 3
+- A(3, n) = 2^(n+3) - 3
+
+**Expected Output:** `ackermann.expected`
+
+### 5. Mersenne Number Factors
 **File:** `mersenne_factors.bas`  
 **Challenge:** https://rosettacode.org/wiki/Factors_of_a_Mersenne_number
 
@@ -59,6 +88,18 @@ Finds factors of Mersenne numbers (2^P - 1) using optimized trial division with:
 **Test Case:** Finds a factor of M929 (2^929 - 1)  
 **Result:** Factor 13007 (k=7)  
 **Expected Output:** `mersenne_factors.expected`
+
+### 6. Addition Chain Exponentiation
+**File:** `addition_chain_exponentiation.bas`
+**Challenge:** https://rosettacode.org/wiki/Addition-chain_exponentiation
+
+Efficient exponentiation using addition chains to minimize the number of multiplications.
+
+### 7. Euler Method
+**File:** `euler_method.bas` and `euler_method_v2.bas`
+**Challenge:** https://rosettacode.org/wiki/Euler_method
+
+Numerical solution of differential equations using Euler's method.
 
 ## Running Tests
 
