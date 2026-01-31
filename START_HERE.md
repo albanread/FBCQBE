@@ -46,9 +46,10 @@ PRINT "Hello, World!"
 END
 EOF
 
-# 4. Compile and run (using the symlink at project root)
-./qbe_basic hello.bas > hello.s
-gcc hello.s fsh/FasterBASICT/runtime_c/*.c -Ifsh/FasterBASICT/runtime_c -lm -o hello
+# 4. Compile BASIC to executable (ONE COMMAND - the compiler does everything!)
+./qbe_basic -o hello hello.bas
+
+# 5. Run it
 ./hello
 ```
 
@@ -56,6 +57,35 @@ gcc hello.s fsh/FasterBASICT/runtime_c/*.c -Ifsh/FasterBASICT/runtime_c -lm -o h
 ```
 Hello, World!
 ```
+
+### How BASIC Compilation Works
+
+The `qbe_basic` compiler is a **BASIC compiler** - it compiles `.bas` files directly to native executables.
+
+**Simple compilation (creates executable):**
+```bash
+./qbe_basic -o output_name input.bas
+```
+
+The compiler automatically:
+1. Compiles your BASIC code to QBE IL
+2. Generates assembly
+3. Compiles the runtime library if needed
+4. Links everything into a native executable
+
+**Other options:**
+```bash
+# Output assembly only (for inspection):
+./qbe_basic -c -o output.s input.bas
+
+# Output QBE IL only (intermediate representation):
+./qbe_basic -i -o output.qbe input.bas
+
+# Compile and run in one step:
+./qbe_basic -o myprogram myprogram.bas && ./myprogram
+```
+
+**⚠️ IMPORTANT:** The `-o` flag must come BEFORE the input filename.
 
 ---
 
@@ -236,33 +266,33 @@ rm -rf qbe_source/*.o
 
 ### Basic Workflow
 
-The compiler generates assembly code that must be linked with the runtime:
+**The `qbe_basic` compiler creates executables directly from BASIC source:**
 
 ```bash
-# Step 1: Compile BASIC to assembly
-./qbe_basic_integrated/qbe_basic program.bas > program.s
+# Compile BASIC to executable (ONE COMMAND)
+./qbe_basic -o program program.bas
 
-# Step 2: Link with runtime
-gcc program.s \
-    fsh/FasterBASICT/runtime_c/*.c \
-    -I fsh/FasterBASICT/runtime_c \
-    -lm \
-    -o program
-
-# Step 3: Run
+# Run it
 ./program
 ```
 
-### Using the -i Flag (Generate QBE IL)
+**⚠️ IMPORTANT:** The `-o output_name` must come BEFORE the input file.
 
-To inspect or save the intermediate QBE IL:
+### Advanced Options
 
+**Output assembly only (for inspection):**
 ```bash
-# Generate QBE IL only (no assembly)
-./qbe_basic_integrated/qbe_basic -i program.bas > program.qbe
+./qbe_basic -c -o program.s program.bas
+```
 
-# Then compile IL to assembly
-./qbe_basic_integrated/qbe_basic program.qbe > program.s
+**Output QBE IL only (intermediate representation):**
+```bash
+./qbe_basic -i -o program.qbe program.bas
+```
+
+**Compile and run in one step:**
+```bash
+./qbe_basic -o program program.bas && ./program
 ```
 
 ### Complete Example
@@ -282,15 +312,8 @@ PRINT "5! = "; Factorial%(5)
 END
 EOF
 
-# Compile
-./qbe_basic_integrated/qbe_basic factorial.bas > factorial.s
-
-# Link
-gcc factorial.s \
-    fsh/FasterBASICT/runtime_c/*.c \
-    -I fsh/FasterBASICT/runtime_c \
-    -lm \
-    -o factorial
+# Compile to executable (one command!)
+./qbe_basic -o factorial factorial.bas
 
 # Run
 ./factorial
@@ -884,14 +907,15 @@ gcc /tmp/t.s fsh/FasterBASICT/runtime_c/*.c -I fsh/FasterBASICT/runtime_c -lm -o
 
 ## Next Steps
 
-1. **Try the examples** in the tests/ directory
-2. **Read the documentation:**
+1. **Learn the language** with the [FasterBASIC Quick Reference](docs/fasterbasicquickref.md)
+2. **Try the examples** in the tests/ directory
+3. **Read the documentation:**
    - [NOT_OPERATOR_IMPLEMENTATION.md](NOT_OPERATOR_IMPLEMENTATION.md)
    - [TEST_COVERAGE_EXPANSION.md](TEST_COVERAGE_EXPANSION.md)
    - [MATH_OPERATORS_STATUS.md](MATH_OPERATORS_STATUS.md)
-3. **Experiment** with code generation
-4. **Add new features** and write tests
-5. **Contribute** improvements!
+4. **Experiment** with code generation
+5. **Add new features** and write tests
+6. **Contribute** improvements!
 
 ---
 
@@ -906,6 +930,7 @@ gcc /tmp/t.s fsh/FasterBASICT/runtime_c/*.c -I fsh/FasterBASICT/runtime_c -lm -o
 
 ## Additional Resources
 
+- **FasterBASIC Quick Reference:** [docs/fasterbasicquickref.md](docs/fasterbasicquickref.md) — Complete language reference
 - **QBE IL Documentation:** https://c9x.me/compile/doc/il.html
 - **QBE IL Tutorial:** https://c9x.me/compile/doc/il-v1.1.html
 - **Project Documentation:** See `*.md` files in project root

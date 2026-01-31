@@ -1,0 +1,12 @@
+=== Mersenne Number Factor Finder ===
+
+Finding factors of 2^929 - 1 (M929)
+
+Searching for factors of the form q = 2kP + 1...
+
+Found factor: 13007
+  k = 7
+  q = 2 * 7 * 929 + 1 = 13007
+  Verification: 2^929 mod 13007 = 1
+
+Therefore, 13007 is a factor of 2^929 - 1

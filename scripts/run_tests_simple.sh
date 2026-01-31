@@ -108,6 +108,7 @@ categories=(
     "tests/types"
     "tests/control"
     "tests/exceptions"
+    "tests/rosetta"
 )
 
 for category in "${categories[@]}"; do
