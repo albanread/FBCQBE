@@ -265,14 +265,13 @@ sel(Ins i, Fn *fn)
 			if (req(acc, R))
 				continue;
 			
+			/* Fix arguments BEFORE emitting to avoid pointer invalidation */
+			fixarg(&mul_a, i.cls, 0, fn);
+			fixarg(&mul_b, i.cls, 0, fn);
+			fixarg(&acc, i.cls, 0, fn);
+			
 			/* Emit fused instruction: result = acc +/- (mul_a * mul_b) */
 			emit3(fused_op, i.cls, i.to, mul_a, mul_b, acc);
-			
-			/* Fix arguments */
-			iarg = curi->arg;
-			fixarg(&iarg[0], i.cls, 0, fn);
-			fixarg(&iarg[1], i.cls, 0, fn);
-			fixarg(&iarg[2], i.cls, 0, fn);
 			
 			/* Mark multiply as nop since it's been fused */
 			def->op = Onop;

@@ -316,7 +316,7 @@ emit(int op, int k, Ref to, Ref arg0, Ref arg1)
 		die("emit, too many instructions");
 	*--curi = (Ins){
 		.op = op, .cls = k,
-		.to = to, .arg = {arg0, arg1}
+		.to = to, .arg = {arg0, arg1, R}
 	};
 }
 
