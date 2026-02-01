@@ -207,7 +207,7 @@ public:
      * @return Variable type
      */
     FasterBASIC::BaseType getVariableType(const std::string& varName);
-
+    
 private:
     QBEBuilder& builder_;
     TypeManager& typeManager_;
@@ -222,7 +222,7 @@ private:
     
     std::string emitBinaryExpression(const FasterBASIC::BinaryExpression* expr);
     std::string emitUnaryExpression(const FasterBASIC::UnaryExpression* expr);
-    std::string emitNumberLiteral(const FasterBASIC::NumberExpression* expr);
+    std::string emitNumberLiteral(const FasterBASIC::NumberExpression* expr, FasterBASIC::BaseType expectedType = FasterBASIC::BaseType::UNKNOWN);
     std::string emitStringLiteral(const FasterBASIC::StringExpression* expr);
     std::string emitVariableExpression(const FasterBASIC::VariableExpression* expr);
     std::string emitArrayAccessExpression(const FasterBASIC::ArrayAccessExpression* expr);
@@ -249,6 +249,10 @@ private:
     // === Helper: get QBE operator name ===
     
     std::string getQBEArithmeticOp(FasterBASIC::TokenType op);
+    
+    // === Helper: get type suffix character ===
+    
+    char getTypeSuffixChar(FasterBASIC::TokenType suffix);
     std::string getQBEComparisonOp(FasterBASIC::TokenType op);
 };
 

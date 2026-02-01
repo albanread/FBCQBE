@@ -130,14 +130,12 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
             std::cerr << "\nArrays:\n";
             for (const auto& [name, arr] : symbols.arrays) {
                 std::cerr << "  " << name << ": elementTypeDesc=" << arr.elementTypeDesc.toString()
-                          << " legacyType=" << (int)arr.type 
                           << " dimensions=" << arr.dimensions.size() << "\n";
             }
             
             std::cerr << "\nVariables:\n";
             for (const auto& [name, var] : symbols.variables) {
-                std::cerr << "  " << name << ": typeDesc=" << var.typeDesc.toString()
-                          << " legacyType=" << (int)var.type << "\n";
+                std::cerr << "  " << name << ": typeDesc=" << var.typeDesc.toString() << "\n";
             }
             
             std::cerr << "=== End Symbol Table ===\n\n";

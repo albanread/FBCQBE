@@ -436,7 +436,6 @@ void SemanticAnalyzer::collectGlobalStatements(Program& program) {
                     
                     // Create variable symbol and mark it as global
                     VariableSymbol varSym(var.name, legacyTypeToDescriptor(varType), true);
-                    varSym.type = varType;
                     varSym.functionScope = "";  // Empty scope = global
                     varSym.firstUse = stmt->location;
                     varSym.isGlobal = true;  // Mark as GLOBAL variable
@@ -729,8 +728,7 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
             paramType = VariableType::DOUBLE;  // Default type (DOUBLE, not FLOAT)
         }
         
-        sym.parameterTypes.push_back(paramType);
-        sym.parameterTypeNames.push_back(paramTypeName);
+        sym.parameterTypeDescs.push_back(legacyTypeToDescriptor(paramType));
     }
     
     // Process return type
@@ -743,19 +741,19 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
         
         // Check if it's a built-in type keyword or user-defined type
         if (upperReturnType == "INTEGER" || upperReturnType == "INT") {
-            sym.returnType = VariableType::INT;
+            sym.returnTypeDesc = TypeDescriptor(BaseType::INTEGER);
             sym.returnTypeName = "";
         } else if (upperReturnType == "DOUBLE") {
-            sym.returnType = VariableType::DOUBLE;
+            sym.returnTypeDesc = TypeDescriptor(BaseType::DOUBLE);
             sym.returnTypeName = "";
         } else if (upperReturnType == "SINGLE" || upperReturnType == "FLOAT") {
-            sym.returnType = VariableType::FLOAT;
+            sym.returnTypeDesc = TypeDescriptor(BaseType::SINGLE);
             sym.returnTypeName = "";
         } else if (upperReturnType == "STRING") {
-            sym.returnType = VariableType::STRING;
+            sym.returnTypeDesc = TypeDescriptor(BaseType::STRING);
             sym.returnTypeName = "";
         } else if (upperReturnType == "LONG") {
-            sym.returnType = VariableType::INT;
+            sym.returnTypeDesc = TypeDescriptor(BaseType::LONG);
             sym.returnTypeName = "";
         } else {
             // User-defined type - validate it exists
@@ -765,10 +763,11 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
                       stmt.location);
             }
             // Keep returnTypeName for user-defined types
-            sym.returnType = VariableType::UNKNOWN;  // Mark as user-defined
+            sym.returnTypeDesc = TypeDescriptor(BaseType::USER_DEFINED);
+            sym.returnTypeDesc.udtName = sym.returnTypeName;
         }
     } else {
-        sym.returnType = inferTypeFromSuffix(stmt.returnTypeSuffix);
+        sym.returnTypeDesc = legacyTypeToDescriptor(inferTypeFromSuffix(stmt.returnTypeSuffix));
     }
     
     m_symbolTable.functions[stmt.functionName] = sym;
@@ -776,8 +775,7 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
     // Add function name as a variable (for return value assignment)
     VariableSymbol returnVar;
     returnVar.name = stmt.functionName;
-    returnVar.type = sym.returnType;
-    returnVar.typeName = sym.returnTypeName;
+    returnVar.typeDesc = sym.returnTypeDesc;
     returnVar.isDeclared = true;
     returnVar.firstUse = stmt.location;
     returnVar.functionScope = stmt.functionName;  // Mark as belonging to this function
@@ -803,7 +801,7 @@ void SemanticAnalyzer::processSubStatement(const SubStatement& stmt) {
     sym.name = stmt.subName;
     sym.parameters = stmt.parameters;
     sym.parameterIsByRef = stmt.parameterIsByRef;
-    sym.returnType = VariableType::VOID;
+    sym.returnTypeDesc = TypeDescriptor(BaseType::VOID);
     
     // Process parameter types
     for (size_t i = 0; i < stmt.parameters.size(); ++i) {
@@ -850,8 +848,7 @@ void SemanticAnalyzer::processSubStatement(const SubStatement& stmt) {
             paramType = VariableType::DOUBLE;  // Default type (DOUBLE, not FLOAT)
         }
         
-        sym.parameterTypes.push_back(paramType);
-        sym.parameterTypeNames.push_back(paramTypeName);
+        sym.parameterTypeDescs.push_back(legacyTypeToDescriptor(paramType));
     }
     
     m_symbolTable.functions[stmt.subName] = sym;
@@ -1175,28 +1172,27 @@ void SemanticAnalyzer::processDefStatement(const DefStatement& stmt) {
     sym.definition = stmt.location;
     
     // Infer return type from function name
-    sym.returnType = inferTypeFromName(stmt.functionName);
+    sym.returnTypeDesc = legacyTypeToDescriptor(inferTypeFromName(stmt.functionName));
     
     // Infer parameter types from parameter names AND suffixes
     for (size_t i = 0; i < stmt.parameters.size(); ++i) {
         const std::string& paramName = stmt.parameters[i];
         
         // Use the stored suffix if available, otherwise fall back to name inference
-        VariableType paramType;
+        TypeDescriptor paramTypeDesc;
         if (i < stmt.parameterSuffixes.size() && stmt.parameterSuffixes[i] != TokenType::UNKNOWN) {
-            paramType = inferTypeFromSuffix(stmt.parameterSuffixes[i]);
+            paramTypeDesc = inferTypeFromSuffixD(stmt.parameterSuffixes[i]);
         } else {
-            paramType = inferTypeFromName(paramName);
+            paramTypeDesc = inferTypeFromNameD(paramName);
         }
-        
-        sym.parameterTypes.push_back(paramType);
-        sym.parameterTypeNames.push_back("");  // No user-defined types for DEF FN
+
+        sym.parameterTypeDescs.push_back(paramTypeDesc);
         sym.parameterIsByRef.push_back(false);  // DEF FN parameters are always by value
-        
+
         // Add parameter as a variable in the symbol table so it can be looked up
         VariableSymbol paramVar;
         paramVar.name = paramName;
-        paramVar.type = paramType;
+        paramVar.typeDesc = paramTypeDesc;
         paramVar.isDeclared = true;  // Parameters are declared
         paramVar.functionScope = stmt.functionName;  // Scope to this function
         paramVar.firstUse = stmt.location;
@@ -1447,7 +1443,7 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
             // Set expected return type
             auto* funcSym = lookupFunction(funcStmt.functionName);
             if (funcSym) {
-                m_currentFunctionScope.expectedReturnType = funcSym->returnType;
+                m_currentFunctionScope.expectedReturnType = funcSym->returnTypeDesc;
                 m_currentFunctionScope.expectedReturnTypeName = funcSym->returnTypeName;
             }
             
@@ -1481,7 +1477,7 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
             m_currentFunctionScope.inFunction = true;
             m_currentFunctionScope.functionName = subStmt.subName;
             m_currentFunctionScope.isSub = true;  // This is a SUB
-            m_currentFunctionScope.expectedReturnType = VariableType::VOID;
+            m_currentFunctionScope.expectedReturnType = TypeDescriptor(BaseType::VOID);
             
             // Add parameters to scope
             for (const auto& param : subStmt.parameters) {
@@ -1606,10 +1602,10 @@ void SemanticAnalyzer::validateSliceAssignStatement(const SliceAssignStatement& 
     
     auto* varSym = lookupVariable(stmt.variable);
     if (varSym) {
-        if (varSym->type != VariableType::STRING && varSym->type != VariableType::UNICODE) {
+        if (varSym->typeDesc.baseType != BaseType::STRING && varSym->typeDesc.baseType != BaseType::UNICODE) {
             error(SemanticErrorType::TYPE_MISMATCH,
                   "Slice assignment can only be used on STRING variables, not " + 
-                  std::string(typeToString(varSym->type)),
+                  varSym->typeDesc.toString(),
                   stmt.location);
             return;
         }
@@ -1744,7 +1740,7 @@ void SemanticAnalyzer::validateLetStatement(const LetStatement& stmt) {
                 return;
             }
             
-            if (arrSym->type != VariableType::USER_DEFINED) {
+            if (arrSym->elementTypeDesc.baseType != BaseType::USER_DEFINED) {
                 error(SemanticErrorType::TYPE_MISMATCH,
                       "Cannot use member access on non-UDT array '" + stmt.variable + "'",
                       stmt.location);
@@ -1762,7 +1758,7 @@ void SemanticAnalyzer::validateLetStatement(const LetStatement& stmt) {
                 return;
             }
             
-            if (varSym->type != VariableType::USER_DEFINED) {
+            if (varSym->typeDesc.baseType != BaseType::USER_DEFINED) {
                 error(SemanticErrorType::TYPE_MISMATCH,
                       "Cannot use member access on non-UDT variable '" + stmt.variable + "'",
                       stmt.location);
@@ -1817,10 +1813,10 @@ void SemanticAnalyzer::validateLetStatement(const LetStatement& stmt) {
         }
     } else if (!stmt.indices.empty()) {
         auto* arraySym = lookupArray(stmt.variable);
-        targetType = arraySym ? arraySym->type : VariableType::UNKNOWN;
+        targetType = arraySym ? descriptorToLegacyType(arraySym->elementTypeDesc) : VariableType::UNKNOWN;
     } else {
         auto* varSym = lookupVariable(stmt.variable);
-        targetType = varSym ? varSym->type : VariableType::UNKNOWN;
+        targetType = varSym ? descriptorToLegacyType(varSym->typeDesc) : VariableType::UNKNOWN;
     }
     
     VariableType valueType = inferExpressionType(*stmt.value);
@@ -2234,7 +2230,7 @@ void SemanticAnalyzer::validateAfterStatement(const AfterStatement& stmt) {
             // Create a function symbol for the inline handler
             FunctionSymbol funcSym;
             funcSym.name = stmt.handlerName;
-            funcSym.returnType = VariableType::VOID;  // SUBs have no return type
+            funcSym.returnTypeDesc = TypeDescriptor(BaseType::VOID);  // SUBs have no return type
             funcSym.definition = stmt.location;
             m_symbolTable.functions[stmt.handlerName] = funcSym;
             
@@ -2281,7 +2277,7 @@ void SemanticAnalyzer::validateEveryStatement(const EveryStatement& stmt) {
             // Create a function symbol for the inline handler
             FunctionSymbol funcSym;
             funcSym.name = stmt.handlerName;
-            funcSym.returnType = VariableType::VOID;  // SUBs have no return type
+            funcSym.returnTypeDesc = TypeDescriptor(BaseType::VOID);  // SUBs have no return type
             funcSym.definition = stmt.location;
             m_symbolTable.functions[stmt.handlerName] = funcSym;
             
@@ -2530,7 +2526,7 @@ void SemanticAnalyzer::validateReturnStatement(const ReturnStatement& stmt) {
         
         // Check return type compatibility
         VariableType returnType = inferExpressionType(*stmt.returnValue);
-        VariableType expectedType = m_currentFunctionScope.expectedReturnType;
+        VariableType expectedType = descriptorToLegacyType(m_currentFunctionScope.expectedReturnType);
         std::string expectedTypeName = m_currentFunctionScope.expectedReturnTypeName;
         
         // Skip validation if expected type is unknown
@@ -2724,7 +2720,7 @@ VariableType SemanticAnalyzer::inferMemberAccessType(const MemberAccessExpressio
     if (expr.object->getType() == ASTNodeType::EXPR_VARIABLE) {
         const VariableExpression* varExpr = static_cast<const VariableExpression*>(expr.object.get());
         VariableSymbol* varSym = lookupVariable(varExpr->name);
-        if (varSym && varSym->type == VariableType::USER_DEFINED) {
+        if (varSym && varSym->typeDesc.baseType == BaseType::USER_DEFINED) {
             // Get the UDT type name
             baseTypeName = varSym->typeName;
         } else {
@@ -2734,7 +2730,7 @@ VariableType SemanticAnalyzer::inferMemberAccessType(const MemberAccessExpressio
         // Array element access
         const ArrayAccessExpression* arrayExpr = static_cast<const ArrayAccessExpression*>(expr.object.get());
         ArraySymbol* arraySym = lookupArray(arrayExpr->name);
-        if (arraySym && arraySym->type == VariableType::USER_DEFINED) {
+        if (arraySym && arraySym->elementTypeDesc.baseType == BaseType::USER_DEFINED) {
             baseTypeName = arraySym->asTypeName;
         } else {
             return VariableType::UNKNOWN;
@@ -2839,7 +2835,7 @@ VariableType SemanticAnalyzer::inferVariableType(const VariableExpression& expr)
         if (m_currentFunctionScope.sharedVariables.count(expr.name)) {
             auto* sym = lookupVariable(expr.name);
             if (sym) {
-                return sym->type;
+                return descriptorToLegacyType(sym->typeDesc);
             }
             return inferTypeFromName(expr.name);
         }
@@ -2853,7 +2849,7 @@ VariableType SemanticAnalyzer::inferVariableType(const VariableExpression& expr)
         
         auto* sym = lookupVariable(expr.name);
         if (sym) {
-            return sym->type;
+            return descriptorToLegacyType(sym->typeDesc);
         }
     }
     
@@ -2871,7 +2867,7 @@ VariableType SemanticAnalyzer::inferArrayAccessType(const ArrayAccessExpression&
         for (const auto& arg : expr.indices) {
             validateExpression(*arg);
         }
-        return funcSym.returnType;
+        return descriptorToLegacyType(funcSym.returnTypeDesc);
     }
     
     // Check symbol table - if it's a declared array, treat as array access
@@ -2891,7 +2887,7 @@ VariableType SemanticAnalyzer::inferArrayAccessType(const ArrayAccessExpression&
             }
         }
         
-        return arraySym->type;
+        return descriptorToLegacyType(arraySym->elementTypeDesc);
     }
     
     // Not a declared array - check if it's a built-in function call
@@ -2932,7 +2928,7 @@ VariableType SemanticAnalyzer::inferArrayAccessType(const ArrayAccessExpression&
     // Return type for implicit array (lookup again after useArray)
     arraySym = lookupArray(expr.name);
     if (arraySym) {
-        return arraySym->type;
+        return descriptorToLegacyType(arraySym->elementTypeDesc);
     }
     return VariableType::UNKNOWN;
 }
@@ -2953,14 +2949,15 @@ VariableType SemanticAnalyzer::inferFunctionCallType(const FunctionCallExpressio
                       "Function " + expr.name + " expects " + std::to_string(sym->parameters.size()) +
                       " arguments, got " + std::to_string(expr.arguments.size()),
                       expr.location);
-                return sym->returnType;
+                return descriptorToLegacyType(sym->returnTypeDesc);
             }
             
             // Validate parameter types
-            for (size_t i = 0; i < expr.arguments.size() && i < sym->parameterTypes.size(); ++i) {
+            for (size_t i = 0; i < expr.arguments.size() && i < sym->parameterTypeDescs.size(); ++i) {
                 VariableType argType = inferExpressionType(*expr.arguments[i]);
-                VariableType paramType = sym->parameterTypes[i];
-                std::string paramTypeName = i < sym->parameterTypeNames.size() ? sym->parameterTypeNames[i] : "";
+                const TypeDescriptor& paramTypeDesc = sym->parameterTypeDescs[i];
+                VariableType paramType = descriptorToLegacyType(paramTypeDesc);
+                std::string paramTypeName = paramTypeDesc.isUserDefined() ? paramTypeDesc.udtName : "";
                 
                 // Skip validation if parameter type is unknown (untyped parameter)
                 if (paramType == VariableType::UNKNOWN && paramTypeName.empty()) {
@@ -3006,7 +3003,7 @@ VariableType SemanticAnalyzer::inferFunctionCallType(const FunctionCallExpressio
             }
             
             // Return the function's return type
-            return sym->returnType;
+            return descriptorToLegacyType(sym->returnTypeDesc);
         } else {
             error(SemanticErrorType::UNDEFINED_FUNCTION,
                   "Undefined function FN" + expr.name,
@@ -3152,7 +3149,7 @@ VariableSymbol* SemanticAnalyzer::declareVariable(const std::string& name, Varia
     
     VariableSymbol sym;
     sym.name = name;
-    sym.type = type;
+    sym.typeDesc = legacyTypeToDescriptor(type);
     sym.isDeclared = isDeclared;
     sym.isUsed = false;
     sym.firstUse = loc;
@@ -3168,7 +3165,6 @@ VariableSymbol* SemanticAnalyzer::declareVariableD(const std::string& name, cons
     if (it != m_symbolTable.variables.end()) {
         // Update existing variable with new type info
         it->second.typeDesc = typeDesc;
-        it->second.type = descriptorToLegacyType(typeDesc);
         if (typeDesc.isUserDefined()) {
             it->second.typeName = typeDesc.udtName;
         }
@@ -3195,7 +3191,7 @@ VariableSymbol* SemanticAnalyzer::lookupVariable(const std::string& name) {
         // Found a scalar array - create a corresponding variable entry
         VariableSymbol sym;
         sym.name = name;
-        sym.type = arrIt->second.type;
+        sym.typeDesc = arrIt->second.elementTypeDesc;
         sym.isDeclared = true;
         sym.firstUse = arrIt->second.declaration;
         m_symbolTable.variables[name] = sym;
@@ -3341,9 +3337,13 @@ void SemanticAnalyzer::useVariable(const std::string& name, const SourceLocation
     
     auto* sym = lookupVariable(name);
     if (!sym) {
-        // Implicitly declare
-        VariableType type = inferTypeFromName(name);
-        sym = declareVariable(name, type, loc, false);
+        // Implicitly declare using TypeDescriptor
+        TypeDescriptor typeDesc = inferTypeFromNameD(name);
+        std::cerr << "[DEBUG] useVariable: declaring '" << name << "' with inferred type=" 
+                  << static_cast<int>(typeDesc.baseType) << std::endl;
+        sym = declareVariableD(name, typeDesc, loc, false);
+        std::cerr << "[DEBUG] useVariable: after declareVariableD, sym->typeDesc.baseType=" 
+                  << static_cast<int>(sym->typeDesc.baseType) << std::endl;
     }
     sym->isUsed = true;
 }
@@ -4590,7 +4590,7 @@ TypeDescriptor SemanticAnalyzer::inferArrayAccessTypeD(const ArrayAccessExpressi
     // Check if it's a function call
     if (m_symbolTable.functions.find(mangledName) != m_symbolTable.functions.end()) {
         const auto& funcSym = m_symbolTable.functions.at(mangledName);
-        return legacyTypeToDescriptor(funcSym.returnType);
+        return funcSym.returnTypeDesc;
     }
     
     // Check array symbol
@@ -4644,7 +4644,7 @@ TypeDescriptor SemanticAnalyzer::inferMemberAccessTypeD(const MemberAccessExpres
     if (expr.object->getType() == ASTNodeType::EXPR_VARIABLE) {
         const auto* varExpr = static_cast<const VariableExpression*>(expr.object.get());
         auto* varSym = lookupVariable(varExpr->name);
-        if (varSym && varSym->type == VariableType::USER_DEFINED) {
+        if (varSym && varSym->typeDesc.baseType == BaseType::USER_DEFINED) {
             baseTypeName = varSym->typeName;
             baseType.baseType = BaseType::USER_DEFINED;
             baseType.udtName = baseTypeName;
@@ -4653,7 +4653,7 @@ TypeDescriptor SemanticAnalyzer::inferMemberAccessTypeD(const MemberAccessExpres
     } else if (expr.object->getType() == ASTNodeType::EXPR_ARRAY_ACCESS) {
         const auto* arrExpr = static_cast<const ArrayAccessExpression*>(expr.object.get());
         auto* arrSym = lookupArray(arrExpr->name);
-        if (arrSym && arrSym->type == VariableType::USER_DEFINED) {
+        if (arrSym && arrSym->elementTypeDesc.baseType == BaseType::USER_DEFINED) {
             baseTypeName = arrSym->asTypeName;
             baseType.baseType = BaseType::USER_DEFINED;
             baseType.udtName = baseTypeName;

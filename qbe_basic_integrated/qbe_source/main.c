@@ -172,13 +172,14 @@ main(int ac, char *av[])
 	char *f, *sep, *output_file = NULL;
 	char *runtime_dir = NULL;
 	char temp_asm[256] = {0};
-	char cmd[2048];
+	char cmd[4096];
 	int c, compile_only = 0, is_basic = 0, il_only = 0;
 	int need_linking = 0;
 	int trace_cfg = 0;
 	int i, j;
 	char **filtered_av;
 	int filtered_ac;
+	char default_output[256];  /* Move to function scope to prevent corruption */
 
 	T = Deftgt;
 	outf = stdout;
@@ -344,7 +345,6 @@ main(int ac, char *av[])
 		} else if (is_basic && !il_only) {
 			/* BASIC file: compile to assembly and link to executable */
 			/* Generate a default output name if not specified */
-			char default_output[256];
 			if (!output_file) {
 				/* Strip .bas extension and use as executable name */
 				const char *base = strrchr(f, '/');
@@ -497,11 +497,19 @@ main(int ac, char *av[])
 		}
 		
 		/* Build link command with precompiled runtime objects */
-		char obj_list[2048] = "";
+		char obj_list[4096] = "";
 		for (char **src = runtime_files; *src; src++) {
 			char obj_path[256];
 			snprintf(obj_path, sizeof(obj_path), "%s/.obj/%s.o ", runtime_dir, *src);
-			strcat(obj_list, obj_path);
+			size_t current_len = strlen(obj_list);
+			size_t path_len = strlen(obj_path);
+			if (current_len + path_len + 1 < sizeof(obj_list)) {
+				strcat(obj_list, obj_path);
+			} else {
+				fprintf(stderr, "Error: runtime object list too long\n");
+				unlink(temp_asm);
+				exit(1);
+			}
 		}
 		
 		snprintf(cmd, sizeof(cmd), "cc -O2 %s %s -o %s", temp_asm, obj_list, output_file);

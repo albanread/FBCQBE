@@ -78,72 +78,71 @@ clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -I"$
     -c "$PROJECT_ROOT/basic_frontend.cpp" \
     -o "$PROJECT_ROOT/obj/basic_frontend.o"
 
-echo "  ✓ Wrapper compiled"
+echo "  ✓ Wrapper and frontend compiled"
 
 # Step 4: Copy runtime files to local directory
 echo "Copying runtime files..."
-RUNTIME_SRC="$PROJECT_ROOT/../fsh/FasterBASICT/runtime_c"
+RUNTIME_SRC_DIR="$PROJECT_ROOT/../fsh/FasterBASICT/runtime_c"
 RUNTIME_DEST="$PROJECT_ROOT/runtime"
 
 mkdir -p "$RUNTIME_DEST"
 
-if [ -d "$RUNTIME_SRC" ]; then
-    cp "$RUNTIME_SRC"/*.c "$RUNTIME_DEST/" 2>/dev/null || true
-    cp "$RUNTIME_SRC"/*.h "$RUNTIME_DEST/" 2>/dev/null || true
+if [ -d "$RUNTIME_SRC_DIR" ]; then
+    cp "$RUNTIME_SRC_DIR"/*.c "$RUNTIME_DEST/" 2>/dev/null || true
+    cp "$RUNTIME_SRC_DIR"/*.h "$RUNTIME_DEST/" 2>/dev/null || true
     echo "  ✓ Runtime files copied to runtime/"
 else
-    echo "  ⚠ Warning: Runtime source not found at $RUNTIME_SRC"
+    echo "  ⚠ Warning: Runtime source not found at $RUNTIME_SRC_DIR"
 fi
 
-# Step 5: Ensure QBE objects are built
-echo "Checking QBE object files..."
+# Step 5: Build QBE object files
+echo "Building QBE object files..."
 cd "$QBE_DIR"
 
-if [ ! -f "main.o" ] || [ ! -f "parse.o" ]; then
-    echo "Building QBE object files..."
+# Configure QBE if needed
+if [ ! -f "config.h" ]; then
+    ARCH=$(uname -m)
+    OS=$(uname -s)
 
-    # Configure QBE if needed
-    if [ ! -f "config.h" ]; then
-        ARCH=$(uname -m)
-        OS=$(uname -s)
-
-        if [ "$OS" = "Darwin" ]; then
-            if [ "$ARCH" = "arm64" ]; then
-                DEFAULT_TARGET="T_arm64_apple"
-            else
-                DEFAULT_TARGET="T_amd64_apple"
-            fi
+    if [ "$OS" = "Darwin" ]; then
+        if [ "$ARCH" = "arm64" ]; then
+            DEFAULT_TARGET="T_arm64_apple"
         else
-            if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-                DEFAULT_TARGET="T_arm64"
-            elif [ "$ARCH" = "riscv64" ]; then
-                DEFAULT_TARGET="T_rv64"
-            else
-                DEFAULT_TARGET="T_amd64_sysv"
-            fi
+            DEFAULT_TARGET="T_amd64_apple"
         fi
+    else
+        if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+            DEFAULT_TARGET="T_arm64"
+        elif [ "$ARCH" = "riscv64" ]; then
+            DEFAULT_TARGET="T_rv64"
+        else
+            DEFAULT_TARGET="T_amd64_sysv"
+        fi
+    fi
 
-        cat > config.h << EOF
+    cat > config.h << EOF
 #define VERSION "qbe+fasterbasic"
 #define Deftgt $DEFAULT_TARGET
 EOF
-    fi
-
-    # Compile QBE C sources
-    cc -std=c99 -O2 -c \
-        main.c parse.c ssa.c live.c copy.c fold.c simpl.c ifopt.c gcm.c gvn.c \
-        mem.c alias.c load.c util.c rega.c emit.c cfg.c abi.c spill.c
-
-    # Compile architecture-specific sources
-    (cd amd64 && cc -std=c99 -O2 -c *.c)
-    (cd arm64 && cc -std=c99 -O2 -c *.c)
-    (cd rv64 && cc -std=c99 -O2 -c *.c)
+    echo "  ✓ Generated config.h (target: $DEFAULT_TARGET)"
 fi
 
-echo "  ✓ QBE objects ready"
+# Compile QBE C sources
+echo "  Compiling QBE core..."
+cc -std=c99 -O2 -c \
+    main.c parse.c ssa.c live.c copy.c fold.c simpl.c ifopt.c gcm.c gvn.c \
+    mem.c alias.c load.c util.c rega.c emit.c cfg.c abi.c spill.c
 
-# Step 6: Link everything together
-echo "Linking QBE with FasterBASIC support..."
+# Compile architecture-specific sources
+echo "  Compiling architecture backends..."
+(cd amd64 && cc -std=c99 -O2 -c *.c)
+(cd arm64 && cc -std=c99 -O2 -c *.c)
+(cd rv64 && cc -std=c99 -O2 -c *.c)
+
+echo "  ✓ QBE objects built"
+
+# Step 6: Link everything together into the final compiler executable
+echo "Linking fbc_qbe compiler..."
 
 clang++ -O2 -o "$PROJECT_ROOT/fbc_qbe" \
     main.o parse.o ssa.o live.o copy.o fold.o simpl.o ifopt.o gcm.o gvn.o \
@@ -163,13 +162,19 @@ echo "Executable: $PROJECT_ROOT/fbc_qbe"
 echo "Symlink:    $PROJECT_ROOT/qbe_basic -> fbc_qbe (for backward compatibility)"
 echo ""
 echo "Usage:"
-echo "  ./fbc_qbe input.bas -o program         # Compile to executable"
-echo "  ./fbc_qbe --emit-qbe input.bas         # Generate QBE IL only"
-echo "  ./fbc_qbe --emit-asm input.bas         # Generate assembly only"
-echo "  ./fbc_qbe --run input.bas              # Compile and run immediately"
+echo "  ./fbc_qbe input.bas                    # Compile to executable (default: 'input')"
+echo "  ./fbc_qbe input.bas -o program         # Compile to named executable"
+echo "  ./fbc_qbe input.bas -i                 # Generate QBE IL only (to stdout)"
+echo "  ./fbc_qbe input.bas -i -o output.qbe   # Generate QBE IL to file"
+echo "  ./fbc_qbe input.bas -c -o output.s     # Generate assembly only"
+echo "  ./fbc_qbe input.bas -G                 # Trace CFG construction and exit"
 echo ""
 echo "  (or use ./qbe_basic for backward compatibility)"
 echo ""
-echo "Note: Runtime library will be built automatically on first use"
+echo "Note: Runtime library will be built automatically on first compilation"
 echo "      and cached in runtime/.obj/ for faster subsequent builds."
+echo ""
+echo "You can now test with:"
+echo "  ./fbc_qbe test_hello.bas"
+echo "  ./test_hello"
 echo ""

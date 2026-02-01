@@ -1,0 +1,3 @@
+LET A# = 10.5
+PRINT A#
+END

@@ -454,9 +454,8 @@ inline BaseType baseTypeFromSuffix(char suffix) {
 // Variable symbol
 struct VariableSymbol {
     std::string name;
-    TypeDescriptor typeDesc;                         // New: TypeDescriptor
-    VariableType type;                               // Legacy: for compatibility (deprecated)
-    std::string typeName;                            // Legacy: for USER_DEFINED types (deprecated)
+    TypeDescriptor typeDesc;                         // Full type descriptor with attributes
+    std::string typeName;                            // For USER_DEFINED types, the type name
     bool isDeclared;                                 // Explicit declaration vs implicit
     bool isUsed;
     SourceLocation firstUse;
@@ -465,11 +464,11 @@ struct VariableSymbol {
     int globalOffset;                                // Slot number in global vector (only valid if isGlobal == true)
 
     VariableSymbol()
-        : typeDesc(BaseType::UNKNOWN), type(VariableType::UNKNOWN), isDeclared(false), isUsed(false), functionScope(""), isGlobal(false), globalOffset(-1) {}
+        : typeDesc(BaseType::UNKNOWN), isDeclared(false), isUsed(false), functionScope(""), isGlobal(false), globalOffset(-1) {}
 
     // Constructor from TypeDescriptor
     VariableSymbol(const std::string& n, const TypeDescriptor& td, bool decl = false)
-        : name(n), typeDesc(td), type(descriptorToLegacyType(td)), isDeclared(decl), isUsed(false), functionScope(""), isGlobal(false), globalOffset(-1) {
+        : name(n), typeDesc(td), isDeclared(decl), isUsed(false), functionScope(""), isGlobal(false), globalOffset(-1) {
         if (td.isUserDefined()) {
             typeName = td.udtName;
         }
@@ -482,36 +481,26 @@ struct VariableSymbol {
         return oss.str();
     }
     
-    // Legacy compatibility method
-    std::string toLegacyString() const {
-        std::ostringstream oss;
-        oss << name << ": " << typeToString(type);
-        if (type == VariableType::USER_DEFINED && !typeName.empty()) {
-            oss << " (" << typeName << ")";
-        }
-        if (!isDeclared) oss << " [implicit]";
-        return oss.str();
-    }
+
 };
 
 // Array symbol
 struct ArraySymbol {
     std::string name;
-    TypeDescriptor elementTypeDesc;                  // New: Element type descriptor
-    VariableType type;                               // Legacy: element type (deprecated)
+    TypeDescriptor elementTypeDesc;                  // Element type descriptor
     std::vector<int> dimensions;
     bool isDeclared;
     SourceLocation declaration;
     int totalSize;                                   // Product of all dimensions
-    std::string asTypeName;                          // Legacy: for user-defined types (deprecated)
+    std::string asTypeName;                          // For USER_DEFINED element types
     std::string functionScope;                       // Empty string = global, otherwise function name
 
     ArraySymbol()
-        : elementTypeDesc(BaseType::UNKNOWN), type(VariableType::UNKNOWN), isDeclared(false), totalSize(0), functionScope("") {}
+        : elementTypeDesc(BaseType::UNKNOWN), isDeclared(false), totalSize(0), functionScope("") {}
 
     // Constructor from TypeDescriptor
     ArraySymbol(const std::string& n, const TypeDescriptor& elemType, const std::vector<int>& dims, bool decl = false)
-        : name(n), elementTypeDesc(elemType), type(descriptorToLegacyType(elemType)), 
+        : name(n), elementTypeDesc(elemType),
           dimensions(dims), isDeclared(decl), totalSize(1), functionScope("") {
         if (elemType.isUserDefined()) {
             asTypeName = elemType.udtName;
@@ -542,7 +531,7 @@ struct ArraySymbol {
             if (i > 0) oss << ", ";
             oss << dimensions[i];
         }
-        oss << ") : " << typeToString(type);
+        oss << ") : " << elementTypeDesc.toString();
         oss << " [" << totalSize << " elements]";
         return oss.str();
     }
@@ -552,28 +541,23 @@ struct ArraySymbol {
 struct FunctionSymbol {
     std::string name;
     std::vector<std::string> parameters;
-    std::vector<TypeDescriptor> parameterTypeDescs;  // New: Parameter type descriptors
-    std::vector<VariableType> parameterTypes;        // Legacy: Type for each parameter (deprecated)
-    std::vector<std::string> parameterTypeNames;     // Legacy: User-defined type names (deprecated)
+    std::vector<TypeDescriptor> parameterTypeDescs;  // Parameter type descriptors
     std::vector<bool> parameterIsByRef;              // BYREF flag for each parameter
-    TypeDescriptor returnTypeDesc;                   // New: Return type descriptor
-    VariableType returnType;                         // Legacy: (deprecated)
-    std::string returnTypeName;                      // Legacy: User-defined return type name (deprecated)
+    TypeDescriptor returnTypeDesc;                   // Return type descriptor
+    std::string returnTypeName;                      // For USER_DEFINED return types
     SourceLocation definition;
     const Expression* body;                          // Pointer to AST node (not owned)
 
     FunctionSymbol()
-        : returnTypeDesc(BaseType::UNKNOWN), returnType(VariableType::UNKNOWN), body(nullptr) {}
+        : returnTypeDesc(BaseType::UNKNOWN), body(nullptr) {}
     
     // Constructor from TypeDescriptors
     FunctionSymbol(const std::string& n, const std::vector<std::string>& params,
                    const std::vector<TypeDescriptor>& paramTypes, const TypeDescriptor& retType)
         : name(n), parameters(params), parameterTypeDescs(paramTypes), 
-          returnTypeDesc(retType), returnType(descriptorToLegacyType(retType)), body(nullptr) {
-        // Fill legacy types for compatibility
+          returnTypeDesc(retType), body(nullptr) {
+        // Fill byref flags
         for (const auto& td : paramTypes) {
-            parameterTypes.push_back(descriptorToLegacyType(td));
-            parameterTypeNames.push_back(td.isUserDefined() ? td.udtName : "");
             parameterIsByRef.push_back(td.isByRef());
         }
         if (retType.isUserDefined()) {
@@ -595,31 +579,7 @@ struct FunctionSymbol {
         oss << ") : " << returnTypeDesc.toString();
         return oss.str();
     }
-    
-    // Legacy compatibility method
-    std::string toLegacyString() const {
-        std::ostringstream oss;
-        oss << "FN " << name << "(";
-        for (size_t i = 0; i < parameters.size(); ++i) {
-            if (i > 0) oss << ", ";
-            oss << parameters[i];
-            if (i < parameterTypes.size() && parameterTypes[i] != VariableType::UNKNOWN) {
-                oss << " : ";
-                if (!parameterTypeNames[i].empty()) {
-                    oss << parameterTypeNames[i];
-                } else {
-                    oss << typeToString(parameterTypes[i]);
-                }
-            }
-        }
-        oss << ") : ";
-        if (!returnTypeName.empty()) {
-            oss << returnTypeName;
-        } else {
-            oss << typeToString(returnType);
-        }
-        return oss.str();
-    }
+
 };
 
 // Line number symbol
@@ -1165,11 +1125,11 @@ private:
         std::unordered_set<std::string> localVariables;  // LOCAL declarations
         std::unordered_set<std::string> sharedVariables; // SHARED declarations
         bool inFunction;                                  // Are we inside a function/sub?
-        VariableType expectedReturnType;                 // Expected return type for FUNCTION
+        TypeDescriptor expectedReturnType;               // Expected return type for FUNCTION
         std::string expectedReturnTypeName;              // User-defined return type name (if any)
         bool isSub;                                      // true if SUB (no return value), false if FUNCTION
         
-        FunctionScope() : inFunction(false), expectedReturnType(VariableType::UNKNOWN), isSub(false) {}
+        FunctionScope() : inFunction(false), expectedReturnType(BaseType::UNKNOWN), isSub(false) {}
     };
     
     FunctionScope m_currentFunctionScope;

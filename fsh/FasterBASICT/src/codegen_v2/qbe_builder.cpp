@@ -96,7 +96,21 @@ void QBEBuilder::emitCompare(const std::string& dest, const std::string& type,
                             const std::string& op, const std::string& lhs,
                             const std::string& rhs) {
     std::ostringstream oss;
-    oss << dest << " =w c" << op << type << " " << lhs << ", " << rhs;
+    // For floating point types (s, d), use 'clt' not 'cslt'
+    // For integer types (w, l), use 'cslt'
+    std::string fullOp;
+    if (type == "s" || type == "d") {
+        // Floating point: remove 's' prefix if present
+        if (op.length() > 0 && op[0] == 's') {
+            fullOp = "c" + op.substr(1) + type;
+        } else {
+            fullOp = "c" + op + type;
+        }
+    } else {
+        // Integer: keep as is
+        fullOp = "c" + op + type;
+    }
+    oss << dest << " =w " << fullOp << " " << lhs << ", " << rhs;
     emitInstruction(oss.str());
 }
 

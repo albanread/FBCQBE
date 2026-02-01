@@ -262,14 +262,14 @@ std::string TypeManager::mapConversion(char fromQBE, char toQBE) const {
     if (fromQBE == 'w') {
         if (toQBE == 'l') return "extsw";     // Sign extend word to long
         if (toQBE == 's') return "swtof";     // Signed word to float
-        if (toQBE == 'd') return "swtof";     // Signed word to double (via float)
+        if (toQBE == 'd') return "INT_TO_DOUBLE_W";  // Special: needs two-step conversion
     }
     
     // From long (l) conversions
     if (fromQBE == 'l') {
         if (toQBE == 'w') return "copy";      // Truncate long to word
         if (toQBE == 's') return "sltof";     // Signed long to float
-        if (toQBE == 'd') return "sltof";     // Signed long to double (via float)
+        if (toQBE == 'd') return "INT_TO_DOUBLE_L";  // Special: needs two-step conversion
     }
     
     // From float (s) conversions

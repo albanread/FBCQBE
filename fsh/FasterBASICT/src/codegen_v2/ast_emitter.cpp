@@ -1,6 +1,7 @@
 #include "ast_emitter.h"
 #include <sstream>
 #include <cmath>
+#include <iostream>
 
 namespace fbc {
 
@@ -27,23 +28,23 @@ std::string ASTEmitter::emitExpression(const Expression* expr) {
     
     switch (expr->getType()) {
         case ASTNodeType::EXPR_NUMBER:
-            return emitNumberLiteral(static_cast<const NumberExpression*>(expr));
+            return emitNumberLiteral(static_cast<const NumberExpression*>(expr), BaseType::UNKNOWN);
             
         case ASTNodeType::EXPR_STRING:
             return emitStringLiteral(static_cast<const StringExpression*>(expr));
-            
+        
         case ASTNodeType::EXPR_VARIABLE:
             return emitVariableExpression(static_cast<const VariableExpression*>(expr));
-            
+        
         case ASTNodeType::EXPR_BINARY:
             return emitBinaryExpression(static_cast<const BinaryExpression*>(expr));
-            
+        
         case ASTNodeType::EXPR_UNARY:
             return emitUnaryExpression(static_cast<const UnaryExpression*>(expr));
-            
+        
         case ASTNodeType::EXPR_ARRAY_ACCESS:
             return emitArrayAccessExpression(static_cast<const ArrayAccessExpression*>(expr));
-            
+        
         case ASTNodeType::EXPR_FUNCTION_CALL:
             return emitFunctionCall(static_cast<const FunctionCallExpression*>(expr));
             
@@ -57,9 +58,20 @@ std::string ASTEmitter::emitExpression(const Expression* expr) {
 }
 
 std::string ASTEmitter::emitExpressionAs(const Expression* expr, BaseType expectedType) {
+    if (!expr) {
+        return "0";
+    }
+    
+    // Special case: if it's a simple number literal, emit it with the expected type
+    if (expr->getType() == ASTNodeType::EXPR_NUMBER) {
+        return emitNumberLiteral(static_cast<const NumberExpression*>(expr), expectedType);
+    }
+    
+    // For complex expressions, emit normally and convert if needed
     std::string value = emitExpression(expr);
     BaseType exprType = getExpressionType(expr);
     
+    // Convert if necessary
     if (typeManager_.needsConversion(exprType, expectedType)) {
         return emitTypeConversion(value, exprType, expectedType);
     }
@@ -69,27 +81,30 @@ std::string ASTEmitter::emitExpressionAs(const Expression* expr, BaseType expect
 
 // === Expression Emitters (by type) ===
 
-std::string ASTEmitter::emitNumberLiteral(const NumberExpression* expr) {
+std::string ASTEmitter::emitNumberLiteral(const NumberExpression* expr, BaseType expectedType) {
     double value = expr->value;
     
     // Check if it's an integer value
     if (value == std::floor(value) && value >= INT32_MIN && value <= INT32_MAX) {
-        // Integer literal
+        // Integer literal - but check if we need to emit as float/double for context
+        if (expectedType == BaseType::SINGLE || expectedType == BaseType::DOUBLE) {
+            std::ostringstream oss;
+            oss.precision(17);
+            oss << (expectedType == BaseType::SINGLE ? "s_" : "d_") << value;
+            return oss.str();
+        }
         return std::to_string(static_cast<int>(value));
     } else {
-        // Float/double literal
+        // Float/double literal - use expectedType if provided, otherwise default to double
         std::ostringstream oss;
         oss.precision(17);  // Full double precision
         
-        // Determine if we need single or double precision
-        if (std::abs(value) < 1e38 && std::abs(value) > 1e-38) {
-            // Can fit in single precision
+        if (expectedType == BaseType::SINGLE) {
             oss << "s_" << value;
         } else {
-            // Need double precision
+            // Default to double for floating literals (matches getExpressionType)
             oss << "d_" << value;
         }
-        
         return oss.str();
     }
 }
@@ -332,6 +347,18 @@ std::string ASTEmitter::emitTypeConversion(const std::string& value,
         return value;
     }
     
+    // Handle special two-step conversions for integer to double
+    if (convOp == "INT_TO_DOUBLE_W" || convOp == "INT_TO_DOUBLE_L") {
+        // QBE doesn't have direct int→double, must go int→float→double
+        std::string floatTemp = builder_.newTemp();
+        std::string op1 = (convOp == "INT_TO_DOUBLE_W") ? "swtof" : "sltof";
+        builder_.emitConvert(floatTemp, "s", op1, value);
+        
+        std::string result = builder_.newTemp();
+        builder_.emitConvert(result, "d", "exts", floatTemp);
+        return result;
+    }
+    
     std::string qbeToType = typeManager_.getQBEType(toType);
     std::string result = builder_.newTemp();
     
@@ -417,8 +444,14 @@ void ASTEmitter::emitStatement(const Statement* stmt) {
 }
 
 void ASTEmitter::emitLetStatement(const LetStatement* stmt) {
-    // Emit the right-hand side expression
-    std::string value = emitExpression(stmt->value.get());
+    // Get the target variable type first
+    BaseType targetType = getVariableType(stmt->variable);
+    
+    // Emit the right-hand side expression with type context for smart literal generation
+    std::string value = emitExpressionAs(stmt->value.get(), targetType);
+    
+    // Use variable name as-is - it's already mangled by the parser/semantic analyzer
+    // (e.g., "Y#" becomes "Y_DOUBLE" in the symbol table)
     
     // Check if this is an array assignment
     if (!stmt->indices.empty()) {
@@ -695,6 +728,9 @@ void ASTEmitter::emitCallStatement(const CallStatement* stmt) {
 // === Variable Access ===
 
 std::string ASTEmitter::getVariableAddress(const std::string& varName) {
+    // Variable name is already mangled by semantic analyzer (e.g., "Y_DOUBLE")
+    // Don't mangle it again - use it as-is for symbol table lookup
+    
     // Check if it's a global variable
     const auto& symbolTable = semantic_.getSymbolTable();
     auto it = symbolTable.variables.find(varName);
@@ -710,17 +746,18 @@ std::string ASTEmitter::getVariableAddress(const std::string& varName) {
                          (symbolMapper_.inFunctionScope() && symbolMapper_.isSharedVariable(varName));
     
     if (treatAsGlobal) {
-        std::string mangledName = symbolMapper_.mangleVariableName(varName, true);
+        // For global variables, use QBE global prefix ($)
+        std::string globalName = "$var_" + varName;
         
         // Cache the address
-        if (globalVarAddresses_.find(mangledName) == globalVarAddresses_.end()) {
-            globalVarAddresses_[mangledName] = mangledName;
+        if (globalVarAddresses_.find(globalName) == globalVarAddresses_.end()) {
+            globalVarAddresses_[globalName] = globalName;
         }
         
-        return mangledName;
+        return globalName;
     } else {
-        // Local variable - use mangled name as address
-        return symbolMapper_.mangleVariableName(varName, false);
+        // Local variable - use QBE local prefix (%)
+        return "%var_" + varName;
     }
 }
 
@@ -1113,29 +1150,18 @@ BaseType ASTEmitter::getExpressionType(const Expression* expr) {
 }
 
 BaseType ASTEmitter::getVariableType(const std::string& varName) {
+    // Variable name is already mangled (e.g., "Y_DOUBLE")
     const auto& symbolTable = semantic_.getSymbolTable();
     auto it = symbolTable.variables.find(varName);
     if (it == symbolTable.variables.end()) {
         return BaseType::UNKNOWN;
     }
+    
     const auto& varSymbol = it->second;
     return varSymbol.typeDesc.baseType;
-    
-    // Try to infer from type suffix
-    if (!varName.empty()) {
-        char lastChar = varName.back();
-        switch (lastChar) {
-            case '%': return BaseType::INTEGER;
-            case '&': return BaseType::LONG;
-            case '!': return BaseType::SINGLE;
-            case '#': return BaseType::DOUBLE;
-            case '$': return BaseType::STRING;
-        }
-    }
-    
-    // Default to SINGLE (classic BASIC default)
-    return BaseType::SINGLE;
 }
+
+
 
 // === Helper: get QBE operator names ===
 
