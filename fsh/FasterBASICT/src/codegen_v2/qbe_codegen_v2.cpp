@@ -111,23 +111,29 @@ std::string QBECodeGeneratorV2::generateFunction(const FunctionSymbol* funcSymbo
     // Get return type
     std::string returnType = typeManager_->getQBEReturnType(funcSymbol->returnTypeDesc.baseType);
     
-    // Build parameter list
+    // Build parameter list using actual parameter names
     std::string params;
     for (size_t i = 0; i < funcSymbol->parameters.size(); ++i) {
         if (i > 0) params += ", ";
         
         BaseType paramType = funcSymbol->parameterTypeDescs[i].baseType;
         std::string qbeType = typeManager_->getQBEType(paramType);
-        std::string paramName = "%arg" + std::to_string(i);
         
-        params += qbeType + " " + paramName;
+        // Use actual parameter name from CFG (e.g., "a", "b", "msg$")
+        std::string paramName = (i < cfg->parameters.size()) ? cfg->parameters[i] : ("arg" + std::to_string(i));
+        
+        params += qbeType + " %" + paramName;
     }
     
     // Start function
     builder_->emitFunctionStart(mangledName.substr(1), returnType, params);
+    builder_->emitComment("TRACE: Started FUNCTION " + funcSymbol->name + " with " + std::to_string(cfg->parameters.size()) + " parameters");
     
-    // Enter function scope
-    symbolMapper_->enterFunctionScope(funcSymbol->name);
+    // Enter function scope with parameters
+    for (size_t i = 0; i < cfg->parameters.size(); ++i) {
+        builder_->emitComment("  FUNCTION param[" + std::to_string(i) + "]: " + cfg->parameters[i]);
+    }
+    symbolMapper_->enterFunctionScope(funcSymbol->name, cfg->parameters);
     
     // Register SHARED variables from this function
     registerSharedVariables(cfg, symbolMapper_.get());
@@ -157,23 +163,29 @@ std::string QBECodeGeneratorV2::generateSub(const FunctionSymbol* subSymbol,
     // SUBs have no return type
     std::string returnType = "";
     
-    // Build parameter list
+    // Build parameter list using actual parameter names
     std::string params;
     for (size_t i = 0; i < subSymbol->parameters.size(); ++i) {
         if (i > 0) params += ", ";
         
         BaseType paramType = subSymbol->parameterTypeDescs[i].baseType;
         std::string qbeType = typeManager_->getQBEType(paramType);
-        std::string paramName = "%arg" + std::to_string(i);
         
-        params += qbeType + " " + paramName;
+        // Use actual parameter name from CFG (e.g., "a%", "b%", "msg$")
+        std::string paramName = (i < cfg->parameters.size()) ? cfg->parameters[i] : ("arg" + std::to_string(i));
+        
+        params += qbeType + " %" + paramName;
     }
     
     // Start function
     builder_->emitFunctionStart(mangledName.substr(1), returnType, params);
+    builder_->emitComment("TRACE: Started SUB " + subSymbol->name + " with " + std::to_string(cfg->parameters.size()) + " parameters");
     
-    // Enter function scope
-    symbolMapper_->enterFunctionScope(subSymbol->name);
+    // Enter function scope with parameters
+    for (size_t i = 0; i < cfg->parameters.size(); ++i) {
+        builder_->emitComment("  SUB param[" + std::to_string(i) + "]: " + cfg->parameters[i]);
+    }
+    symbolMapper_->enterFunctionScope(subSymbol->name, cfg->parameters);
     
     // Register SHARED variables from this SUB
     registerSharedVariables(cfg, symbolMapper_.get());

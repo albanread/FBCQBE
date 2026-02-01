@@ -113,10 +113,12 @@ public:
     // === Scope Management ===
     
     /**
-     * Enter a new function scope
+     * Enter a function scope (for LOCAL variable handling)
      * @param functionName Function or SUB name
+     * @param parameters List of parameter names for this function
      */
-    void enterFunctionScope(const std::string& functionName);
+    void enterFunctionScope(const std::string& functionName,
+                           const std::vector<std::string>& parameters = {});
     
     /**
      * Exit current function scope
@@ -130,11 +132,18 @@ public:
     void addSharedVariable(const std::string& varName);
     
     /**
-     * Check if a variable is SHARED in the current function scope
+     * Check if a variable is SHARED in the current function
      * @param varName Variable name
-     * @return True if the variable is SHARED in the current function
+     * @return True if SHARED
      */
     bool isSharedVariable(const std::string& varName) const;
+    
+    /**
+     * Check if a variable is a parameter of the current function
+     * @param varName Variable name
+     * @return True if it's a parameter
+     */
+    bool isParameter(const std::string& varName) const;
     
     /**
      * Clear shared variables (called when exiting function scope)
@@ -182,6 +191,9 @@ private:
     
     // Shared variables in current function scope
     std::unordered_set<std::string> sharedVariables_;
+    
+    // Parameters in current function scope
+    std::vector<std::string> currentFunctionParameters_;
     
     // Counters for unique name generation
     int labelCounter_;

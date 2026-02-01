@@ -138,14 +138,17 @@ std::string SymbolMapper::getStringConstantName() {
 
 // === Scope Management ===
 
-void SymbolMapper::enterFunctionScope(const std::string& functionName) {
+void SymbolMapper::enterFunctionScope(const std::string& functionName,
+                                      const std::vector<std::string>& parameters) {
     currentFunction_ = functionName;
     sharedVariables_.clear();
+    currentFunctionParameters_ = parameters;
 }
 
 void SymbolMapper::exitFunctionScope() {
     currentFunction_ = "";
     sharedVariables_.clear();
+    currentFunctionParameters_.clear();
 }
 
 void SymbolMapper::addSharedVariable(const std::string& varName) {
@@ -185,9 +188,20 @@ std::string SymbolMapper::escapeReserved(const std::string& name) const {
 
 void SymbolMapper::reset() {
     currentFunction_ = "";
+    sharedVariables_.clear();
+    currentFunctionParameters_.clear();
     labelCounter_ = 0;
     stringCounter_ = 0;
     symbolCache_.clear();
+}
+
+bool SymbolMapper::isParameter(const std::string& varName) const {
+    for (const auto& param : currentFunctionParameters_) {
+        if (param == varName) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // === Private Helpers ===

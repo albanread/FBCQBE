@@ -1060,6 +1060,14 @@ std::string ASTEmitter::getVariableAddress(const std::string& varName) {
 }
 
 std::string ASTEmitter::loadVariable(const std::string& varName) {
+    // Check if this is a function parameter FIRST - parameters are passed as QBE temporaries
+    // and don't need to be loaded from memory
+    if (symbolMapper_.inFunctionScope() && symbolMapper_.isParameter(varName)) {
+        // Parameter - return the parameter temporary directly (e.g., %a_INT)
+        builder_.emitComment("Loading parameter: " + varName);
+        return "%" + varName;
+    }
+    
     BaseType varType = getVariableType(varName);
     std::string qbeType = typeManager_.getQBEType(varType);
     
@@ -1094,6 +1102,17 @@ std::string ASTEmitter::loadVariable(const std::string& varName) {
 void ASTEmitter::storeVariable(const std::string& varName, const std::string& value) {
     BaseType varType = getVariableType(varName);
     std::string qbeType = typeManager_.getQBEType(varType);
+    
+    // Check if this is a function parameter
+    // In BASIC, parameters can be modified (pass-by-reference semantics)
+    if (symbolMapper_.inFunctionScope() && symbolMapper_.isParameter(varName)) {
+        // Parameter - need to allocate stack space and copy parameter value there
+        // Then update all references to use the stack location
+        // For now, we'll treat parameters as modifiable temporaries
+        builder_.emitComment("WARNING: Modifying parameter " + varName + " (using copy assignment)");
+        builder_.emitRaw("    %" + varName + " =" + qbeType + " copy " + value);
+        return;
+    }
     
     // Look up variable with scoped lookup
     std::string currentFunc = symbolMapper_.getCurrentFunction();
