@@ -23,14 +23,14 @@ namespace FasterBASIC {
 //
 BasicBlock* CFGBuilder::handleGoto(const GotoStatement& stmt, BasicBlock* incoming) {
     if (m_debugMode) {
-        std::cout << "[CFG] Handling GOTO to line " << stmt.targetLine << std::endl;
+        std::cout << "[CFG] Handling GOTO to line " << stmt.lineNumber << std::endl;
     }
     
     // Add GOTO statement to current block
     addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
     
     // Resolve target line to block ID
-    int targetBlockId = resolveLineNumberToBlock(stmt.targetLine);
+    int targetBlockId = resolveLineNumberToBlock(stmt.lineNumber);
     
     if (targetBlockId >= 0) {
         // Target already exists, wire directly
@@ -44,12 +44,12 @@ BasicBlock* CFGBuilder::handleGoto(const GotoStatement& stmt, BasicBlock* incomi
         // Forward reference - defer until Phase 2
         DeferredEdge edge;
         edge.sourceBlockId = incoming->id;
-        edge.targetLineNumber = stmt.targetLine;
+        edge.targetLineNumber = stmt.lineNumber;
         edge.label = "goto";
         m_deferredEdges.push_back(edge);
         
         if (m_debugMode) {
-            std::cout << "[CFG] Deferred GOTO edge to line " << stmt.targetLine << std::endl;
+            std::cout << "[CFG] Deferred GOTO edge to line " << stmt.lineNumber << std::endl;
         }
     }
     
@@ -73,7 +73,7 @@ BasicBlock* CFGBuilder::handleGosub(const GosubStatement& stmt, BasicBlock* inco
                                     LoopContext* loop, SelectContext* select,
                                     TryContext* tryCtx, SubroutineContext* outerSub) {
     if (m_debugMode) {
-        std::cout << "[CFG] Handling GOSUB to line " << stmt.targetLine << std::endl;
+        std::cout << "[CFG] Handling GOSUB to line " << stmt.lineNumber << std::endl;
     }
     
     // Add GOSUB statement to current block
@@ -83,7 +83,7 @@ BasicBlock* CFGBuilder::handleGosub(const GosubStatement& stmt, BasicBlock* inco
     BasicBlock* returnBlock = createBlock("Return_Point");
     
     // Edge A: Call edge to subroutine target
-    int targetBlockId = resolveLineNumberToBlock(stmt.targetLine);
+    int targetBlockId = resolveLineNumberToBlock(stmt.lineNumber);
     
     if (targetBlockId >= 0) {
         // Target already exists, wire directly
@@ -97,12 +97,12 @@ BasicBlock* CFGBuilder::handleGosub(const GosubStatement& stmt, BasicBlock* inco
         // Forward reference - defer until Phase 2
         DeferredEdge edge;
         edge.sourceBlockId = incoming->id;
-        edge.targetLineNumber = stmt.targetLine;
+        edge.targetLineNumber = stmt.lineNumber;
         edge.label = "call";
         m_deferredEdges.push_back(edge);
         
         if (m_debugMode) {
-            std::cout << "[CFG] Deferred GOSUB call edge to line " << stmt.targetLine << std::endl;
+            std::cout << "[CFG] Deferred GOSUB call edge to line " << stmt.lineNumber << std::endl;
         }
     }
     
@@ -315,8 +315,9 @@ BasicBlock* CFGBuilder::handleExit(const ExitStatement& stmt, BasicBlock* incomi
         case ExitStatement::ExitType::DO_LOOP:
             return handleExitDo(incoming, loop);
             
-        case ExitStatement::ExitType::SELECT_CASE:
-            return handleExitSelect(incoming, select);
+        case ExitStatement::ExitType::REPEAT_LOOP:
+            // REPEAT loops use same exit mechanism as DO loops
+            return handleExitDo(incoming, loop);
             
         case ExitStatement::ExitType::FUNCTION:
         case ExitStatement::ExitType::SUB:

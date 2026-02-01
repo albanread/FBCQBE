@@ -193,12 +193,12 @@ BasicBlock* CFGBuilder::buildStatementRange(
         }
         
         // =============================================================================
-        // EXIT Statements (loop/select exits)
+        // EXIT Statements (loop exits)
         // =============================================================================
         
         if (auto* exitStmt = dynamic_cast<const ExitStatement*>(stmt.get())) {
-            // Dispatch based on exit type
-            currentBlock = handleExit(*exitStmt, currentBlock, currentLoop, currentSelect);
+            // Dispatch based on exit type (no select parameter needed)
+            currentBlock = handleExit(*exitStmt, currentBlock, currentLoop, nullptr);
             continue;
         }
         

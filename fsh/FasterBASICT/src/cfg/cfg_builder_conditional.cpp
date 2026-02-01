@@ -71,7 +71,7 @@ BasicBlock* CFGBuilder::buildIf(
     }
     
     // Check if this is a single-line IF with inline statements
-    if (stmt.isSingleLine && !stmt.thenStatements.empty()) {
+    if (!stmt.isMultiLine && !stmt.thenStatements.empty()) {
         // Single-line IF...THEN statement [ELSE statement]
         // e.g., IF x > 5 THEN PRINT "yes" ELSE PRINT "no"
         if (m_debugMode) {
@@ -221,7 +221,7 @@ BasicBlock* CFGBuilder::buildSelectCase(
 ) {
     if (m_debugMode) {
         std::cout << "[CFG] Building SELECT CASE statement with " 
-                  << stmt.cases.size() << " cases" << std::endl;
+                  << stmt.whenClauses.size() << " when clauses" << std::endl;
     }
     
     // 1. Add SELECT CASE to incoming block (evaluates expression)
@@ -230,65 +230,73 @@ BasicBlock* CFGBuilder::buildSelectCase(
     // 2. Create exit block for the entire SELECT
     BasicBlock* exitBlock = createBlock("Select_Exit");
     
-    // 3. Create SELECT context for EXIT SELECT statements
+    // 3. Create SELECT context (though EXIT SELECT doesn't exist in this dialect)
     SelectContext selectCtx;
     selectCtx.exitBlockId = exitBlock->id;
     selectCtx.outerSelect = outerSelect;
     
-    // 4. Process each CASE clause
+    // 4. Process each WHEN clause
     BasicBlock* previousCaseCheck = incoming;
     
-    for (size_t i = 0; i < stmt.cases.size(); i++) {
-        const auto& caseClause = stmt.cases[i];
+    for (size_t i = 0; i < stmt.whenClauses.size(); i++) {
+        const auto& whenClause = stmt.whenClauses[i];
         
         if (m_debugMode) {
-            std::cout << "[CFG] Processing CASE " << i << std::endl;
+            std::cout << "[CFG] Processing WHEN clause " << i << std::endl;
         }
         
-        // Create block for this case's statements
-        BasicBlock* caseBlock = createBlock("Case_" + std::to_string(i));
+        // Create block for this when's statements
+        BasicBlock* whenBlock = createBlock("When_" + std::to_string(i));
         
-        // Create block for next case check (or default for last case)
-        BasicBlock* nextCheck = (i < stmt.cases.size() - 1) 
-            ? createBlock("Case_Check_" + std::to_string(i + 1))
-            : createBlock("Case_Default");
+        // Create block for next when check (or otherwise for last when)
+        BasicBlock* nextCheck = (i < stmt.whenClauses.size() - 1) 
+            ? createBlock("When_Check_" + std::to_string(i + 1))
+            : createBlock("When_Otherwise");
         
-        // Wire from previous check to this case (if match) and to next check (if not)
-        if (caseClause.isElse) {
-            // CASE ELSE - always matches
-            addUnconditionalEdge(previousCaseCheck->id, caseBlock->id);
-        } else {
-            // Regular CASE - conditional edge
-            std::string caseLabel = "case_" + std::to_string(i);
-            addConditionalEdge(previousCaseCheck->id, caseBlock->id, caseLabel);
-            addConditionalEdge(previousCaseCheck->id, nextCheck->id, "no_match");
-        }
+        // Wire from previous check to this when (if match) and to next check (if not)
+        std::string whenLabel = "when_" + std::to_string(i);
+        addConditionalEdge(previousCaseCheck->id, whenBlock->id, whenLabel);
+        addConditionalEdge(previousCaseCheck->id, nextCheck->id, "no_match");
         
-        // Recursively build case statements
-        BasicBlock* caseExit = buildStatementRange(
-            caseClause.statements,
-            caseBlock,
+        // Recursively build when statements
+        BasicBlock* whenExit = buildStatementRange(
+            whenClause.statements,
+            whenBlock,
             loop,
-            &selectCtx,  // Pass select context for EXIT SELECT
+            &selectCtx,
             tryCtx,
             sub
         );
         
-        // Wire case exit to SELECT exit (if not terminated)
+        // Wire when exit to SELECT exit (if not terminated)
         // Note: Cases don't fall through in most BASIC dialects
-        if (!isTerminated(caseExit)) {
-            addUnconditionalEdge(caseExit->id, exitBlock->id);
+        if (!isTerminated(whenExit)) {
+            addUnconditionalEdge(whenExit->id, exitBlock->id);
         }
         
-        // Move to next case check
-        if (!caseClause.isElse) {
-            previousCaseCheck = nextCheck;
-        }
+        // Move to next when check
+        previousCaseCheck = nextCheck;
     }
     
-    // 5. If no CASE ELSE, wire the final check to exit
-    // (no case matched)
-    if (!stmt.cases.empty() && !stmt.cases.back().isElse) {
+    // 5. Process OTHERWISE clause if present
+    if (!stmt.otherwiseStatements.empty()) {
+        BasicBlock* otherwiseBlock = createBlock("Otherwise");
+        addUnconditionalEdge(previousCaseCheck->id, otherwiseBlock->id);
+        
+        BasicBlock* otherwiseExit = buildStatementRange(
+            stmt.otherwiseStatements,
+            otherwiseBlock,
+            loop,
+            &selectCtx,
+            tryCtx,
+            sub
+        );
+        
+        if (!isTerminated(otherwiseExit)) {
+            addUnconditionalEdge(otherwiseExit->id, exitBlock->id);
+        }
+    } else {
+        // No OTHERWISE - wire the final check to exit (no case matched)
         addUnconditionalEdge(previousCaseCheck->id, exitBlock->id);
     }
     

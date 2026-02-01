@@ -131,11 +131,15 @@ void CFGBuilder::collectJumpTargetsFromStatement(const Statement* stmt) {
     }
     
     if (auto* selectStmt = dynamic_cast<const CaseStatement*>(stmt)) {
-        // Scan case branches for GOTOs
-        for (const auto& caseClause : selectStmt->cases) {
-            for (const auto& caseStmt : caseClause.statements) {
-                collectJumpTargetsFromStatement(caseStmt.get());
+        // Scan WHEN clauses for GOTOs
+        for (const auto& whenClause : selectStmt->whenClauses) {
+            for (const auto& whenStmt : whenClause.statements) {
+                collectJumpTargetsFromStatement(whenStmt.get());
             }
+        }
+        // Scan OTHERWISE clause
+        for (const auto& otherwiseStmt : selectStmt->otherwiseStatements) {
+            collectJumpTargetsFromStatement(otherwiseStmt.get());
         }
         return;
     }
@@ -145,9 +149,9 @@ void CFGBuilder::collectJumpTargetsFromStatement(const Statement* stmt) {
         for (const auto& tryBlockStmt : tryStmt->tryBlock) {
             collectJumpTargetsFromStatement(tryBlockStmt.get());
         }
-        // Scan catch blocks
-        for (const auto& catchClause : tryStmt->catchBlocks) {
-            for (const auto& catchStmt : catchClause.statements) {
+        // Scan catch clauses
+        for (const auto& catchClause : tryStmt->catchClauses) {
+            for (const auto& catchStmt : catchClause.block) {
                 collectJumpTargetsFromStatement(catchStmt.get());
             }
         }

@@ -55,7 +55,7 @@ BasicBlock* CFGBuilder::buildTryCatch(
     
     // 3. Create catch blocks (one per catch clause)
     std::vector<BasicBlock*> catchBlocks;
-    for (size_t i = 0; i < stmt.catchBlocks.size(); i++) {
+    for (size_t i = 0; i < stmt.catchClauses.size(); i++) {
         BasicBlock* catchBlock = createBlock("Catch_" + std::to_string(i));
         catchBlocks.push_back(catchBlock);
     }
@@ -93,8 +93,8 @@ BasicBlock* CFGBuilder::buildTryCatch(
     }
     
     // 7. Process each CATCH clause
-    for (size_t i = 0; i < stmt.catchBlocks.size(); i++) {
-        const auto& catchClause = stmt.catchBlocks[i];
+    for (size_t i = 0; i < stmt.catchClauses.size(); i++) {
+        const auto& catchClause = stmt.catchClauses[i];
         BasicBlock* catchBlock = catchBlocks[i];
         
         if (m_debugMode) {
@@ -107,7 +107,7 @@ BasicBlock* CFGBuilder::buildTryCatch(
         
         // Recursively build catch block
         BasicBlock* catchExit = buildStatementRange(
-            catchClause.statements,
+            catchClause.block,
             catchBlock,
             loop,
             select,
