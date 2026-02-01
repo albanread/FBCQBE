@@ -1633,10 +1633,15 @@ public:
     std::string indexVariable;  // Optional index variable name (empty if not used)
     ExpressionPtr array;         // Array expression to iterate over
     int inferredType;            // Inferred element type from array (stored as int, cast to VariableType)
+    std::vector<StatementPtr> body;  // Loop body statements
 
     ForInStatement(const std::string& var) : variable(var), inferredType(0) {}
     ForInStatement(const std::string& var, const std::string& indexVar) 
         : variable(var), indexVariable(indexVar), inferredType(0) {}
+
+    void addBodyStatement(StatementPtr stmt) {
+        body.push_back(std::move(stmt));
+    }
 
     ASTNodeType getType() const override { return ASTNodeType::STMT_FOR_IN; }
 

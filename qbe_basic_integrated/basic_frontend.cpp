@@ -17,22 +17,32 @@ extern "C" {
  * Returns: FILE* to memory buffer containing QBE IL, or NULL on error
  */
 FILE* compile_basic_to_il(const char *basic_path) {
+    fprintf(stderr, "[DEBUG] compile_basic_to_il: Starting...\n");
     /* Call embedded FasterBASIC compiler */
     char *qbe_il = compile_basic_to_qbe_string(basic_path);
     
+    fprintf(stderr, "[DEBUG] compile_basic_to_il: Returned from wrapper\n");
+    
     if (!qbe_il) {
+        fprintf(stderr, "[DEBUG] compile_basic_to_il: qbe_il is NULL, returning NULL\n");
         return NULL;
     }
     
+    fprintf(stderr, "[DEBUG] compile_basic_to_il: qbe_il is valid\n");
     size_t len = strlen(qbe_il);
+    fprintf(stderr, "[DEBUG] compile_basic_to_il: len = %zu\n", len);
     
     /* Create FILE* from memory buffer using fmemopen */
+    fprintf(stderr, "[DEBUG] compile_basic_to_il: About to call fmemopen...\n");
     FILE *mem_file = fmemopen(qbe_il, len, "r");
+    fprintf(stderr, "[DEBUG] compile_basic_to_il: fmemopen returned\n");
     if (!mem_file) {
+        fprintf(stderr, "[DEBUG] compile_basic_to_il: fmemopen failed, freeing and returning NULL\n");
         free(qbe_il);
         return NULL;
     }
     
+    fprintf(stderr, "[DEBUG] compile_basic_to_il: Returning mem_file\n");
     /* Note: qbe_il memory is now owned by fmemopen */
     return mem_file;
 }

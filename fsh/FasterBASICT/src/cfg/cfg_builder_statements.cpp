@@ -62,6 +62,21 @@ BasicBlock* CFGBuilder::buildStatementRange(
         // Each builder returns the exit block for the next statement
         
         // =============================================================================
+        // Function/Subroutine Definitions (skip - handled at top level)
+        // =============================================================================
+        
+        // SUB, FUNCTION, and DEF FN definitions should not appear in nested contexts
+        // They are top-level declarations that are processed separately by buildProgramCFG()
+        if (dynamic_cast<const SubStatement*>(stmt.get()) ||
+            dynamic_cast<const FunctionStatement*>(stmt.get()) ||
+            dynamic_cast<const DefStatement*>(stmt.get())) {
+            if (m_debugMode) {
+                std::cout << "[CFG] Skipping function/sub definition (should be top-level)" << std::endl;
+            }
+            continue;
+        }
+        
+        // =============================================================================
         // Control Structures (recursive builders)
         // =============================================================================
         

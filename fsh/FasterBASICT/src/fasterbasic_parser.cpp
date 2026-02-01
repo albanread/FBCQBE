@@ -2318,6 +2318,56 @@ StatementPtr Parser::parseForStatement() {
         auto stmt = std::make_unique<ForInStatement>(varName);
         stmt->array = parseExpression();
 
+        // Skip to next line
+        if (current().type == TokenType::END_OF_LINE) {
+            advance();
+        }
+
+        // Parse loop body until NEXT (same as regular FOR)
+        while (!isAtEnd()) {
+            skipBlankLines();
+
+            if (isAtEnd()) break;
+
+            // Skip optional line number at start of line
+            skipOptionalLineNumber();
+
+            // Check for NEXT
+            if (current().type == TokenType::NEXT) {
+                advance(); // consume NEXT
+                
+                // Optional variable name after NEXT
+                if (current().type == TokenType::IDENTIFIER) {
+                    advance(); // consume variable name
+                }
+                break;
+            }
+
+            // Parse statements on this line (may be separated by colons)
+            while (!isAtEnd() &&
+                   current().type != TokenType::END_OF_LINE &&
+                   current().type != TokenType::NEXT) {
+
+                auto bodyStmt = parseStatement();
+                if (bodyStmt) {
+                    stmt->addBodyStatement(std::move(bodyStmt));
+                }
+
+                // If there's a colon, continue parsing more statements on this line
+                if (current().type == TokenType::COLON) {
+                    advance(); // consume colon
+                } else {
+                    // No more statements on this line
+                    break;
+                }
+            }
+
+            // Skip EOL after statement(s)
+            if (current().type == TokenType::END_OF_LINE) {
+                advance();
+            }
+        }
+
         return stmt;
     }
 
@@ -2371,6 +2421,56 @@ StatementPtr Parser::parseForStatement() {
 
         auto stmt = std::make_unique<ForInStatement>(varName, indexVarName);
         stmt->array = parseExpression();
+
+        // Skip to next line
+        if (current().type == TokenType::END_OF_LINE) {
+            advance();
+        }
+
+        // Parse loop body until NEXT (same as regular FOR)
+        while (!isAtEnd()) {
+            skipBlankLines();
+
+            if (isAtEnd()) break;
+
+            // Skip optional line number at start of line
+            skipOptionalLineNumber();
+
+            // Check for NEXT
+            if (current().type == TokenType::NEXT) {
+                advance(); // consume NEXT
+                
+                // Optional variable name after NEXT
+                if (current().type == TokenType::IDENTIFIER) {
+                    advance(); // consume variable name
+                }
+                break;
+            }
+
+            // Parse statements on this line (may be separated by colons)
+            while (!isAtEnd() &&
+                   current().type != TokenType::END_OF_LINE &&
+                   current().type != TokenType::NEXT) {
+
+                auto bodyStmt = parseStatement();
+                if (bodyStmt) {
+                    stmt->addBodyStatement(std::move(bodyStmt));
+                }
+
+                // If there's a colon, continue parsing more statements on this line
+                if (current().type == TokenType::COLON) {
+                    advance(); // consume colon
+                } else {
+                    // No more statements on this line
+                    break;
+                }
+            }
+
+            // Skip EOL after statement(s)
+            if (current().type == TokenType::END_OF_LINE) {
+                advance();
+            }
+        }
 
         return stmt;
     } else {

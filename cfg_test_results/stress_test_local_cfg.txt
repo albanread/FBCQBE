@@ -1,0 +1,312 @@
+[DEBUG] compile_basic_to_il: Starting...
+[DEBUG] Starting pass1_collectDeclarations
+[DEBUG] Starting pass2_validate
+[DEBUG] pass2_validate: processing 49 lines
+[DEBUG] pass2_validate: line 1000 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 1010 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 1020 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 1030 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 1040 has 4 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1050 has 4 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1060 has 4 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1070 has 4 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1080 has 4 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1090 has 4 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1100 has 4 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1110 has 4 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1120 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1130 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1140 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1150 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1160 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1170 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1180 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1190 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1200 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1210 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1220 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1230 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1240 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1250 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1260 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1270 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1280 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1290 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1300 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1310 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1320 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1330 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1340 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1350 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1360 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1370 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1380 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1390 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1400 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1410 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1420 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1430 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1440 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1450 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1460 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1470 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1480 has 1 statements
+[DEBUG] validateStatement called for type: 34
+[DEBUG] Finished pass2_validate
+[DEBUG] validateControlFlow called, FOR stack size: 0
+[INFO] Building complete ProgramCFG (main + all SUBs/FUNCTIONs)...
+[INFO] ProgramCFG build successful!
+[INFO] Main program CFG + 0 function/subroutine CFGs
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║                    PROGRAM CFG ANALYSIS REPORT                           ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Total CFGs: 1
+  - Main Program: 1
+  - Functions/Subs: 0
+
+
++==========================================================================+
+|                       CFG ANALYSIS REPORT                                 |
++==========================================================================╝
+
+Phase: Main Program
+Function: main
+
+------------------------------------------------------------------------------
+SUMMARY METRICS
+------------------------------------------------------------------------------
+  Basic Statistics:
+    Total Blocks:          2
+    Total Edges:           1
+    Entry Block:           0
+    Exit Block:            1
+    Total Statements:     73
+    Reachable Blocks:      2
+    Unreachable:           0
+    Cyclomatic Complexity: 1 (LOW)
+
+  Block Categories:
+    Empty Blocks:          1
+    Loop Headers:          0
+    Loop Exits:            0
+    Terminated:            1
+    Multi-Pred:            0
+    Multi-Succ:            0
+
+  Edge Types:
+    Jump:                  1
+
+------------------------------------------------------------------------------
+COMPACT FORMAT (for test validation)
+------------------------------------------------------------------------------
+CFG:main:B2:E1:S73:CC1:R2
+EDGES: 0->1
+
+==============================================================================
+DETAILED BLOCK ANALYSIS
+==============================================================================
+
++=== Block 0 (Entry) =======================================================+
+| Flags: [ENTRY] [TERMINATED]
+| Source Lines: 1000 1010 1020 1030 1040 1050 1060 1070 1080 1090
+|               1100 1110 1120 1130 1140 1150 1160 1170 1180 1190
+|               1200 1210 1220 1230 1240 1250 1260 1270 1280 1290
+|               1300 1310 1320 1330 1340 1350 1360 1370 1380 1390
+|               1400 1410 1420 1430 1440 1450 1460 1470
+| Statements: 73
+|   Types: DimStatement×4, EndStatement, LetStatement×64, PrintStatement×4
+|   Detail:
+|     [ 0] DimStatement (line 1000)
+|     [ 1] DimStatement (line 1010)
+|     [ 2] DimStatement (line 1020)
+|     [ 3] DimStatement (line 1030)
+|     [ 4] LetStatement (line 1040)
+|     [ 5] LetStatement (line 1040)
+|     [ 6] LetStatement (line 1040)
+|     [ 7] LetStatement (line 1040)
+|     [ 8] LetStatement (line 1050)
+|     [ 9] LetStatement (line 1050)
+|     [10] LetStatement (line 1050)
+|     [11] LetStatement (line 1050)
+|     [12] LetStatement (line 1060)
+|     [13] LetStatement (line 1060)
+|     [14] LetStatement (line 1060)
+|     [15] LetStatement (line 1060)
+|     [16] LetStatement (line 1070)
+|     [17] LetStatement (line 1070)
+|     [18] LetStatement (line 1070)
+|     [19] LetStatement (line 1070)
+|     [20] LetStatement (line 1080)
+|     [21] LetStatement (line 1080)
+|     [22] LetStatement (line 1080)
+|     [23] LetStatement (line 1080)
+|     [24] LetStatement (line 1090)
+|     [25] LetStatement (line 1090)
+|     [26] LetStatement (line 1090)
+|     [27] LetStatement (line 1090)
+|     [28] LetStatement (line 1100)
+|     [29] LetStatement (line 1100)
+|     [30] LetStatement (line 1100)
+|     [31] LetStatement (line 1100)
+|     [32] LetStatement (line 1110)
+|     [33] LetStatement (line 1110)
+|     [34] LetStatement (line 1110)
+|     [35] LetStatement (line 1110)
+|     [36] LetStatement (line 1120)
+|     [37] LetStatement (line 1130)
+|     [38] LetStatement (line 1140)
+|     [39] LetStatement (line 1150)
+|     [40] LetStatement (line 1160)
+|     [41] LetStatement (line 1170)
+|     [42] LetStatement (line 1180)
+|     [43] LetStatement (line 1190)
+|     [44] LetStatement (line 1200)
+|     [45] LetStatement (line 1210)
+|     [46] LetStatement (line 1220)
+|     [47] LetStatement (line 1230)
+|     [48] LetStatement (line 1240)
+|     [49] LetStatement (line 1250)
+|     [50] LetStatement (line 1260)
+|     [51] LetStatement (line 1270)
+|     [52] LetStatement (line 1280)
+|     [53] LetStatement (line 1290)
+|     [54] LetStatement (line 1300)
+|     [55] LetStatement (line 1310)
+|     [56] LetStatement (line 1320)
+|     [57] LetStatement (line 1330)
+|     [58] LetStatement (line 1340)
+|     [59] LetStatement (line 1350)
+|     [60] LetStatement (line 1360)
+|     [61] LetStatement (line 1370)
+|     [62] LetStatement (line 1380)
+|     [63] LetStatement (line 1390)
+|     [64] LetStatement (line 1400)
+|     [65] LetStatement (line 1410)
+|     [66] LetStatement (line 1420)
+|     [67] LetStatement (line 1430)
+|     [68] PrintStatement (line 1440)
+|     [69] PrintStatement (line 1450)
+|     [70] PrintStatement (line 1460)
+|     [71] PrintStatement (line 1470)
+|     [72] EndStatement
+| Predecessors (0): none
+| Successors (1): 1
++============================================================================╝
+
++=== Block 1 (Exit) ========================================================+
+| Flags: [EXIT] [EMPTY]
+| Statements: 0
+| Predecessors (1): 0
+| Successors (0): none
++============================================================================╝
+
+------------------------------------------------------------------------------
+DETAILED EDGE ANALYSIS
+------------------------------------------------------------------------------
+
+Edge   0: Block   0 --[JUMP]--> Block   1
+
+------------------------------------------------------------------------------
+CONTROL FLOW ANALYSIS
+------------------------------------------------------------------------------
+
+✓ All non-exit blocks are reachable from entry
+
+==============================================================================
+END OF CFG ANALYSIS REPORT
+==============================================================================
+
+
+========================================
+CODE GENERATION: DISABLED
+========================================
+The new CFG builder generates correct control flow graphs.
+Code generation will be re-enabled after adapting the
+QBE code generator to work with the new CFG structure.
+
+To test CFG generation:
+  ./qbe_basic -G program.bas
+
+========================================
+
+[DEBUG] compile_basic_to_il: Returned from wrapper
+[DEBUG] compile_basic_to_il: qbe_il is valid
+[DEBUG] compile_basic_to_il: len = 0
+[DEBUG] compile_basic_to_il: About to call fmemopen...
+[DEBUG] compile_basic_to_il: fmemopen returned
+[DEBUG] compile_basic_to_il: fmemopen failed, freeing and returning NULL
+failed to compile BASIC file 'tests/stress_test_local.bas'

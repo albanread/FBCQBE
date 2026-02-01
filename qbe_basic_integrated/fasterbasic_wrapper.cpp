@@ -25,8 +25,6 @@ using namespace FasterBASIC;
 static bool g_traceCFG = false;
 static bool g_traceAST = false;
 
-// Old dumpCFG function removed - using CFGBuilder::dumpCFG() instead
-
 extern "C" {
 
 /* Compile BASIC source to QBE IL string
@@ -122,22 +120,43 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
         }
         
         // Build CFG using new single-pass recursive builder
-        std::cerr << "[INFO] Building CFG with new single-pass recursive builder...\n";
+        std::cerr << "[INFO] Building complete ProgramCFG (main + all SUBs/FUNCTIONs)...\n";
         CFGBuilder cfgBuilder;
-        ControlFlowGraph* mainCFG = cfgBuilder.buildFromProgram(*ast);
+        ProgramCFG* programCFG = cfgBuilder.buildProgramCFG(*ast);
         
-        if (!mainCFG) {
-            std::cerr << "[ERROR] CFG build failed\n";
+        if (!programCFG) {
+            std::cerr << "[ERROR] ProgramCFG build failed\n";
             return nullptr;
         }
         
-        std::cerr << "[INFO] CFG build successful!\n";
+        std::cerr << "[INFO] ProgramCFG build successful!\n";
+        std::cerr << "[INFO] Main program CFG + " << programCFG->functionCFGs.size() 
+                  << " function/subroutine CFGs\n";
         
-        // Always dump the CFG for verification
-        std::cerr << "\n========================================\n";
-        std::cerr << "CFG GENERATION COMPLETE\n";
-        std::cerr << "========================================\n";
-        cfgBuilder.dumpCFG("Final");
+        // Always dump the CFGs for verification using comprehensive report
+        std::cerr << "\n╔══════════════════════════════════════════════════════════════════════════╗\n";
+        std::cerr << "║                    PROGRAM CFG ANALYSIS REPORT                           ║\n";
+        std::cerr << "╚══════════════════════════════════════════════════════════════════════════╝\n\n";
+        
+        std::cerr << "Total CFGs: " << (1 + programCFG->functionCFGs.size()) << "\n";
+        std::cerr << "  - Main Program: 1\n";
+        std::cerr << "  - Functions/Subs: " << programCFG->functionCFGs.size() << "\n\n";
+        
+        // Dump main CFG with comprehensive analysis
+        CFGBuilder mainBuilder;
+        mainBuilder.setCFGForDump(programCFG->mainCFG.get());
+        mainBuilder.dumpCFG("Main Program");
+        mainBuilder.setCFGForDump(nullptr); // Clear to prevent deletion
+        
+        // Dump function/SUB CFGs with comprehensive analysis
+        for (const auto& [name, cfg] : programCFG->functionCFGs) {
+            CFGBuilder funcBuilder;
+            funcBuilder.setCFGForDump(cfg.get());
+            funcBuilder.dumpCFG(name);
+            funcBuilder.setCFGForDump(nullptr); // Clear to prevent deletion
+        }
+        
+        delete programCFG;
         
         // CODE GENERATION DISABLED
         // The codegen layer needs to be updated to work with the new CFG structure

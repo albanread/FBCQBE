@@ -1,0 +1,581 @@
+[DEBUG] compile_basic_to_il: Starting...
+[DEBUG] Starting pass1_collectDeclarations
+[DEBUG] Starting pass2_validate
+[DEBUG] pass2_validate: processing 56 lines
+[DEBUG] pass2_validate: line 1000 has 0 statements
+[DEBUG] pass2_validate: line 1010 has 0 statements
+[DEBUG] pass2_validate: line 1020 has 0 statements
+[DEBUG] pass2_validate: line 1030 has 0 statements
+[DEBUG] pass2_validate: line 1040 has 0 statements
+[DEBUG] pass2_validate: line 1050 has 0 statements
+[DEBUG] pass2_validate: line 1060 has 0 statements
+[DEBUG] pass2_validate: line 1070 has 0 statements
+[DEBUG] pass2_validate: line 1090 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1100 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1120 has 0 statements
+[DEBUG] pass2_validate: line 1130 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1140 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1150 has 1 statements
+[DEBUG] validateStatement called for type: 22
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 11
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1210 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1220 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1240 has 0 statements
+[DEBUG] pass2_validate: line 1250 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1260 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1270 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1280 has 1 statements
+[DEBUG] validateStatement called for type: 22
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 22
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 11
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1370 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1380 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1400 has 0 statements
+[DEBUG] pass2_validate: line 1410 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1420 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1430 has 1 statements
+[DEBUG] validateStatement called for type: 28
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 22
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 11
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1550 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1560 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1580 has 0 statements
+[DEBUG] pass2_validate: line 1590 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1600 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1610 has 1 statements
+[DEBUG] validateStatement called for type: 22
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 11
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 11
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1680 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1690 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1710 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1720 has 1 statements
+[DEBUG] validateStatement called for type: 34
+[DEBUG] pass2_validate: line 1740 has 0 statements
+[DEBUG] pass2_validate: line 1750 has 1 statements
+[DEBUG] validateStatement called for type: 18
+[DEBUG] pass2_validate: line 1760 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1770 has 1 statements
+[DEBUG] validateStatement called for type: 16
+[DEBUG] pass2_validate: line 1790 has 1 statements
+[DEBUG] validateStatement called for type: 18
+[DEBUG] pass2_validate: line 1800 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1810 has 1 statements
+[DEBUG] validateStatement called for type: 16
+[DEBUG] pass2_validate: line 1830 has 1 statements
+[DEBUG] validateStatement called for type: 18
+[DEBUG] pass2_validate: line 1840 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1850 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1860 has 1 statements
+[DEBUG] validateStatement called for type: 16
+[DEBUG] pass2_validate: line 1880 has 1 statements
+[DEBUG] validateStatement called for type: 18
+[DEBUG] pass2_validate: line 1890 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1900 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1910 has 1 statements
+[DEBUG] validateStatement called for type: 16
+[DEBUG] pass2_validate: line 1930 has 1 statements
+[DEBUG] validateStatement called for type: 18
+[DEBUG] pass2_validate: line 1940 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1950 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1960 has 1 statements
+[DEBUG] validateStatement called for type: 16
+[DEBUG] Finished pass2_validate
+[DEBUG] validateControlFlow called, FOR stack size: 0
+[INFO] Building complete ProgramCFG (main + all SUBs/FUNCTIONs)...
+[INFO] ProgramCFG build successful!
+[INFO] Main program CFG + 0 function/subroutine CFGs
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║                    PROGRAM CFG ANALYSIS REPORT                           ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Total CFGs: 1
+  - Main Program: 1
+  - Functions/Subs: 0
+
+
++==========================================================================+
+|                       CFG ANALYSIS REPORT                                 |
++==========================================================================╝
+
+Phase: Main Program
+Function: main
+
+------------------------------------------------------------------------------
+SUMMARY METRICS
+------------------------------------------------------------------------------
+  Basic Statistics:
+    Total Blocks:         25
+    Total Edges:          25
+    Entry Block:           0
+    Exit Block:            1
+    Total Statements:     67
+    Reachable Blocks:     20
+    Unreachable:           5 ⚠
+    Cyclomatic Complexity: 2 (LOW)
+
+  Block Categories:
+    Empty Blocks:          1
+    Loop Headers:          1
+    Loop Exits:            1
+    Terminated:            6
+    Multi-Pred:            6
+    Multi-Succ:            6
+
+  Edge Types:
+    Conditional True:     12
+    Jump:                 13
+
+------------------------------------------------------------------------------
+COMPACT FORMAT (for test validation)
+------------------------------------------------------------------------------
+CFG:main:B25:E25:S67:CC2:R20!
+EDGES: 0->2 0->3 2->4 4->3 3->5 3->6 5->7 5->8 7->9 9->8 8->6 6->10 10->11 10->12 11->13 11->14 13->15 15->14 14->10 12->16 12->17 16->18 18->19 19->17 17->1
+
+==============================================================================
+DETAILED BLOCK ANALYSIS
+==============================================================================
+
++=== Block 0 (Entry) =======================================================+
+| Flags: [ENTRY]
+| Source Lines: 1090 1100 1130 1140
+| Statements: 5
+|   Types: IfStatement, LetStatement, PrintStatement×3
+|   Detail:
+|     [ 0] PrintStatement (line 1090)
+|     [ 1] PrintStatement (line 1100)
+|     [ 2] PrintStatement (line 1130)
+|     [ 3] LetStatement (line 1140)
+|     [ 4] IfStatement
+| Predecessors (0): none
+| Successors (2): 2, 3
++============================================================================╝
+
++=== Block 1 (Exit) ========================================================+
+| Flags: [EXIT] [EMPTY]
+| Statements: 0
+| Predecessors (1): 17
+| Successors (0): none
++============================================================================╝
+
++=== Block 2 (If_Then) =====================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: GosubStatement, PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+|     [ 1] GosubStatement
+| Predecessors (1): 0
+| Successors (1): 4
++============================================================================╝
+
++=== Block 3 (If_Merge) ====================================================+
+| Flags: [NORMAL]
+| Source Lines: 1210 1220 1250 1260 1270
+| Statements: 6
+|   Types: IfStatement, LetStatement×2, PrintStatement×3
+|   Detail:
+|     [ 0] PrintStatement (line 1210)
+|     [ 1] PrintStatement (line 1220)
+|     [ 2] PrintStatement (line 1250)
+|     [ 3] LetStatement (line 1260)
+|     [ 4] LetStatement (line 1270)
+|     [ 5] IfStatement
+| Predecessors (2): 0, 4
+| Successors (2): 5, 6
++============================================================================╝
+
++=== Block 4 (Return_Point) ================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: PrintStatement×2
+|   Detail:
+|     [ 0] PrintStatement
+|     [ 1] PrintStatement
+| Predecessors (1): 2
+| Successors (1): 3
++============================================================================╝
+
++=== Block 5 (If_Then) =====================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: IfStatement, PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+|     [ 1] IfStatement
+| Predecessors (1): 3
+| Successors (2): 7, 8
++============================================================================╝
+
++=== Block 6 (If_Merge) ====================================================+
+| Flags: [NORMAL]
+| Source Lines: 1370 1380 1410 1420
+| Statements: 4
+|   Types: LetStatement, PrintStatement×3
+|   Detail:
+|     [ 0] PrintStatement (line 1370)
+|     [ 1] PrintStatement (line 1380)
+|     [ 2] PrintStatement (line 1410)
+|     [ 3] LetStatement (line 1420)
+| Predecessors (2): 3, 8
+| Successors (1): 10
++============================================================================╝
+
++=== Block 7 (If_Then) =====================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: GosubStatement, PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+|     [ 1] GosubStatement
+| Predecessors (1): 5
+| Successors (1): 9
++============================================================================╝
+
++=== Block 8 (If_Merge) ====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+| Predecessors (2): 5, 9
+| Successors (1): 6
++============================================================================╝
+
++=== Block 9 (Return_Point) ================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+| Predecessors (1): 7
+| Successors (1): 8
++============================================================================╝
+
++=== Block 10 (While_Header) ================================================+
+| Flags: [LOOP_HEADER]
+| Statements: 1
+|   Types: WhileStatement
+|   Detail:
+|     [ 0] WhileStatement
+| Predecessors (2): 6, 14
+| Successors (2): 11, 12
++============================================================================╝
+
++=== Block 11 (While_Body) ==================================================+
+| Flags: [NORMAL]
+| Statements: 3
+|   Types: IfStatement, LetStatement, PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+|     [ 1] LetStatement
+|     [ 2] IfStatement
+| Predecessors (1): 10
+| Successors (2): 13, 14
++============================================================================╝
+
++=== Block 12 (While_Exit) ==================================================+
+| Flags: [LOOP_EXIT]
+| Source Lines: 1550 1560 1590 1600
+| Statements: 5
+|   Types: IfStatement, LetStatement, PrintStatement×3
+|   Detail:
+|     [ 0] PrintStatement (line 1550)
+|     [ 1] PrintStatement (line 1560)
+|     [ 2] PrintStatement (line 1590)
+|     [ 3] LetStatement (line 1600)
+|     [ 4] IfStatement
+| Predecessors (1): 10
+| Successors (2): 16, 17
++============================================================================╝
+
++=== Block 13 (If_Then) =====================================================+
+| Flags: [NORMAL]
+| Statements: 3
+|   Types: GosubStatement, LetStatement, PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+|     [ 1] LetStatement
+|     [ 2] GosubStatement
+| Predecessors (1): 11
+| Successors (1): 15
++============================================================================╝
+
++=== Block 14 (If_Merge) ====================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: LetStatement, PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+|     [ 1] LetStatement
+| Predecessors (2): 11, 15
+| Successors (1): 10
++============================================================================╝
+
++=== Block 15 (Return_Point) ================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+| Predecessors (1): 13
+| Successors (1): 14
++============================================================================╝
+
++=== Block 16 (If_Then) =====================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: GosubStatement, PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+|     [ 1] GosubStatement
+| Predecessors (1): 12
+| Successors (1): 18
++============================================================================╝
+
++=== Block 17 (If_Merge) ====================================================+
+| Flags: [TERMINATED]
+| Source Lines: 1680 1690 1710
+| Statements: 4
+|   Types: EndStatement, PrintStatement×3
+|   Detail:
+|     [ 0] PrintStatement (line 1680)
+|     [ 1] PrintStatement (line 1690)
+|     [ 2] PrintStatement (line 1710)
+|     [ 3] EndStatement
+| Predecessors (2): 12, 19
+| Successors (1): 1
++============================================================================╝
+
++=== Block 18 (Return_Point) ================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: GosubStatement, PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+|     [ 1] GosubStatement
+| Predecessors (1): 16
+| Successors (1): 19
++============================================================================╝
+
++=== Block 19 (Return_Point) ================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+| Predecessors (1): 18
+| Successors (1): 17
++============================================================================╝
+
++=== Block 20 (Unreachable) =================================================+
+| Flags: [TERMINATED] [UNREACHABLE]
+| Source Lines: 1750 1760
+| Statements: 3
+|   Types: LabelStatement, PrintStatement, ReturnStatement
+|   Detail:
+|     [ 0] LabelStatement (line 1750)
+|     [ 1] PrintStatement (line 1760)
+|     [ 2] ReturnStatement
+| Predecessors (0): none
+| Successors (0): none
++============================================================================╝
+
++=== Block 21 (Unreachable) =================================================+
+| Flags: [TERMINATED] [UNREACHABLE]
+| Source Lines: 1790 1800
+| Statements: 3
+|   Types: LabelStatement, PrintStatement, ReturnStatement
+|   Detail:
+|     [ 0] LabelStatement (line 1790)
+|     [ 1] PrintStatement (line 1800)
+|     [ 2] ReturnStatement
+| Predecessors (0): none
+| Successors (0): none
++============================================================================╝
+
++=== Block 22 (Unreachable) =================================================+
+| Flags: [TERMINATED] [UNREACHABLE]
+| Source Lines: 1830 1840 1850
+| Statements: 4
+|   Types: LabelStatement, LetStatement, PrintStatement, ReturnStatement
+|   Detail:
+|     [ 0] LabelStatement (line 1830)
+|     [ 1] PrintStatement (line 1840)
+|     [ 2] LetStatement (line 1850)
+|     [ 3] ReturnStatement
+| Predecessors (0): none
+| Successors (0): none
++============================================================================╝
+
++=== Block 23 (Unreachable) =================================================+
+| Flags: [TERMINATED] [UNREACHABLE]
+| Source Lines: 1880 1890 1900
+| Statements: 4
+|   Types: LabelStatement, LetStatement, PrintStatement, ReturnStatement
+|   Detail:
+|     [ 0] LabelStatement (line 1880)
+|     [ 1] PrintStatement (line 1890)
+|     [ 2] LetStatement (line 1900)
+|     [ 3] ReturnStatement
+| Predecessors (0): none
+| Successors (0): none
++============================================================================╝
+
++=== Block 24 (Unreachable) =================================================+
+| Flags: [TERMINATED] [UNREACHABLE]
+| Source Lines: 1930 1940 1950
+| Statements: 4
+|   Types: LabelStatement, LetStatement, PrintStatement, ReturnStatement
+|   Detail:
+|     [ 0] LabelStatement (line 1930)
+|     [ 1] PrintStatement (line 1940)
+|     [ 2] LetStatement (line 1950)
+|     [ 3] ReturnStatement
+| Predecessors (0): none
+| Successors (0): none
++============================================================================╝
+
+------------------------------------------------------------------------------
+DETAILED EDGE ANALYSIS
+------------------------------------------------------------------------------
+
+Edge   0: Block   0 --[TRUE]--> Block   2 ("true")
+Edge   1: Block   0 --[TRUE]--> Block   3 ("false")
+Edge   2: Block   2 --[JUMP]--> Block   4
+Edge   3: Block   4 --[JUMP]--> Block   3 <- BACK-EDGE
+Edge   4: Block   3 --[TRUE]--> Block   5 ("true")
+Edge   5: Block   3 --[TRUE]--> Block   6 ("false")
+Edge   6: Block   5 --[TRUE]--> Block   7 ("true")
+Edge   7: Block   5 --[TRUE]--> Block   8 ("false")
+Edge   8: Block   7 --[JUMP]--> Block   9
+Edge   9: Block   9 --[JUMP]--> Block   8 <- BACK-EDGE
+Edge  10: Block   8 --[JUMP]--> Block   6 <- BACK-EDGE
+Edge  11: Block   6 --[JUMP]--> Block  10
+Edge  12: Block  10 --[TRUE]--> Block  11 ("true")
+Edge  13: Block  10 --[TRUE]--> Block  12 ("false")
+Edge  14: Block  11 --[TRUE]--> Block  13 ("true")
+Edge  15: Block  11 --[TRUE]--> Block  14 ("false")
+Edge  16: Block  13 --[JUMP]--> Block  15
+Edge  17: Block  15 --[JUMP]--> Block  14 <- BACK-EDGE
+Edge  18: Block  14 --[JUMP]--> Block  10 <- BACK-EDGE
+Edge  19: Block  12 --[TRUE]--> Block  16 ("true")
+Edge  20: Block  12 --[TRUE]--> Block  17 ("false")
+Edge  21: Block  16 --[JUMP]--> Block  18
+Edge  22: Block  18 --[JUMP]--> Block  19
+Edge  23: Block  19 --[JUMP]--> Block  17 <- BACK-EDGE
+Edge  24: Block  17 --[JUMP]--> Block   1 <- BACK-EDGE
+
+------------------------------------------------------------------------------
+CONTROL FLOW ANALYSIS
+------------------------------------------------------------------------------
+
+⚠ UNREACHABLE BLOCKS DETECTED:
+  - Block 20 (Unreachable) - contains 3 statement(s)
+  - Block 21 (Unreachable) - contains 3 statement(s)
+  - Block 22 (Unreachable) - contains 4 statement(s)
+  - Block 23 (Unreachable) - contains 4 statement(s)
+  - Block 24 (Unreachable) - contains 4 statement(s)
+
+DETECTED LOOPS (back-edges):
+  - Block 4 → Block 3
+  - Block 9 → Block 8
+  - Block 8 → Block 6
+  - Block 15 → Block 14
+  - Block 14 → Block 10
+  - Block 19 → Block 17
+  - Block 17 → Block 1
+
+TERMINAL BLOCKS (no successors, excluding exit):
+  - Block 20 (unreachable)
+  - Block 21 (unreachable)
+  - Block 22 (unreachable)
+  - Block 23 (unreachable)
+  - Block 24 (unreachable)
+
+DECISION POINTS (blocks with multiple successors): 6
+  - Block 0 (Entry) → 2 paths
+  - Block 3 (If_Merge) → 2 paths
+  - Block 5 (If_Then) → 2 paths
+  - Block 10 (While_Header) → 2 paths
+  - Block 11 (While_Body) → 2 paths
+  - Block 12 (While_Exit) → 2 paths
+
+JOIN POINTS (blocks with multiple predecessors): 6
+  - Block 3 (If_Merge) ← 2 paths
+  - Block 6 (If_Merge) ← 2 paths
+  - Block 8 (If_Merge) ← 2 paths
+  - Block 10 (While_Header) ← 2 paths
+  - Block 14 (If_Merge) ← 2 paths
+  - Block 17 (If_Merge) ← 2 paths
+
+==============================================================================
+END OF CFG ANALYSIS REPORT
+==============================================================================
+
+
+========================================
+CODE GENERATION: DISABLED
+========================================
+The new CFG builder generates correct control flow graphs.
+Code generation will be re-enabled after adapting the
+QBE code generator to work with the new CFG structure.
+
+To test CFG generation:
+  ./qbe_basic -G program.bas
+
+========================================
+
+[DEBUG] compile_basic_to_il: Returned from wrapper
+[DEBUG] compile_basic_to_il: qbe_il is valid
+[DEBUG] compile_basic_to_il: len = 0
+[DEBUG] compile_basic_to_il: About to call fmemopen...
+[DEBUG] compile_basic_to_il: fmemopen returned
+[DEBUG] compile_basic_to_il: fmemopen failed, freeing and returning NULL
+failed to compile BASIC file 'tests/rosetta//gosub_if_control_flow.bas'

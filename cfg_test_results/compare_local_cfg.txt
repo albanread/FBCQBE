@@ -1,0 +1,143 @@
+[DEBUG] compile_basic_to_il: Starting...
+[DEBUG] Starting pass1_collectDeclarations
+[DEBUG] Starting pass2_validate
+[DEBUG] pass2_validate: processing 10 lines
+[DEBUG] pass2_validate: line 1000 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 1010 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1020 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1030 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1040 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1050 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1060 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1070 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1080 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1090 has 1 statements
+[DEBUG] validateStatement called for type: 34
+[DEBUG] Finished pass2_validate
+[DEBUG] validateControlFlow called, FOR stack size: 0
+[INFO] Building complete ProgramCFG (main + all SUBs/FUNCTIONs)...
+[INFO] ProgramCFG build successful!
+[INFO] Main program CFG + 0 function/subroutine CFGs
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║                    PROGRAM CFG ANALYSIS REPORT                           ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Total CFGs: 1
+  - Main Program: 1
+  - Functions/Subs: 0
+
+
++==========================================================================+
+|                       CFG ANALYSIS REPORT                                 |
++==========================================================================╝
+
+Phase: Main Program
+Function: main
+
+------------------------------------------------------------------------------
+SUMMARY METRICS
+------------------------------------------------------------------------------
+  Basic Statistics:
+    Total Blocks:          2
+    Total Edges:           1
+    Entry Block:           0
+    Exit Block:            1
+    Total Statements:     10
+    Reachable Blocks:      2
+    Unreachable:           0
+    Cyclomatic Complexity: 1 (LOW)
+
+  Block Categories:
+    Empty Blocks:          1
+    Loop Headers:          0
+    Loop Exits:            0
+    Terminated:            1
+    Multi-Pred:            0
+    Multi-Succ:            0
+
+  Edge Types:
+    Jump:                  1
+
+------------------------------------------------------------------------------
+COMPACT FORMAT (for test validation)
+------------------------------------------------------------------------------
+CFG:main:B2:E1:S10:CC1:R2
+EDGES: 0->1
+
+==============================================================================
+DETAILED BLOCK ANALYSIS
+==============================================================================
+
++=== Block 0 (Entry) =======================================================+
+| Flags: [ENTRY] [TERMINATED]
+| Source Lines: 1000 1010 1020 1030 1040 1050 1060 1070 1080
+| Statements: 10
+|   Types: DimStatement, EndStatement, LetStatement×7, PrintStatement
+|   Detail:
+|     [ 0] DimStatement (line 1000)
+|     [ 1] LetStatement (line 1010)
+|     [ 2] LetStatement (line 1020)
+|     [ 3] LetStatement (line 1030)
+|     [ 4] LetStatement (line 1040)
+|     [ 5] LetStatement (line 1050)
+|     [ 6] LetStatement (line 1060)
+|     [ 7] LetStatement (line 1070)
+|     [ 8] PrintStatement (line 1080)
+|     [ 9] EndStatement
+| Predecessors (0): none
+| Successors (1): 1
++============================================================================╝
+
++=== Block 1 (Exit) ========================================================+
+| Flags: [EXIT] [EMPTY]
+| Statements: 0
+| Predecessors (1): 0
+| Successors (0): none
++============================================================================╝
+
+------------------------------------------------------------------------------
+DETAILED EDGE ANALYSIS
+------------------------------------------------------------------------------
+
+Edge   0: Block   0 --[JUMP]--> Block   1
+
+------------------------------------------------------------------------------
+CONTROL FLOW ANALYSIS
+------------------------------------------------------------------------------
+
+✓ All non-exit blocks are reachable from entry
+
+==============================================================================
+END OF CFG ANALYSIS REPORT
+==============================================================================
+
+
+========================================
+CODE GENERATION: DISABLED
+========================================
+The new CFG builder generates correct control flow graphs.
+Code generation will be re-enabled after adapting the
+QBE code generator to work with the new CFG structure.
+
+To test CFG generation:
+  ./qbe_basic -G program.bas
+
+========================================
+
+[DEBUG] compile_basic_to_il: Returned from wrapper
+[DEBUG] compile_basic_to_il: qbe_il is valid
+[DEBUG] compile_basic_to_il: len = 0
+[DEBUG] compile_basic_to_il: About to call fmemopen...
+[DEBUG] compile_basic_to_il: fmemopen returned
+[DEBUG] compile_basic_to_il: fmemopen failed, freeing and returning NULL
+failed to compile BASIC file 'tests/compare_local.bas'

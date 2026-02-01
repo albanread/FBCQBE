@@ -24,13 +24,14 @@ mkdir -p obj
 
 # Compile each FasterBASIC C++ source
 # NOTE: Using modular CFG structure (February 2026 refactor)
+# NOTE: Codegen disabled - needs adaptation to CFG v2
 clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -c \
     "$FASTERBASIC_SRC/fasterbasic_lexer.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_parser.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_semantic.cpp" \
     "$FASTERBASIC_SRC/cfg/cfg_builder_core.cpp" \
     "$FASTERBASIC_SRC/cfg/cfg_builder_blocks.cpp" \
-    "$FASTERBASIC_SRC/cfg/cfg_builder_utils.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_comprehensive_dump.cpp" \
     "$FASTERBASIC_SRC/cfg/cfg_builder_jumptargets.cpp" \
     "$FASTERBASIC_SRC/cfg/cfg_builder_statements.cpp" \
     "$FASTERBASIC_SRC/cfg/cfg_builder_jumps.cpp" \
@@ -44,6 +45,11 @@ clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -c \
     "$FASTERBASIC_SRC/modular_commands.cpp" \
     "$FASTERBASIC_SRC/command_registry_core.cpp" \
     "$FASTERBASIC_SRC/../runtime/ConstantsManager.cpp"
+#    "$FASTERBASIC_SRC/codegen/qbe_codegen_main.cpp" \
+#    "$FASTERBASIC_SRC/codegen/qbe_codegen_statements.cpp" \
+#    "$FASTERBASIC_SRC/codegen/qbe_codegen_expressions.cpp" \
+#    "$FASTERBASIC_SRC/codegen/qbe_codegen_helpers.cpp" \
+#    "$FASTERBASIC_SRC/codegen/qbe_codegen_runtime.cpp"
 
 mv *.o obj/ 2>/dev/null || true
 

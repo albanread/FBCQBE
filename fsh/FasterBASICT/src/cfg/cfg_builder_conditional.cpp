@@ -104,12 +104,15 @@ BasicBlock* CFGBuilder::buildIf(
             sub
         );
         
+        bool thenTerminated = isTerminated(thenExit);
+        
         // Wire THEN to merge
-        if (!isTerminated(thenExit)) {
+        if (!thenTerminated) {
             addUnconditionalEdge(thenExit->id, mergeBlock->id);
         }
         
         // Build ELSE branch if present
+        bool elseTerminated = false;
         if (elseBlock) {
             BasicBlock* elseExit = buildStatementRange(
                 stmt.elseStatements,
@@ -120,13 +123,28 @@ BasicBlock* CFGBuilder::buildIf(
                 sub
             );
             
-            if (!isTerminated(elseExit)) {
+            elseTerminated = isTerminated(elseExit);
+            
+            if (!elseTerminated) {
                 addUnconditionalEdge(elseExit->id, mergeBlock->id);
             }
         }
         
         if (m_debugMode) {
             std::cout << "[CFG] Single-line IF complete, merge block: " << mergeBlock->id << std::endl;
+        }
+        
+        // If both branches are terminated (or only THEN exists and is terminated),
+        // the merge block is unreachable. Return an unreachable block for subsequent statements.
+        // Cases:
+        // - THEN terminated AND ELSE terminated → merge unreachable
+        // - THEN terminated AND no ELSE → false path reaches merge → merge reachable
+        // - THEN not terminated → merge reachable
+        if (thenTerminated && elseBlock && elseTerminated) {
+            if (m_debugMode) {
+                std::cout << "[CFG] Both IF branches terminated, returning unreachable block" << std::endl;
+            }
+            return createUnreachableBlock();
         }
         
         return mergeBlock;

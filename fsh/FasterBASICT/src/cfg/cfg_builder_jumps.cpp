@@ -56,10 +56,8 @@ BasicBlock* CFGBuilder::handleGoto(const GotoStatement& stmt, BasicBlock* incomi
     // GOTO is a terminator - no fallthrough
     markTerminated(incoming);
     
-    // Create unreachable block for code following GOTO
-    BasicBlock* unreachableBlock = createUnreachableBlock();
-    
-    return unreachableBlock;
+    // Return the terminated block - caller will create unreachable block if needed
+    return incoming;
 }
 
 // =============================================================================
@@ -153,12 +151,11 @@ BasicBlock* CFGBuilder::handleReturn(const ReturnStatement& stmt, BasicBlock* in
     }
     
     // Mark as terminator
+    // RETURN is a terminator - no fallthrough
     markTerminated(incoming);
     
-    // Create unreachable block for code following RETURN
-    BasicBlock* unreachableBlock = createUnreachableBlock();
-    
-    return unreachableBlock;
+    // Return the terminated block - caller will create unreachable block if needed
+    return incoming;
 }
 
 // =============================================================================
@@ -323,14 +320,14 @@ BasicBlock* CFGBuilder::handleExit(const ExitStatement& stmt, BasicBlock* incomi
         case ExitStatement::ExitType::SUB:
             // Function/Sub exit - just mark as terminator
             markTerminated(incoming);
-            return createUnreachableBlock();
+            return incoming;
             
         default:
             if (m_debugMode) {
                 std::cout << "[CFG] Warning: Unknown EXIT type" << std::endl;
             }
             markTerminated(incoming);
-            return createUnreachableBlock();
+            return incoming;
     }
 }
 
@@ -353,7 +350,7 @@ BasicBlock* CFGBuilder::handleExitFor(BasicBlock* incoming, LoopContext* loop) {
             std::cout << "[CFG] Warning: EXIT FOR outside of FOR loop" << std::endl;
         }
         markTerminated(incoming);
-        return createUnreachableBlock();
+        return incoming;
     }
     
     // Jump to loop exit
@@ -365,7 +362,7 @@ BasicBlock* CFGBuilder::handleExitFor(BasicBlock* incoming, LoopContext* loop) {
                   << " to exit block " << forLoop->exitBlockId << std::endl;
     }
     
-    return createUnreachableBlock();
+    return incoming;
 }
 
 // =============================================================================
@@ -387,7 +384,7 @@ BasicBlock* CFGBuilder::handleExitWhile(BasicBlock* incoming, LoopContext* loop)
             std::cout << "[CFG] Warning: EXIT WHILE outside of WHILE loop" << std::endl;
         }
         markTerminated(incoming);
-        return createUnreachableBlock();
+        return incoming;
     }
     
     // Jump to loop exit
@@ -399,7 +396,7 @@ BasicBlock* CFGBuilder::handleExitWhile(BasicBlock* incoming, LoopContext* loop)
                   << " to exit block " << whileLoop->exitBlockId << std::endl;
     }
     
-    return createUnreachableBlock();
+    return incoming;
 }
 
 // =============================================================================
@@ -421,7 +418,7 @@ BasicBlock* CFGBuilder::handleExitDo(BasicBlock* incoming, LoopContext* loop) {
             std::cout << "[CFG] Warning: EXIT DO outside of DO loop" << std::endl;
         }
         markTerminated(incoming);
-        return createUnreachableBlock();
+        return incoming;
     }
     
     // Jump to loop exit
@@ -433,7 +430,7 @@ BasicBlock* CFGBuilder::handleExitDo(BasicBlock* incoming, LoopContext* loop) {
                   << " to exit block " << doLoop->exitBlockId << std::endl;
     }
     
-    return createUnreachableBlock();
+    return incoming;
 }
 
 // =============================================================================
@@ -452,7 +449,7 @@ BasicBlock* CFGBuilder::handleExitSelect(BasicBlock* incoming, SelectContext* se
             std::cout << "[CFG] Warning: EXIT SELECT outside of SELECT CASE" << std::endl;
         }
         markTerminated(incoming);
-        return createUnreachableBlock();
+        return incoming;
     }
     
     // Jump to select exit
@@ -464,7 +461,7 @@ BasicBlock* CFGBuilder::handleExitSelect(BasicBlock* incoming, SelectContext* se
                   << " to exit block " << select->exitBlockId << std::endl;
     }
     
-    return createUnreachableBlock();
+    return incoming;
 }
 
 // =============================================================================
@@ -483,7 +480,7 @@ BasicBlock* CFGBuilder::handleContinue(BasicBlock* incoming, LoopContext* loop) 
             std::cout << "[CFG] Warning: CONTINUE outside of loop" << std::endl;
         }
         markTerminated(incoming);
-        return createUnreachableBlock();
+        return incoming;
     }
     
     // Jump to loop header
@@ -495,7 +492,7 @@ BasicBlock* CFGBuilder::handleContinue(BasicBlock* incoming, LoopContext* loop) 
                   << " to header block " << loop->headerBlockId << std::endl;
     }
     
-    return createUnreachableBlock();
+    return incoming;
 }
 
 // =============================================================================
@@ -506,23 +503,26 @@ BasicBlock* CFGBuilder::handleContinue(BasicBlock* incoming, LoopContext* loop) 
 //
 BasicBlock* CFGBuilder::handleEnd(const EndStatement& stmt, BasicBlock* incoming) {
     if (m_debugMode) {
-        std::cout << "[CFG] Handling END statement" << std::endl;
+        std::cout << "[CFG] Handling END statement - jumping to exit" << std::endl;
     }
     
     // Add END statement to current block
     addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
     
-    // END is a terminator - program stops
-    markTerminated(incoming);
-    
-    if (m_debugMode) {
-        std::cout << "[CFG] END in block " << incoming->id << " terminates program" << std::endl;
+    // END jumps to the program exit block (if it exists)
+    if (m_exitBlock) {
+        addUnconditionalEdge(incoming->id, m_exitBlock->id);
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] END in block " << incoming->id << " jumps to exit block " << m_exitBlock->id << std::endl;
+        }
     }
     
-    // Create unreachable block for code following END
-    BasicBlock* unreachableBlock = createUnreachableBlock();
+    // Mark as terminated so no fall-through
+    markTerminated(incoming);
     
-    return unreachableBlock;
+    // Return the terminated block - caller will create unreachable block if needed
+    return incoming;
 }
 
 // =============================================================================
@@ -558,12 +558,11 @@ BasicBlock* CFGBuilder::handleThrow(const ThrowStatement& stmt, BasicBlock* inco
     }
     
     // Mark as terminator
+    // THROW is a terminator - no fallthrough
     markTerminated(incoming);
     
-    // Create unreachable block for code following THROW
-    BasicBlock* unreachableBlock = createUnreachableBlock();
-    
-    return unreachableBlock;
+    // Return the terminated block - caller will create unreachable block if needed
+    return incoming;
 }
 
 } // namespace FasterBASIC

@@ -1,0 +1,1032 @@
+[DEBUG] compile_basic_to_il: Starting...
+[DEBUG] Starting pass1_collectDeclarations
+[DEBUG] Starting pass2_validate
+[DEBUG] pass2_validate: processing 119 lines
+[DEBUG] pass2_validate: line 10 has 0 statements
+[DEBUG] pass2_validate: line 20 has 0 statements
+[DEBUG] pass2_validate: line 30 has 0 statements
+[DEBUG] pass2_validate: line 40 has 0 statements
+[DEBUG] pass2_validate: line 50 has 0 statements
+[DEBUG] pass2_validate: line 60 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 70 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 80 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 90 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 100 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 110 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 130 has 0 statements
+[DEBUG] pass2_validate: line 140 has 0 statements
+[DEBUG] pass2_validate: line 150 has 0 statements
+[DEBUG] pass2_validate: line 160 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 170 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 180 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 190 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 200 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 210 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 230 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 240 has 1 statements
+[DEBUG] validateStatement called for type: 25
+[DEBUG] validateForStatement called for variable: i
+[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] FOR stack POP after body, stack size before pop: 1
+[DEBUG] FOR stack size after pop: 0
+[DEBUG] pass2_validate: line 280 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 290 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 300 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 310 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 330 has 0 statements
+[DEBUG] pass2_validate: line 340 has 0 statements
+[DEBUG] pass2_validate: line 350 has 0 statements
+[DEBUG] pass2_validate: line 360 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 370 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 380 has 1 statements
+[DEBUG] validateStatement called for type: 25
+[DEBUG] validateForStatement called for variable: i
+[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] FOR stack POP after body, stack size before pop: 1
+[DEBUG] FOR stack size after pop: 0
+[DEBUG] pass2_validate: line 420 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 430 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 440 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 450 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 470 has 0 statements
+[DEBUG] pass2_validate: line 480 has 0 statements
+[DEBUG] pass2_validate: line 490 has 0 statements
+[DEBUG] pass2_validate: line 500 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 510 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 520 has 1 statements
+[DEBUG] validateStatement called for type: 25
+[DEBUG] validateForStatement called for variable: i
+[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] FOR stack POP after body, stack size before pop: 1
+[DEBUG] FOR stack size after pop: 0
+[DEBUG] pass2_validate: line 560 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 570 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 580 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 590 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 610 has 0 statements
+[DEBUG] pass2_validate: line 620 has 0 statements
+[DEBUG] pass2_validate: line 630 has 0 statements
+[DEBUG] pass2_validate: line 640 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 650 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 660 has 1 statements
+[DEBUG] validateStatement called for type: 25
+[DEBUG] validateForStatement called for variable: i
+[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] FOR stack POP after body, stack size before pop: 1
+[DEBUG] FOR stack size after pop: 0
+[DEBUG] pass2_validate: line 700 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 710 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 720 has 1 statements
+[DEBUG] validateStatement called for type: 22
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 34
+[DEBUG] pass2_validate: line 730 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 740 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 760 has 0 statements
+[DEBUG] pass2_validate: line 770 has 0 statements
+[DEBUG] pass2_validate: line 780 has 0 statements
+[DEBUG] pass2_validate: line 790 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 800 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 810 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 820 has 1 statements
+[DEBUG] validateStatement called for type: 25
+[DEBUG] validateForStatement called for variable: i
+[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] FOR stack POP after body, stack size before pop: 1
+[DEBUG] FOR stack size after pop: 0
+[DEBUG] pass2_validate: line 870 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 880 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 890 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 900 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 920 has 0 statements
+[DEBUG] pass2_validate: line 930 has 0 statements
+[DEBUG] pass2_validate: line 940 has 0 statements
+[DEBUG] pass2_validate: line 950 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 960 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 970 has 1 statements
+[DEBUG] validateStatement called for type: 25
+[DEBUG] validateForStatement called for variable: i
+[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] FOR stack POP after body, stack size before pop: 1
+[DEBUG] FOR stack size after pop: 0
+[DEBUG] pass2_validate: line 1010 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1020 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1030 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1040 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1060 has 0 statements
+[DEBUG] pass2_validate: line 1070 has 0 statements
+[DEBUG] pass2_validate: line 1080 has 0 statements
+[DEBUG] pass2_validate: line 1090 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1100 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1110 has 1 statements
+[DEBUG] validateStatement called for type: 25
+[DEBUG] validateForStatement called for variable: i
+[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 7
+[DEBUG] FOR stack POP after body, stack size before pop: 1
+[DEBUG] FOR stack size after pop: 0
+[DEBUG] pass2_validate: line 1160 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1170 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1180 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1190 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1210 has 0 statements
+[DEBUG] pass2_validate: line 1220 has 0 statements
+[DEBUG] pass2_validate: line 1230 has 0 statements
+[DEBUG] pass2_validate: line 1240 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1250 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 1260 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 1270 has 1 statements
+[DEBUG] validateStatement called for type: 37
+[DEBUG] pass2_validate: line 1280 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1290 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1300 has 1 statements
+[DEBUG] validateStatement called for type: 7
+[DEBUG] pass2_validate: line 1320 has 1 statements
+[DEBUG] validateStatement called for type: 25
+[DEBUG] validateForStatement called for variable: i
+[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 37
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 22
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 22
+[DEBUG] validateStatement called for type: 7
+[DEBUG] validateStatement called for type: 22
+[DEBUG] validateStatement called for type: 7
+[DEBUG] FOR stack POP after body, stack size before pop: 1
+[DEBUG] FOR stack size after pop: 0
+[DEBUG] pass2_validate: line 1410 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1420 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1430 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1440 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1450 has 1 statements
+[DEBUG] validateStatement called for type: 22
+[DEBUG] validateStatement called for type: 2
+[DEBUG] validateStatement called for type: 34
+[DEBUG] pass2_validate: line 1460 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1470 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1490 has 0 statements
+[DEBUG] pass2_validate: line 1500 has 0 statements
+[DEBUG] pass2_validate: line 1510 has 0 statements
+[DEBUG] pass2_validate: line 1520 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1530 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1540 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1550 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1560 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1570 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1580 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1590 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1600 has 1 statements
+[DEBUG] validateStatement called for type: 2
+[DEBUG] pass2_validate: line 1610 has 1 statements
+[DEBUG] validateStatement called for type: 34
+[DEBUG] Finished pass2_validate
+[DEBUG] validateControlFlow called, FOR stack size: 0
+[INFO] Building complete ProgramCFG (main + all SUBs/FUNCTIONs)...
+[INFO] ProgramCFG build successful!
+[INFO] Main program CFG + 0 function/subroutine CFGs
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║                    PROGRAM CFG ANALYSIS REPORT                           ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Total CFGs: 1
+  - Main Program: 1
+  - Functions/Subs: 0
+
+
++==========================================================================+
+|                       CFG ANALYSIS REPORT                                 |
++==========================================================================╝
+
+Phase: Main Program
+Function: main
+
+------------------------------------------------------------------------------
+SUMMARY METRICS
+------------------------------------------------------------------------------
+  Basic Statistics:
+    Total Blocks:         52
+    Total Edges:          64
+    Entry Block:           0
+    Exit Block:            1
+    Total Statements:    116
+    Reachable Blocks:     52
+    Unreachable:           0
+    Cyclomatic Complexity: 14 (HIGH)
+
+  Block Categories:
+    Empty Blocks:         18
+    Loop Headers:          8
+    Loop Exits:            8
+    Terminated:            3
+    Multi-Pred:           12
+    Multi-Succ:           13
+
+  Edge Types:
+    Conditional True:     26
+    Jump:                 38
+
+------------------------------------------------------------------------------
+COMPACT FORMAT (for test validation)
+------------------------------------------------------------------------------
+CFG:main:B52:E64:S116:CC14:R52
+EDGES: 0->2 2->3 3->4 3->6 4->5 5->3 6->7 7->8 8->9 8->11 9->10 10->8 11->12 12->13 13->14 13->16 14->15 15->13 16->17 17->18 18->19 18->21 19->20 20->18 21->22 21->23 22->1 23->24 24->25 25->26 25->28 26->27 27->25 28->29 29->30 30->31 30->33 31->32 32->30 33->34 34->35 35->36 35->38 36->37 37->35 38->39 39->40 40->41 40->43 41->44 41->45 44->45 45->46 45->47 46->47 47->48 47->49 48->49 49->42 42->40 43->50 43->51 50->1 51->1
+
+==============================================================================
+DETAILED BLOCK ANALYSIS
+==============================================================================
+
++=== Block 0 (Entry) =======================================================+
+| Flags: [ENTRY]
+| Source Lines: 60 70 80 90 100 110 160 170 180 190
+|               200 210 230
+| Statements: 13
+|   Types: DimStatement×4, LetStatement×2, PrintStatement×7
+|   Detail:
+|     [ 0] PrintStatement (line 60)
+|     [ 1] PrintStatement (line 70)
+|     [ 2] PrintStatement (line 80)
+|     [ 3] PrintStatement (line 90)
+|     [ 4] PrintStatement (line 100)
+|     [ 5] PrintStatement (line 110)
+|     [ 6] PrintStatement (line 160)
+|     [ 7] DimStatement (line 170)
+|     [ 8] DimStatement (line 180)
+|     [ 9] DimStatement (line 190)
+|     [10] DimStatement (line 200)
+|     [11] LetStatement (line 210)
+|     [12] LetStatement (line 230)
+| Predecessors (0): none
+| Successors (1): 2
++============================================================================╝
+
++=== Block 1 (Exit) ========================================================+
+| Flags: [EXIT] [EMPTY]
+| Statements: 0
+| Predecessors (3): 22, 50, 51
+| Successors (0): none
++============================================================================╝
+
++=== Block 2 (For_Init) ====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: ForStatement
+|   Detail:
+|     [ 0] ForStatement
+| Predecessors (1): 0
+| Successors (1): 3
++============================================================================╝
+
++=== Block 3 (For_Header) ==================================================+
+| Flags: [LOOP_HEADER] [EMPTY]
+| Statements: 0
+| Predecessors (2): 2, 5
+| Successors (2): 4, 6
++============================================================================╝
+
++=== Block 4 (For_Body) ====================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: LetStatement×2
+|   Detail:
+|     [ 0] LetStatement
+|     [ 1] LetStatement
+| Predecessors (1): 3
+| Successors (1): 5
++============================================================================╝
+
++=== Block 5 (For_Increment) ===============================================+
+| Flags: [EMPTY]
+| Statements: 0
+| Predecessors (1): 4
+| Successors (1): 3
++============================================================================╝
+
++=== Block 6 (For_Exit) ====================================================+
+| Flags: [LOOP_EXIT]
+| Source Lines: 280 290 300 310 360 370
+| Statements: 6
+|   Types: LetStatement, PrintStatement×5
+|   Detail:
+|     [ 0] PrintStatement (line 280)
+|     [ 1] PrintStatement (line 290)
+|     [ 2] PrintStatement (line 300)
+|     [ 3] PrintStatement (line 310)
+|     [ 4] PrintStatement (line 360)
+|     [ 5] LetStatement (line 370)
+| Predecessors (1): 3
+| Successors (1): 7
++============================================================================╝
+
++=== Block 7 (For_Init) ====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: ForStatement
+|   Detail:
+|     [ 0] ForStatement
+| Predecessors (1): 6
+| Successors (1): 8
++============================================================================╝
+
++=== Block 8 (For_Header) ==================================================+
+| Flags: [LOOP_HEADER] [EMPTY]
+| Statements: 0
+| Predecessors (2): 7, 10
+| Successors (2): 9, 11
++============================================================================╝
+
++=== Block 9 (For_Body) ====================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: LetStatement×2
+|   Detail:
+|     [ 0] LetStatement
+|     [ 1] LetStatement
+| Predecessors (1): 8
+| Successors (1): 10
++============================================================================╝
+
++=== Block 10 (For_Increment) ===============================================+
+| Flags: [EMPTY]
+| Statements: 0
+| Predecessors (1): 9
+| Successors (1): 8
++============================================================================╝
+
++=== Block 11 (For_Exit) ====================================================+
+| Flags: [LOOP_EXIT]
+| Source Lines: 420 430 440 450 500 510
+| Statements: 6
+|   Types: LetStatement, PrintStatement×5
+|   Detail:
+|     [ 0] PrintStatement (line 420)
+|     [ 1] PrintStatement (line 430)
+|     [ 2] PrintStatement (line 440)
+|     [ 3] PrintStatement (line 450)
+|     [ 4] PrintStatement (line 500)
+|     [ 5] LetStatement (line 510)
+| Predecessors (1): 8
+| Successors (1): 12
++============================================================================╝
+
++=== Block 12 (For_Init) ====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: ForStatement
+|   Detail:
+|     [ 0] ForStatement
+| Predecessors (1): 11
+| Successors (1): 13
++============================================================================╝
+
++=== Block 13 (For_Header) ==================================================+
+| Flags: [LOOP_HEADER] [EMPTY]
+| Statements: 0
+| Predecessors (2): 12, 15
+| Successors (2): 14, 16
++============================================================================╝
+
++=== Block 14 (For_Body) ====================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: LetStatement×2
+|   Detail:
+|     [ 0] LetStatement
+|     [ 1] LetStatement
+| Predecessors (1): 13
+| Successors (1): 15
++============================================================================╝
+
++=== Block 15 (For_Increment) ===============================================+
+| Flags: [EMPTY]
+| Statements: 0
+| Predecessors (1): 14
+| Successors (1): 13
++============================================================================╝
+
++=== Block 16 (For_Exit) ====================================================+
+| Flags: [LOOP_EXIT]
+| Source Lines: 560 570 580 590 640 650
+| Statements: 6
+|   Types: LetStatement, PrintStatement×5
+|   Detail:
+|     [ 0] PrintStatement (line 560)
+|     [ 1] PrintStatement (line 570)
+|     [ 2] PrintStatement (line 580)
+|     [ 3] PrintStatement (line 590)
+|     [ 4] PrintStatement (line 640)
+|     [ 5] LetStatement (line 650)
+| Predecessors (1): 13
+| Successors (1): 17
++============================================================================╝
+
++=== Block 17 (For_Init) ====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: ForStatement
+|   Detail:
+|     [ 0] ForStatement
+| Predecessors (1): 16
+| Successors (1): 18
++============================================================================╝
+
++=== Block 18 (For_Header) ==================================================+
+| Flags: [LOOP_HEADER] [EMPTY]
+| Statements: 0
+| Predecessors (2): 17, 20
+| Successors (2): 19, 21
++============================================================================╝
+
++=== Block 19 (For_Body) ====================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: LetStatement×2
+|   Detail:
+|     [ 0] LetStatement
+|     [ 1] LetStatement
+| Predecessors (1): 18
+| Successors (1): 20
++============================================================================╝
+
++=== Block 20 (For_Increment) ===============================================+
+| Flags: [EMPTY]
+| Statements: 0
+| Predecessors (1): 19
+| Successors (1): 18
++============================================================================╝
+
++=== Block 21 (For_Exit) ====================================================+
+| Flags: [LOOP_EXIT]
+| Source Lines: 700 710
+| Statements: 3
+|   Types: IfStatement, PrintStatement×2
+|   Detail:
+|     [ 0] PrintStatement (line 700)
+|     [ 1] PrintStatement (line 710)
+|     [ 2] IfStatement
+| Predecessors (1): 18
+| Successors (2): 22, 23
++============================================================================╝
+
++=== Block 22 (If_Then) =====================================================+
+| Flags: [TERMINATED]
+| Statements: 2
+|   Types: EndStatement, PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+|     [ 1] EndStatement
+| Predecessors (1): 21
+| Successors (1): 1
++============================================================================╝
+
++=== Block 23 (If_Merge) ====================================================+
+| Flags: [NORMAL]
+| Source Lines: 730 740 790 800 810
+| Statements: 5
+|   Types: DimStatement, LetStatement, PrintStatement×3
+|   Detail:
+|     [ 0] PrintStatement (line 730)
+|     [ 1] PrintStatement (line 740)
+|     [ 2] PrintStatement (line 790)
+|     [ 3] DimStatement (line 800)
+|     [ 4] LetStatement (line 810)
+| Predecessors (1): 21
+| Successors (1): 24
++============================================================================╝
+
++=== Block 24 (For_Init) ====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: ForStatement
+|   Detail:
+|     [ 0] ForStatement
+| Predecessors (1): 23
+| Successors (1): 25
++============================================================================╝
+
++=== Block 25 (For_Header) ==================================================+
+| Flags: [LOOP_HEADER] [EMPTY]
+| Statements: 0
+| Predecessors (2): 24, 27
+| Successors (2): 26, 28
++============================================================================╝
+
++=== Block 26 (For_Body) ====================================================+
+| Flags: [NORMAL]
+| Statements: 3
+|   Types: LetStatement×3
+|   Detail:
+|     [ 0] LetStatement
+|     [ 1] LetStatement
+|     [ 2] LetStatement
+| Predecessors (1): 25
+| Successors (1): 27
++============================================================================╝
+
++=== Block 27 (For_Increment) ===============================================+
+| Flags: [EMPTY]
+| Statements: 0
+| Predecessors (1): 26
+| Successors (1): 25
++============================================================================╝
+
++=== Block 28 (For_Exit) ====================================================+
+| Flags: [LOOP_EXIT]
+| Source Lines: 870 880 890 900 950 960
+| Statements: 6
+|   Types: LetStatement, PrintStatement×5
+|   Detail:
+|     [ 0] PrintStatement (line 870)
+|     [ 1] PrintStatement (line 880)
+|     [ 2] PrintStatement (line 890)
+|     [ 3] PrintStatement (line 900)
+|     [ 4] PrintStatement (line 950)
+|     [ 5] LetStatement (line 960)
+| Predecessors (1): 25
+| Successors (1): 29
++============================================================================╝
+
++=== Block 29 (For_Init) ====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: ForStatement
+|   Detail:
+|     [ 0] ForStatement
+| Predecessors (1): 28
+| Successors (1): 30
++============================================================================╝
+
++=== Block 30 (For_Header) ==================================================+
+| Flags: [LOOP_HEADER] [EMPTY]
+| Statements: 0
+| Predecessors (2): 29, 32
+| Successors (2): 31, 33
++============================================================================╝
+
++=== Block 31 (For_Body) ====================================================+
+| Flags: [NORMAL]
+| Statements: 2
+|   Types: LetStatement×2
+|   Detail:
+|     [ 0] LetStatement
+|     [ 1] LetStatement
+| Predecessors (1): 30
+| Successors (1): 32
++============================================================================╝
+
++=== Block 32 (For_Increment) ===============================================+
+| Flags: [EMPTY]
+| Statements: 0
+| Predecessors (1): 31
+| Successors (1): 30
++============================================================================╝
+
++=== Block 33 (For_Exit) ====================================================+
+| Flags: [LOOP_EXIT]
+| Source Lines: 1010 1020 1030 1040 1090 1100
+| Statements: 6
+|   Types: LetStatement, PrintStatement×5
+|   Detail:
+|     [ 0] PrintStatement (line 1010)
+|     [ 1] PrintStatement (line 1020)
+|     [ 2] PrintStatement (line 1030)
+|     [ 3] PrintStatement (line 1040)
+|     [ 4] PrintStatement (line 1090)
+|     [ 5] LetStatement (line 1100)
+| Predecessors (1): 30
+| Successors (1): 34
++============================================================================╝
+
++=== Block 34 (For_Init) ====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: ForStatement
+|   Detail:
+|     [ 0] ForStatement
+| Predecessors (1): 33
+| Successors (1): 35
++============================================================================╝
+
++=== Block 35 (For_Header) ==================================================+
+| Flags: [LOOP_HEADER] [EMPTY]
+| Statements: 0
+| Predecessors (2): 34, 37
+| Successors (2): 36, 38
++============================================================================╝
+
++=== Block 36 (For_Body) ====================================================+
+| Flags: [NORMAL]
+| Statements: 3
+|   Types: LetStatement×3
+|   Detail:
+|     [ 0] LetStatement
+|     [ 1] LetStatement
+|     [ 2] LetStatement
+| Predecessors (1): 35
+| Successors (1): 37
++============================================================================╝
+
++=== Block 37 (For_Increment) ===============================================+
+| Flags: [EMPTY]
+| Statements: 0
+| Predecessors (1): 36
+| Successors (1): 35
++============================================================================╝
+
++=== Block 38 (For_Exit) ====================================================+
+| Flags: [LOOP_EXIT]
+| Source Lines: 1160 1170 1180 1190 1240 1250 1260 1270 1280 1290
+|               1300
+| Statements: 11
+|   Types: DimStatement×3, LetStatement×3, PrintStatement×5
+|   Detail:
+|     [ 0] PrintStatement (line 1160)
+|     [ 1] PrintStatement (line 1170)
+|     [ 2] PrintStatement (line 1180)
+|     [ 3] PrintStatement (line 1190)
+|     [ 4] PrintStatement (line 1240)
+|     [ 5] DimStatement (line 1250)
+|     [ 6] DimStatement (line 1260)
+|     [ 7] DimStatement (line 1270)
+|     [ 8] LetStatement (line 1280)
+|     [ 9] LetStatement (line 1290)
+|     [10] LetStatement (line 1300)
+| Predecessors (1): 35
+| Successors (1): 39
++============================================================================╝
+
++=== Block 39 (For_Init) ====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: ForStatement
+|   Detail:
+|     [ 0] ForStatement
+| Predecessors (1): 38
+| Successors (1): 40
++============================================================================╝
+
++=== Block 40 (For_Header) ==================================================+
+| Flags: [LOOP_HEADER] [EMPTY]
+| Statements: 0
+| Predecessors (2): 39, 42
+| Successors (2): 41, 43
++============================================================================╝
+
++=== Block 41 (For_Body) ====================================================+
+| Flags: [NORMAL]
+| Statements: 4
+|   Types: DimStatement, IfStatement, LetStatement×2
+|   Detail:
+|     [ 0] LetStatement
+|     [ 1] DimStatement
+|     [ 2] LetStatement
+|     [ 3] IfStatement
+| Predecessors (1): 40
+| Successors (2): 44, 45
++============================================================================╝
+
++=== Block 42 (For_Increment) ===============================================+
+| Flags: [EMPTY]
+| Statements: 0
+| Predecessors (1): 49
+| Successors (1): 40
++============================================================================╝
+
++=== Block 43 (For_Exit) ====================================================+
+| Flags: [LOOP_EXIT]
+| Source Lines: 1410 1420 1430 1440
+| Statements: 5
+|   Types: IfStatement, PrintStatement×4
+|   Detail:
+|     [ 0] PrintStatement (line 1410)
+|     [ 1] PrintStatement (line 1420)
+|     [ 2] PrintStatement (line 1430)
+|     [ 3] PrintStatement (line 1440)
+|     [ 4] IfStatement
+| Predecessors (1): 40
+| Successors (2): 50, 51
++============================================================================╝
+
++=== Block 44 (If_Then) =====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: LetStatement
+|   Detail:
+|     [ 0] LetStatement
+| Predecessors (1): 41
+| Successors (1): 45
++============================================================================╝
+
++=== Block 45 (If_Merge) ====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: IfStatement
+|   Detail:
+|     [ 0] IfStatement
+| Predecessors (2): 41, 44
+| Successors (2): 46, 47
++============================================================================╝
+
++=== Block 46 (If_Then) =====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: LetStatement
+|   Detail:
+|     [ 0] LetStatement
+| Predecessors (1): 45
+| Successors (1): 47
++============================================================================╝
+
++=== Block 47 (If_Merge) ====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: IfStatement
+|   Detail:
+|     [ 0] IfStatement
+| Predecessors (2): 45, 46
+| Successors (2): 48, 49
++============================================================================╝
+
++=== Block 48 (If_Then) =====================================================+
+| Flags: [NORMAL]
+| Statements: 1
+|   Types: LetStatement
+|   Detail:
+|     [ 0] LetStatement
+| Predecessors (1): 47
+| Successors (1): 49
++============================================================================╝
+
++=== Block 49 (If_Merge) ====================================================+
+| Flags: [EMPTY]
+| Statements: 0
+| Predecessors (2): 47, 48
+| Successors (1): 42
++============================================================================╝
+
++=== Block 50 (If_Then) =====================================================+
+| Flags: [TERMINATED]
+| Statements: 2
+|   Types: EndStatement, PrintStatement
+|   Detail:
+|     [ 0] PrintStatement
+|     [ 1] EndStatement
+| Predecessors (1): 43
+| Successors (1): 1
++============================================================================╝
+
++=== Block 51 (If_Merge) ====================================================+
+| Flags: [TERMINATED]
+| Source Lines: 1460 1470 1520 1530 1540 1550 1560 1570 1580 1590
+|               1600
+| Statements: 12
+|   Types: EndStatement, PrintStatement×11
+|   Detail:
+|     [ 0] PrintStatement (line 1460)
+|     [ 1] PrintStatement (line 1470)
+|     [ 2] PrintStatement (line 1520)
+|     [ 3] PrintStatement (line 1530)
+|     [ 4] PrintStatement (line 1540)
+|     [ 5] PrintStatement (line 1550)
+|     [ 6] PrintStatement (line 1560)
+|     [ 7] PrintStatement (line 1570)
+|     [ 8] PrintStatement (line 1580)
+|     [ 9] PrintStatement (line 1590)
+|     [10] PrintStatement (line 1600)
+|     [11] EndStatement
+| Predecessors (1): 43
+| Successors (1): 1
++============================================================================╝
+
+------------------------------------------------------------------------------
+DETAILED EDGE ANALYSIS
+------------------------------------------------------------------------------
+
+Edge   0: Block   0 --[JUMP]--> Block   2
+Edge   1: Block   2 --[JUMP]--> Block   3
+Edge   2: Block   3 --[TRUE]--> Block   4 ("true")
+Edge   3: Block   3 --[TRUE]--> Block   6 ("false")
+Edge   4: Block   4 --[JUMP]--> Block   5
+Edge   5: Block   5 --[JUMP]--> Block   3 <- BACK-EDGE
+Edge   6: Block   6 --[JUMP]--> Block   7
+Edge   7: Block   7 --[JUMP]--> Block   8
+Edge   8: Block   8 --[TRUE]--> Block   9 ("true")
+Edge   9: Block   8 --[TRUE]--> Block  11 ("false")
+Edge  10: Block   9 --[JUMP]--> Block  10
+Edge  11: Block  10 --[JUMP]--> Block   8 <- BACK-EDGE
+Edge  12: Block  11 --[JUMP]--> Block  12
+Edge  13: Block  12 --[JUMP]--> Block  13
+Edge  14: Block  13 --[TRUE]--> Block  14 ("true")
+Edge  15: Block  13 --[TRUE]--> Block  16 ("false")
+Edge  16: Block  14 --[JUMP]--> Block  15
+Edge  17: Block  15 --[JUMP]--> Block  13 <- BACK-EDGE
+Edge  18: Block  16 --[JUMP]--> Block  17
+Edge  19: Block  17 --[JUMP]--> Block  18
+Edge  20: Block  18 --[TRUE]--> Block  19 ("true")
+Edge  21: Block  18 --[TRUE]--> Block  21 ("false")
+Edge  22: Block  19 --[JUMP]--> Block  20
+Edge  23: Block  20 --[JUMP]--> Block  18 <- BACK-EDGE
+Edge  24: Block  21 --[TRUE]--> Block  22 ("true")
+Edge  25: Block  21 --[TRUE]--> Block  23 ("false")
+Edge  26: Block  22 --[JUMP]--> Block   1 <- BACK-EDGE
+Edge  27: Block  23 --[JUMP]--> Block  24
+Edge  28: Block  24 --[JUMP]--> Block  25
+Edge  29: Block  25 --[TRUE]--> Block  26 ("true")
+Edge  30: Block  25 --[TRUE]--> Block  28 ("false")
+Edge  31: Block  26 --[JUMP]--> Block  27
+Edge  32: Block  27 --[JUMP]--> Block  25 <- BACK-EDGE
+Edge  33: Block  28 --[JUMP]--> Block  29
+Edge  34: Block  29 --[JUMP]--> Block  30
+Edge  35: Block  30 --[TRUE]--> Block  31 ("true")
+Edge  36: Block  30 --[TRUE]--> Block  33 ("false")
+Edge  37: Block  31 --[JUMP]--> Block  32
+Edge  38: Block  32 --[JUMP]--> Block  30 <- BACK-EDGE
+Edge  39: Block  33 --[JUMP]--> Block  34
+Edge  40: Block  34 --[JUMP]--> Block  35
+Edge  41: Block  35 --[TRUE]--> Block  36 ("true")
+Edge  42: Block  35 --[TRUE]--> Block  38 ("false")
+Edge  43: Block  36 --[JUMP]--> Block  37
+Edge  44: Block  37 --[JUMP]--> Block  35 <- BACK-EDGE
+Edge  45: Block  38 --[JUMP]--> Block  39
+Edge  46: Block  39 --[JUMP]--> Block  40
+Edge  47: Block  40 --[TRUE]--> Block  41 ("true")
+Edge  48: Block  40 --[TRUE]--> Block  43 ("false")
+Edge  49: Block  41 --[TRUE]--> Block  44 ("true")
+Edge  50: Block  41 --[TRUE]--> Block  45 ("false")
+Edge  51: Block  44 --[JUMP]--> Block  45
+Edge  52: Block  45 --[TRUE]--> Block  46 ("true")
+Edge  53: Block  45 --[TRUE]--> Block  47 ("false")
+Edge  54: Block  46 --[JUMP]--> Block  47
+Edge  55: Block  47 --[TRUE]--> Block  48 ("true")
+Edge  56: Block  47 --[TRUE]--> Block  49 ("false")
+Edge  57: Block  48 --[JUMP]--> Block  49
+Edge  58: Block  49 --[JUMP]--> Block  42 <- BACK-EDGE
+Edge  59: Block  42 --[JUMP]--> Block  40 <- BACK-EDGE
+Edge  60: Block  43 --[TRUE]--> Block  50 ("true")
+Edge  61: Block  43 --[TRUE]--> Block  51 ("false")
+Edge  62: Block  50 --[JUMP]--> Block   1 <- BACK-EDGE
+Edge  63: Block  51 --[JUMP]--> Block   1 <- BACK-EDGE
+
+------------------------------------------------------------------------------
+CONTROL FLOW ANALYSIS
+------------------------------------------------------------------------------
+
+✓ All non-exit blocks are reachable from entry
+
+DETECTED LOOPS (back-edges):
+  - Block 5 → Block 3
+  - Block 10 → Block 8
+  - Block 15 → Block 13
+  - Block 20 → Block 18
+  - Block 22 → Block 1
+  - Block 27 → Block 25
+  - Block 32 → Block 30
+  - Block 37 → Block 35
+  - Block 49 → Block 42
+  - Block 42 → Block 40
+  - Block 50 → Block 1
+  - Block 51 → Block 1
+
+DECISION POINTS (blocks with multiple successors): 13
+  - Block 3 (For_Header) → 2 paths
+  - Block 8 (For_Header) → 2 paths
+  - Block 13 (For_Header) → 2 paths
+  - Block 18 (For_Header) → 2 paths
+  - Block 21 (For_Exit) → 2 paths
+  - Block 25 (For_Header) → 2 paths
+  - Block 30 (For_Header) → 2 paths
+  - Block 35 (For_Header) → 2 paths
+  - Block 40 (For_Header) → 2 paths
+  - Block 41 (For_Body) → 2 paths
+  - Block 43 (For_Exit) → 2 paths
+  - Block 45 (If_Merge) → 2 paths
+  - Block 47 (If_Merge) → 2 paths
+
+JOIN POINTS (blocks with multiple predecessors): 12
+  - Block 1 (Exit) ← 3 paths
+  - Block 3 (For_Header) ← 2 paths
+  - Block 8 (For_Header) ← 2 paths
+  - Block 13 (For_Header) ← 2 paths
+  - Block 18 (For_Header) ← 2 paths
+  - Block 25 (For_Header) ← 2 paths
+  - Block 30 (For_Header) ← 2 paths
+  - Block 35 (For_Header) ← 2 paths
+  - Block 40 (For_Header) ← 2 paths
+  - Block 45 (If_Merge) ← 2 paths
+  - Block 47 (If_Merge) ← 2 paths
+  - Block 49 (If_Merge) ← 2 paths
+
+==============================================================================
+END OF CFG ANALYSIS REPORT
+==============================================================================
+
+
+========================================
+CODE GENERATION: DISABLED
+========================================
+The new CFG builder generates correct control flow graphs.
+Code generation will be re-enabled after adapting the
+QBE code generator to work with the new CFG structure.
+
+To test CFG generation:
+  ./qbe_basic -G program.bas
+
+========================================
+
+[DEBUG] compile_basic_to_il: Returned from wrapper
+[DEBUG] compile_basic_to_il: qbe_il is valid
+[DEBUG] compile_basic_to_il: len = 0
+[DEBUG] compile_basic_to_il: About to call fmemopen...
+[DEBUG] compile_basic_to_il: fmemopen returned
+[DEBUG] compile_basic_to_il: fmemopen failed, freeing and returning NULL
+failed to compile BASIC file 'tests/arithmetic//bench_abs_sgn.bas'

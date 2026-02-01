@@ -312,8 +312,11 @@ bool SemanticAnalyzer::analyze(Program& program, const CompilerOptions& options)
     while (!m_repeatStack.empty()) m_repeatStack.pop();
     
     // Two-pass analysis
+    std::cerr << "[DEBUG] Starting pass1_collectDeclarations" << std::endl;
     pass1_collectDeclarations(program);
+    std::cerr << "[DEBUG] Starting pass2_validate" << std::endl;
     pass2_validate(program);
+    std::cerr << "[DEBUG] Finished pass2_validate" << std::endl;
     
     // Final validation
     validateControlFlow(program);
@@ -1289,7 +1292,9 @@ void SemanticAnalyzer::collectForEachVariables(Program& program) {
 // =============================================================================
 
 void SemanticAnalyzer::pass2_validate(Program& program) {
+    std::cerr << "[DEBUG] pass2_validate: processing " << program.lines.size() << " lines" << std::endl;
     for (const auto& line : program.lines) {
+        std::cerr << "[DEBUG] pass2_validate: line " << line->lineNumber << " has " << line->statements.size() << " statements" << std::endl;
         validateProgramLine(*line);
     }
 }
@@ -1303,6 +1308,7 @@ void SemanticAnalyzer::validateProgramLine(const ProgramLine& line) {
 }
 
 void SemanticAnalyzer::validateStatement(const Statement& stmt) {
+    std::cerr << "[DEBUG] validateStatement called for type: " << (int)stmt.getType() << std::endl;
     switch (stmt.getType()) {
         case ASTNodeType::STMT_TRY_CATCH:
             validateTryCatchStatement(static_cast<const TryCatchStatement&>(stmt));
@@ -1953,6 +1959,7 @@ void SemanticAnalyzer::validateIfStatement(const IfStatement& stmt) {
 }
 
 void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
+    std::cerr << "[DEBUG] validateForStatement called for variable: " << stmt.variable << std::endl;
     // FOR loop variables are ALWAYS plain integers (no type suffix)
     // Strip any suffix from the variable name and register as INTEGER
     std::string plainVarName = stmt.variable;
@@ -1987,16 +1994,22 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
               stmt.location);
     }
     
+    // Push to control flow stack before validating body (for nested loop checking)
+    ForContext ctx;
+    ctx.variable = plainVarName;
+    ctx.location = stmt.location;
+    m_forStack.push(ctx);
+    std::cerr << "[DEBUG] FOR stack PUSH at " << stmt.location.toString() << ", stack size now: " << m_forStack.size() << std::endl;
+    
     // Validate body statements
     for (const auto& bodyStmt : stmt.body) {
         validateStatement(*bodyStmt);
     }
     
-    // Push to control flow stack
-    ForContext ctx;
-    ctx.variable = plainVarName;
-    ctx.location = stmt.location;
-    m_forStack.push(ctx);
+    // Pop stack since NEXT is now consumed by parser and body is self-contained
+    std::cerr << "[DEBUG] FOR stack POP after body, stack size before pop: " << m_forStack.size() << std::endl;
+    m_forStack.pop();
+    std::cerr << "[DEBUG] FOR stack size after pop: " << m_forStack.size() << std::endl;
 }
 
 void SemanticAnalyzer::validateForInStatement(ForInStatement& stmt) {
@@ -2009,11 +2022,19 @@ void SemanticAnalyzer::validateForInStatement(ForInStatement& stmt) {
     // Note: We do NOT add the FOR EACH variable to the symbol table
     // It will be declared directly in codegen with the correct type
     
-    // Push to control flow stack
+    // Push to control flow stack before validating body (for nested loop checking)
     ForContext ctx;
     ctx.variable = stmt.variable;
     ctx.location = stmt.location;
     m_forStack.push(ctx);
+    
+    // Validate body statements
+    for (const auto& bodyStmt : stmt.body) {
+        validateStatement(*bodyStmt);
+    }
+    
+    // Pop stack since NEXT is now consumed by parser and body is self-contained
+    m_forStack.pop();
 }
 
 void SemanticAnalyzer::validateNextStatement(const NextStatement& stmt) {
@@ -2039,12 +2060,16 @@ void SemanticAnalyzer::validateNextStatement(const NextStatement& stmt) {
 void SemanticAnalyzer::validateWhileStatement(const WhileStatement& stmt) {
     validateExpression(*stmt.condition);
     
+    // Push to stack before validating body (for nested loop checking)
+    m_whileStack.push(stmt.location);
+    
     // Validate body statements
     for (const auto& bodyStmt : stmt.body) {
         validateStatement(*bodyStmt);
     }
     
-    m_whileStack.push(stmt.location);
+    // Pop stack since WEND is now consumed by parser and body is self-contained
+    m_whileStack.pop();
 }
 
 void SemanticAnalyzer::validateWendStatement(const WendStatement& stmt) {
@@ -2099,11 +2124,16 @@ void SemanticAnalyzer::validateDoStatement(const DoStatement& stmt) {
         validateExpression(*stmt.postCondition);
     }
     
+    // Push to control flow stack before validating body (for nested loop checking)
+    m_doStack.push(stmt.location);
+    
     // Validate body statements
     for (const auto& bodyStmt : stmt.body) {
         validateStatement(*bodyStmt);
     }
-    m_doStack.push(stmt.location);
+    
+    // Pop stack since LOOP is now consumed by parser and body is self-contained
+    m_doStack.pop();
 }
 
 void SemanticAnalyzer::validateLoopStatement(const LoopStatement& stmt) {
@@ -3428,9 +3458,11 @@ std::string SemanticAnalyzer::mangleNameWithSuffix(const std::string& name, Toke
 // =============================================================================
 
 void SemanticAnalyzer::validateControlFlow(Program& program) {
+    std::cerr << "[DEBUG] validateControlFlow called, FOR stack size: " << m_forStack.size() << std::endl;
     // Check for unclosed loops
     if (!m_forStack.empty()) {
         const auto& ctx = m_forStack.top();
+        std::cerr << "[DEBUG] FOR stack NOT empty! Top entry: " << ctx.location.toString() << std::endl;
         error(SemanticErrorType::FOR_WITHOUT_NEXT,
               "FOR loop starting at " + ctx.location.toString() + " has no matching NEXT",
               ctx.location);

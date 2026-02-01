@@ -138,6 +138,10 @@ ControlFlowGraph* CFGBuilder::buildFromProgram(const Program& program) {
     m_entryBlock = createBlock("Entry");
     m_cfg->entryBlock = m_entryBlock->id;
     
+    // Create exit block BEFORE processing statements so END can jump to it
+    m_exitBlock = createBlock("Exit");
+    m_cfg->exitBlock = m_exitBlock->id;
+    
     // Build statement list from Program structure
     // The Program contains ProgramLines, each with statements
     BasicBlock* currentBlock = m_entryBlock;
@@ -197,6 +201,11 @@ ControlFlowGraph* CFGBuilder::buildFromProgram(const Program& program) {
                 continue;
             }
             
+            if (auto* selectStmt = dynamic_cast<const CaseStatement*>(stmt.get())) {
+                currentBlock = buildSelectCase(*selectStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
             if (auto* gotoStmt = dynamic_cast<const GotoStatement*>(stmt.get())) {
                 currentBlock = handleGoto(*gotoStmt, currentBlock);
                 continue;
@@ -233,10 +242,6 @@ ControlFlowGraph* CFGBuilder::buildFromProgram(const Program& program) {
             addStatementToBlock(currentBlock, stmt.get(), line->lineNumber);
         }
     }
-    
-    // Create exit block
-    m_exitBlock = createBlock("Exit");
-    m_cfg->exitBlock = m_exitBlock->id;
     
     // Wire final block to exit (if not already terminated)
     if (currentBlock && !isTerminated(currentBlock)) {

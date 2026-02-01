@@ -238,11 +238,18 @@ public:
     // Note: The Program should already have loop bodies populated by the parser
     ControlFlowGraph* buildFromProgram(const Program& program);
     
+    // Build complete ProgramCFG with main program and all SUB/FUNCTION CFGs
+    // This is the top-level entry point for building CFGs for entire programs
+    ProgramCFG* buildProgramCFG(const Program& program);
+    
     // Get the constructed CFG (transfers ownership)
     ControlFlowGraph* takeCFG();
     
     // Dump the CFG structure (can be called after build)
     void dumpCFG(const std::string& phase = "") const;
+    
+    // Set CFG for dumping purposes (does not take ownership)
+    void setCFGForDump(ControlFlowGraph* cfg) { m_cfg = cfg; }
     
     // Public access to CFG for verification
     const ControlFlowGraph* getCFG() const { return m_cfg; }
