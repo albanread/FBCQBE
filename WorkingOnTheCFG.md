@@ -1,7 +1,7 @@
 # Working on the CFG Builder - Quick Reference
 
-**Last Updated:** February 1, 2025  
-**Status:** 🚧 Foundation Complete - Loop Implementations In Progress  
+**Last Updated:** February 1, 2025
+**Status:** 🚧 Foundation Complete - Loop Implementations In Progress
 **Priority:** HIGH - Fixes critical nested control flow bugs
 
 ---
@@ -10,7 +10,7 @@
 
 We're rewriting the Control Flow Graph (CFG) builder from scratch to fix critical bugs where nested loops (REPEAT, DO) inside IF statements cause infinite loops.
 
-**The Problem:** Old builder uses two-phase construction (build blocks → add edges). This breaks with nested structures.  
+**The Problem:** Old builder uses two-phase construction (build blocks → add edges). This breaks with nested structures.
 **The Solution:** New single-pass recursive builder that creates complete structures immediately.
 
 ---
@@ -26,8 +26,8 @@ We're rewriting the Control Flow Graph (CFG) builder from scratch to fix critica
 | REPEAT Loop | 📋 TODO | **CRITICAL - fixes infinite loop** |
 | DO Loop | 📋 TODO | **CRITICAL - fixes infinite loop** |
 
-**Current:** 25% complete  
-**Test Results:** 3 of 6 nested tests pass (50%)  
+**Current:** 25% complete
+**Test Results:** 3 of 6 nested tests pass (50%)
 **Target:** 6 of 6 nested tests pass (100%)
 
 ---
@@ -35,7 +35,7 @@ We're rewriting the Control Flow Graph (CFG) builder from scratch to fix critica
 ## 📂 Essential Documents (Read These!)
 
 ### 1. **Design & Architecture**
-📄 `docs/CFG_REFACTORING_PLAN.md` (1,152 lines)
+📄 `CFG_REFACTORING_PLAN.md` (1,152 lines)
 - Why we're doing this (old builder is broken)
 - Complete architectural design
 - Implementation examples for all control structures
@@ -44,7 +44,7 @@ We're rewriting the Control Flow Graph (CFG) builder from scratch to fix critica
 **Read this first to understand the "why" and "how"**
 
 ### 2. **Implementation Guide**
-📄 `fsh/FasterBASICT/src/cfg_v2/README.md` (478 lines)
+📄 `CGGREDESIGN.md` (478 lines)
 - Overview of new architecture
 - File structure
 - Implementation status
@@ -54,7 +54,7 @@ We're rewriting the Control Flow Graph (CFG) builder from scratch to fix critica
 **Read this to start coding**
 
 ### 3. **Progress Tracking**
-📄 `docs/CFG_V2_PROGRESS.md` (454 lines)
+📄 `CFGPROGRESS.md`
 - Daily progress log
 - Milestone tracking
 - Test results
