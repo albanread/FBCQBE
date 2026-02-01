@@ -1467,12 +1467,75 @@ BaseType ASTEmitter::getExpressionType(const Expression* expr) {
             return typeManager_.getPromotedType(trueType, falseType);
         }
         
+        case ASTNodeType::EXPR_FUNCTION_CALL: {
+            const auto* callExpr = static_cast<const FunctionCallExpression*>(expr);
+            
+            // Look up function in symbol table to get return type
+            const auto& symbolTable = semantic_.getSymbolTable();
+            auto it = symbolTable.functions.find(callExpr->name);
+            if (it != symbolTable.functions.end()) {
+                return it->second.returnTypeDesc.baseType;
+            }
+            
+            // Check for intrinsic functions
+            std::string upperName = callExpr->name;
+            std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
+            
+            // String functions
+            if (upperName.back() == '$' || upperName == "CHR" || upperName == "STR" || 
+                upperName == "LEFT" || upperName == "RIGHT" || upperName == "MID" ||
+                upperName == "SPACE" || upperName == "STRING" || upperName == "UCASE" || 
+                upperName == "LCASE" || upperName == "TRIM" || upperName == "LTRIM" || 
+                upperName == "RTRIM") {
+                return BaseType::STRING;
+            }
+            
+            // Integer functions
+            if (upperName == "LEN" || upperName == "ASC" || upperName == "INSTR" ||
+                upperName == "INT" || upperName == "FIX" || upperName == "SGN" ||
+                upperName == "CINT" || upperName == "ERR" || upperName == "ERL") {
+                return BaseType::INTEGER;
+            }
+            
+            // ABS returns same type as argument
+            if (upperName == "ABS" && callExpr->arguments.size() == 1) {
+                return getExpressionType(callExpr->arguments[0].get());
+            }
+            
+            // Floating point math functions
+            if (upperName == "SIN" || upperName == "COS" || upperName == "TAN" ||
+                upperName == "SQRT" || upperName == "SQR" || upperName == "LOG" || 
+                upperName == "EXP" || upperName == "RND" || upperName == "VAL") {
+                return BaseType::DOUBLE;
+            }
+            
+            // Default to DOUBLE for unknown functions
+            return BaseType::DOUBLE;
+        }
+        
         default:
             return BaseType::UNKNOWN;
     }
 }
 
 BaseType ASTEmitter::getVariableType(const std::string& varName) {
+    // Check if this is a parameter first - get type from function symbol
+    if (symbolMapper_.inFunctionScope() && symbolMapper_.isParameter(varName)) {
+        std::string currentFunc = symbolMapper_.getCurrentFunction();
+        const auto& symbolTable = semantic_.getSymbolTable();
+        auto it = symbolTable.functions.find(currentFunc);
+        if (it != symbolTable.functions.end()) {
+            const auto& funcSymbol = it->second;
+            // Find the parameter index
+            for (size_t i = 0; i < funcSymbol.parameters.size(); ++i) {
+                if (funcSymbol.parameters[i] == varName) {
+                    BaseType paramType = funcSymbol.parameterTypeDescs[i].baseType;
+                    return paramType;
+                }
+            }
+        }
+    }
+    
     // Use scoped lookup for variable type
     std::string currentFunc = symbolMapper_.getCurrentFunction();
     const auto* varSymbol = semantic_.lookupVariableScoped(varName, currentFunc);
