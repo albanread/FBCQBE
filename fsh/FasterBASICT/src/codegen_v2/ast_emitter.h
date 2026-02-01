@@ -224,6 +224,9 @@ private:
     // Global variable addresses cache
     std::unordered_map<std::string, std::string> globalVarAddresses_;
     
+    // FOR loop temporary variable addresses (limit, step, comparison flag)
+    std::unordered_map<std::string, std::string> forLoopTempAddresses_;
+    
     // === Expression Emitters (by type) ===
     
     std::string emitBinaryExpression(const FasterBASIC::BinaryExpression* expr);

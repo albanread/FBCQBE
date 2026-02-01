@@ -1,7 +1,6 @@
 #include "all.h"
 #include "config.h"
 #include <ctype.h>
-#include <getopt.h>
 #include <unistd.h>
 #include <libgen.h>
 #include <sys/stat.h>
@@ -11,6 +10,7 @@
 extern FILE* compile_basic_to_il(const char *basic_path);
 extern int is_basic_file(const char *filename);
 extern void set_trace_cfg(int enable);
+extern void set_show_il(int enable);
 
 /* Global flag for MADD fusion control */
 static int enable_madd_fusion = 1;  /* Enabled by default */
@@ -169,110 +169,150 @@ main(int ac, char *av[])
 {
 	Target **t;
 	FILE *inf;
-	char *f, *sep, *output_file = NULL;
+	char *f = NULL, *sep, *output_file = NULL;
 	char *runtime_dir = NULL;
 	char temp_asm[256] = {0};
 	char cmd[4096];
-	int c, compile_only = 0, is_basic = 0, il_only = 0;
+	int compile_only = 0, is_basic = 0, il_only = 0;
 	int need_linking = 0;
 	int trace_cfg = 0;
-	int i, j;
-	char **filtered_av;
-	int filtered_ac;
-	char default_output[256];  /* Move to function scope to prevent corruption */
+	int debug_mode = 0;
+	int i;
+	char *target_name = NULL;
+	char *debug_flags = NULL;
+	char default_output[256];
 
 	T = Deftgt;
 	outf = stdout;
 	
-	/* Parse and filter long options before getopt */
-	filtered_av = malloc(ac * sizeof(char*));
-	filtered_av[0] = av[0];
-	filtered_ac = 1;
-	
+	/* Custom argument parser - handles options in any position */
 	for (i = 1; i < ac; i++) {
-		if (strcmp(av[i], "--enable-madd-fusion") == 0) {
+		char *arg = av[i];
+		
+		/* Long options */
+		if (strcmp(arg, "--enable-madd-fusion") == 0) {
 			enable_madd_fusion = 1;
-			/* Skip this argument */
-		} else if (strcmp(av[i], "--disable-madd-fusion") == 0) {
+		} else if (strcmp(arg, "--disable-madd-fusion") == 0) {
 			enable_madd_fusion = 0;
-			/* Skip this argument */
-		} else {
-			/* Keep this argument */
-			filtered_av[filtered_ac++] = av[i];
+		} else if (strcmp(arg, "--debug") == 0 || strcmp(arg, "-D") == 0) {
+			debug_mode = 1;
 		}
-	}
-	
-	/* Reset optind for getopt */
-	optind = 1;
-	
-	while ((c = getopt(filtered_ac, filtered_av, "hicd:o:t:G")) != -1)
-		switch (c) {
-		case 'i':
-			il_only = 1;
-			break;
-		case 'c':
-			compile_only = 1;
-			break;
-		case 'd':
-			for (; *optarg; optarg++)
-				if (isalpha(*optarg)) {
-					debug[toupper(*optarg)] = 1;
-					dbg = 1;
-				}
-			break;
-		case 'o':
-			output_file = optarg;
-			break;
-		case 't':
-			if (strcmp(optarg, "?") == 0) {
-				puts(T.name);
-				exit(0);
-			}
-			for (t=tlist;; t++) {
-				if (!*t) {
-					fprintf(stderr, "unknown target '%s'\n", optarg);
-					exit(1);
-				}
-				if (strcmp(optarg, (*t)->name) == 0) {
-					T = **t;
-					break;
-				}
-			}
-			break;
-		case 'G':
-			trace_cfg = 1;
-			break;
-		case 'h':
-		default:
+		/* Short options */
+		else if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0) {
 			fprintf(stderr, "%s [OPTIONS] {file.ssa, file.bas, -}\n", av[0]);
-			fprintf(stderr, "\t%-11s prints this help\n", "-h");
-			fprintf(stderr, "\t%-11s output to file\n", "-o file");
-			fprintf(stderr, "\t%-11s output IL only (stop before assembly)\n", "-i");
-			fprintf(stderr, "\t%-11s compile only (stop at assembly)\n", "-c");
-			fprintf(stderr, "\t%-11s trace CFG and exit (BASIC files only)\n", "-G");
-			fprintf(stderr, "\t%-11s enable MADD/MSUB fusion (default)\n", "--enable-madd-fusion");
-			fprintf(stderr, "\t%-11s disable MADD/MSUB fusion\n", "--disable-madd-fusion");
-			fprintf(stderr, "\t%-11s generate for a target among:\n", "-t <target>");
-			fprintf(stderr, "\t%-11s ", "");
+			fprintf(stderr, "Options can appear in any position.\n\n");
+			fprintf(stderr, "  %-20s prints this help\n", "-h, --help");
+			fprintf(stderr, "  %-20s output to file\n", "-o <file>");
+			fprintf(stderr, "  %-20s output IL only (stop before assembly)\n", "-i");
+			fprintf(stderr, "  %-20s compile only (stop at assembly)\n", "-c");
+			fprintf(stderr, "  %-20s trace CFG and exit (BASIC files only)\n", "-G");
+			fprintf(stderr, "  %-20s enable debug output\n", "-D, --debug");
+			fprintf(stderr, "  %-20s enable MADD/MSUB fusion (default)\n", "--enable-madd-fusion");
+			fprintf(stderr, "  %-20s disable MADD/MSUB fusion\n", "--disable-madd-fusion");
+			fprintf(stderr, "  %-20s generate for target\n", "-t <target>");
+			fprintf(stderr, "  %-20s dump debug information\n", "-d <flags>");
+			fprintf(stderr, "\nAvailable targets: ");
 			for (t=tlist, sep=""; *t; t++, sep=", ") {
 				fprintf(stderr, "%s%s", sep, (*t)->name);
 				if (*t == &Deftgt)
 					fputs(" (default)", stderr);
 			}
 			fprintf(stderr, "\n");
-			fprintf(stderr, "\t%-11s dump debug information\n", "-d <flags>");
-			exit(c != 'h');
+			exit(0);
 		}
-
-	if (optind >= filtered_ac) {
+		else if (strcmp(arg, "-i") == 0) {
+			il_only = 1;
+		}
+		else if (strcmp(arg, "-c") == 0) {
+			compile_only = 1;
+		}
+		else if (strcmp(arg, "-G") == 0) {
+			trace_cfg = 1;
+		}
+		else if (strcmp(arg, "-o") == 0) {
+			if (i + 1 >= ac) {
+				fprintf(stderr, "error: -o requires an argument\n");
+				exit(1);
+			}
+			output_file = av[++i];
+		}
+		else if (strcmp(arg, "-t") == 0) {
+			if (i + 1 >= ac) {
+				fprintf(stderr, "error: -t requires an argument\n");
+				exit(1);
+			}
+			target_name = av[++i];
+			if (strcmp(target_name, "?") == 0) {
+				puts(T.name);
+				exit(0);
+			}
+		}
+		else if (strcmp(arg, "-d") == 0) {
+			if (i + 1 >= ac) {
+				fprintf(stderr, "error: -d requires an argument\n");
+				exit(1);
+			}
+			debug_flags = av[++i];
+		}
+		else if (arg[0] == '-' && arg[1] != '\0') {
+			fprintf(stderr, "error: unknown option '%s'\n", arg);
+			fprintf(stderr, "Use -h for help\n");
+			exit(1);
+		}
+		else {
+			/* Non-option argument - the input file */
+			if (f) {
+				fprintf(stderr, "error: multiple input files specified\n");
+				exit(1);
+			}
+			f = arg;
+		}
+	}
+	
+	/* Process target selection */
+	if (target_name) {
+		for (t=tlist;; t++) {
+			if (!*t) {
+				fprintf(stderr, "unknown target '%s'\n", target_name);
+				exit(1);
+			}
+			if (strcmp(target_name, (*t)->name) == 0) {
+				T = **t;
+				break;
+			}
+		}
+	}
+	
+	/* Process debug flags */
+	if (debug_flags) {
+		for (char *p = debug_flags; *p; p++) {
+			if (isalpha(*p)) {
+				debug[toupper(*p)] = 1;
+				dbg = 1;
+			}
+		}
+	}
+	
+	/* Check for input file */
+	if (!f) {
 		fprintf(stderr, "error: no input file specified\n");
-		free(filtered_av);
+		fprintf(stderr, "Use -h for help\n");
 		exit(1);
 	}
 	
 	/* Set trace-cfg flag before compilation */
 	if (trace_cfg) {
 		set_trace_cfg(1);
+	}
+	
+	/* Set show-il flag if -i was specified */
+	if (il_only) {
+		set_show_il(1);
+	}
+	
+	/* Set debug mode environment variable for parser/semantic analyzer */
+	if (debug_mode) {
+		setenv("FASTERBASIC_DEBUG", "1", 1);
 	}
 	
 	/* Set MADD fusion environment variable for ARM64 backend */
@@ -282,120 +322,138 @@ main(int ac, char *av[])
 		setenv("ENABLE_MADD_FUSION", "0", 1);
 	}
 
-	/* Process input files */
-	do {
-		f = filtered_av[optind];
-		if (!f || strcmp(f, "-") == 0) {
-			inf = stdin;
-			f = "-";
-			is_basic = 0;
-		} else {
-			is_basic = is_basic_file(f);
-			
-			if (is_basic) {
-				inf = compile_basic_to_il(f);
-				if (!inf) {
-					fprintf(stderr, "failed to compile BASIC file '%s'\n", f);
-					exit(1);
-				}
-				
-				/* If trace-cfg was enabled, compilation stops after CFG dump */
-				if (trace_cfg) {
-					fclose(inf);
-					exit(0);
-				}
-			} else {
-				inf = fopen(f, "r");
-				if (!inf) {
-					fprintf(stderr, "cannot open '%s'\n", f);
-					exit(1);
-				}
-			}
-		}
+	/* Process the input file */
+	if (strcmp(f, "-") == 0) {
+		inf = stdin;
+		f = "-";
+		is_basic = 0;
+	} else {
+		is_basic = is_basic_file(f);
 		
-		/* Decide output strategy:
-		 * -i: Output IL only to -o or stdout
-		 * -c: Output assembly to -o or stdout
-		 * BASIC + -o (no flags): Create executable (temp asm, then link)
-		 * Otherwise: Output assembly to stdout
-		 */
-		
-		if (il_only) {
-			/* Output IL only - just copy through */
-			if (output_file && strcmp(output_file, "-") != 0) {
-				outf = fopen(output_file, "w");
-				if (!outf) {
-					fprintf(stderr, "cannot open '%s'\n", output_file);
-					exit(1);
-				}
-			} else {
-				outf = stdout;
-			}
-			
-			char buf[4096];
-			size_t n;
-			while ((n = fread(buf, 1, sizeof(buf), inf)) > 0) {
-				fwrite(buf, 1, n, outf);
-			}
-			fclose(inf);
-			
-			if (outf != stdout)
-				fclose(outf);
-				
-		} else if (is_basic && !il_only) {
-			/* BASIC file: compile to assembly and link to executable */
-			/* Generate a default output name if not specified */
-			if (!output_file) {
-				/* Strip .bas extension and use as executable name */
-				const char *base = strrchr(f, '/');
-				base = base ? base + 1 : f;
-				char *dot = strrchr(base, '.');
-				if (dot && (strcmp(dot, ".bas") == 0 || strcmp(dot, ".BAS") == 0)) {
-					snprintf(default_output, sizeof(default_output), "%.*s", (int)(dot - base), base);
-				} else {
-					snprintf(default_output, sizeof(default_output), "%s.out", base);
-				}
-				output_file = default_output;
-			}
-			
-			snprintf(temp_asm, sizeof(temp_asm), "/tmp/qbe_basic_%d.s", getpid());
-			outf = fopen(temp_asm, "w");
-			if (!outf) {
-				fprintf(stderr, "cannot create temp file '%s'\n", temp_asm);
+		if (is_basic) {
+			inf = compile_basic_to_il(f);
+			if (!inf) {
+				fprintf(stderr, "failed to compile BASIC file '%s'\n", f);
 				exit(1);
 			}
-			need_linking = !compile_only;
 			
-			parse(inf, f, dbgfile, data, func);
-			fclose(inf);
-			
-			if (!dbg)
-				T.emitfin(outf);
-			fclose(outf);
-			
-		} else {
-			/* Regular QBE processing - output assembly */
-			if (output_file && strcmp(output_file, "-") != 0) {
-				outf = fopen(output_file, "w");
-				if (!outf) {
-					fprintf(stderr, "cannot open '%s'\n", output_file);
-					exit(1);
-				}
-			} else {
-				outf = stdout;
+			/* If trace-cfg was enabled, compilation stops after CFG dump */
+			if (trace_cfg) {
+				fclose(inf);
+				exit(0);
 			}
-			
-			parse(inf, f, dbgfile, data, func);
-			fclose(inf);
-			
-			if (!dbg)
-				T.emitfin(outf);
-				
-			if (outf != stdout)
-				fclose(outf);
+		} else {
+			inf = fopen(f, "r");
+			if (!inf) {
+				fprintf(stderr, "cannot open '%s'\n", f);
+				exit(1);
+			}
+		}
+	}
+	
+	/* Decide output strategy:
+	 * -i: Output IL only to -o or stdout
+	 * -c: Output assembly to -o or stdout
+	 * BASIC + -o (no flags): Create executable (temp asm, then link)
+	 * Otherwise: Output assembly to stdout
+	 */
+	
+	if (il_only) {
+		/* Output IL only - just copy through */
+		if (output_file && strcmp(output_file, "-") != 0) {
+			outf = fopen(output_file, "w");
+			if (!outf) {
+				fprintf(stderr, "cannot open '%s'\n", output_file);
+				exit(1);
+			}
+		} else {
+			outf = stdout;
 		}
 		
-	} while (++optind < ac);
+		char buf[4096];
+		size_t n;
+		while ((n = fread(buf, 1, sizeof(buf), inf)) > 0) {
+			fwrite(buf, 1, n, outf);
+		}
+		fclose(inf);
+		
+		if (outf != stdout)
+			fclose(outf);
+			
+	} else if (is_basic && !il_only) {
+		/* BASIC file: compile to assembly and link to executable */
+		/* Generate a default output name if not specified */
+		if (!output_file) {
+			/* Strip .bas extension and use as executable name */
+			const char *base = strrchr(f, '/');
+			base = base ? base + 1 : f;
+			char *dot = strrchr(base, '.');
+			if (dot && (strcmp(dot, ".bas") == 0 || strcmp(dot, ".BAS") == 0)) {
+				snprintf(default_output, sizeof(default_output), "%.*s", (int)(dot - base), base);
+			} else {
+				snprintf(default_output, sizeof(default_output), "%s.out", base);
+			}
+			output_file = default_output;
+		}
+		
+		snprintf(temp_asm, sizeof(temp_asm), "/tmp/qbe_basic_%d.s", getpid());
+		outf = fopen(temp_asm, "w");
+		if (!outf) {
+			fprintf(stderr, "cannot create temp file '%s'\n", temp_asm);
+			exit(1);
+		}
+		need_linking = !compile_only;
+		
+		parse(inf, f, dbgfile, data, func);
+		fclose(inf);
+		
+		if (!dbg)
+			T.emitfin(outf);
+		fclose(outf);
+		
+		/* If -c was specified, copy temp asm to output file instead of linking */
+		if (compile_only) {
+			if (output_file && strcmp(output_file, "-") != 0) {
+				/* Copy temp asm to specified output */
+				snprintf(cmd, sizeof(cmd), "cp %s %s", temp_asm, output_file);
+				run_command(cmd);
+				unlink(temp_asm);
+			} else {
+				/* Output to stdout */
+				FILE *asm_file = fopen(temp_asm, "r");
+				if (asm_file) {
+					char buf[4096];
+					size_t n;
+					while ((n = fread(buf, 1, sizeof(buf), asm_file)) > 0) {
+						fwrite(buf, 1, n, stdout);
+					}
+					fclose(asm_file);
+				}
+				unlink(temp_asm);
+			}
+		}
+		
+	} else {
+		/* Regular QBE processing - output assembly */
+		if (output_file && strcmp(output_file, "-") != 0) {
+			outf = fopen(output_file, "w");
+			if (!outf) {
+				fprintf(stderr, "cannot open '%s'\n", output_file);
+				exit(1);
+			}
+		} else {
+			outf = stdout;
+		}
+		
+		parse(inf, f, dbgfile, data, func);
+		fclose(inf);
+		
+		if (!dbg)
+			T.emitfin(outf);
+			
+		if (outf != stdout)
+			fclose(outf);
+	}
 
 	/* If we need to link (BASIC + -o without -i or -c) */
 	if (need_linking && temp_asm[0]) {

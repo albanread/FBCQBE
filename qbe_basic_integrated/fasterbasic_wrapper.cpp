@@ -24,6 +24,8 @@ using namespace FasterBASIC;
 // Global flags for trace options
 static bool g_traceCFG = false;
 static bool g_traceAST = false;
+static bool g_showIL = false;
+static bool g_verbose = false;
 
 extern "C" {
 
@@ -57,27 +59,29 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
         DataPreprocessorResult dataResult = dataPreprocessor.process(source);
         
         // Debug: Show what DATA preprocessor collected
-        std::cerr << "[INFO] DataPreprocessor collected " << dataResult.values.size() << " DATA values\n";
-        if (!dataResult.values.empty()) {
-            std::cerr << "[INFO] DATA values: ";
-            for (size_t i = 0; i < dataResult.values.size() && i < 10; ++i) {
-                if (i > 0) std::cerr << ", ";
-                // Print the value based on its type
-                if (std::holds_alternative<int>(dataResult.values[i])) {
-                    std::cerr << std::get<int>(dataResult.values[i]);
-                } else if (std::holds_alternative<double>(dataResult.values[i])) {
-                    std::cerr << std::get<double>(dataResult.values[i]);
-                } else if (std::holds_alternative<std::string>(dataResult.values[i])) {
-                    std::cerr << "\"" << std::get<std::string>(dataResult.values[i]) << "\"";
+        if (g_verbose) {
+            std::cerr << "[INFO] DataPreprocessor collected " << dataResult.values.size() << " DATA values\n";
+            if (!dataResult.values.empty()) {
+                std::cerr << "[INFO] DATA values: ";
+                for (size_t i = 0; i < dataResult.values.size() && i < 10; ++i) {
+                    if (i > 0) std::cerr << ", ";
+                    // Print the value based on its type
+                    if (std::holds_alternative<int>(dataResult.values[i])) {
+                        std::cerr << std::get<int>(dataResult.values[i]);
+                    } else if (std::holds_alternative<double>(dataResult.values[i])) {
+                        std::cerr << std::get<double>(dataResult.values[i]);
+                    } else if (std::holds_alternative<std::string>(dataResult.values[i])) {
+                        std::cerr << "\"" << std::get<std::string>(dataResult.values[i]) << "\"";
+                    }
                 }
+                if (dataResult.values.size() > 10) {
+                    std::cerr << " ... (" << (dataResult.values.size() - 10) << " more)";
+                }
+                std::cerr << "\n";
             }
-            if (dataResult.values.size() > 10) {
-                std::cerr << " ... (" << (dataResult.values.size() - 10) << " more)";
-            }
-            std::cerr << "\n";
+            std::cerr << "[INFO] DATA line restore points: " << dataResult.lineRestorePoints.size() << "\n";
+            std::cerr << "[INFO] DATA label restore points: " << dataResult.labelRestorePoints.size() << "\n";
         }
-        std::cerr << "[INFO] DATA line restore points: " << dataResult.lineRestorePoints.size() << "\n";
-        std::cerr << "[INFO] DATA label restore points: " << dataResult.labelRestorePoints.size() << "\n";
         
         source = dataResult.cleanedSource;  // Use cleaned source
         
@@ -142,7 +146,9 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
         }
         
         // Build CFG using new single-pass recursive builder
-        std::cerr << "[INFO] Building complete ProgramCFG (main + all SUBs/FUNCTIONs)...\n";
+        if (g_verbose) {
+            std::cerr << "[INFO] Building complete ProgramCFG (main + all SUBs/FUNCTIONs)...\n";
+        }
         CFGBuilder cfgBuilder;
         ProgramCFG* programCFG = cfgBuilder.buildProgramCFG(*ast);
         
@@ -151,63 +157,69 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
             return nullptr;
         }
         
-        std::cerr << "[INFO] ProgramCFG build successful!\n";
-        std::cerr << "[INFO] Main program CFG + " << programCFG->functionCFGs.size() 
-                  << " function/subroutine CFGs\n";
-        
-        // Debug: Show what lines are in the program
-        std::cerr << "[INFO] Program has " << ast->lines.size() << " lines\n";
-        for (size_t i = 0; i < ast->lines.size() && i < 20; ++i) {
-            const auto& line = ast->lines[i];
-            std::cerr << "[INFO]   Line " << line->lineNumber << " has " << line->statements.size() << " statements: ";
-            for (const auto& stmt : line->statements) {
-                std::cerr << static_cast<int>(stmt->getType()) << " ";
+        if (g_verbose) {
+            std::cerr << "[INFO] ProgramCFG build successful!\n";
+            std::cerr << "[INFO] Main program CFG + " << programCFG->functionCFGs.size() 
+                      << " function/subroutine CFGs\n";
+            
+            // Debug: Show what lines are in the program
+            std::cerr << "[INFO] Program has " << ast->lines.size() << " lines\n";
+            for (size_t i = 0; i < ast->lines.size() && i < 20; ++i) {
+                const auto& line = ast->lines[i];
+                std::cerr << "[INFO]   Line " << line->lineNumber << " has " << line->statements.size() << " statements: ";
+                for (const auto& stmt : line->statements) {
+                    std::cerr << static_cast<int>(stmt->getType()) << " ";
+                }
+                std::cerr << "\n";
             }
-            std::cerr << "\n";
+            
+            // Debug: Show data segment contents
+            const auto& dataSegment = semantic.getSymbolTable().dataSegment;
+            std::cerr << "[INFO] Data segment: " << dataSegment.values.size() << " values\n";
+            if (!dataSegment.values.empty()) {
+                std::cerr << "[INFO] DATA values: ";
+                for (size_t i = 0; i < dataSegment.values.size() && i < 10; ++i) {
+                    if (i > 0) std::cerr << ", ";
+                    std::cerr << "\"" << dataSegment.values[i] << "\"";
+                }
+                if (dataSegment.values.size() > 10) {
+                    std::cerr << " ... (" << (dataSegment.values.size() - 10) << " more)";
+                }
+                std::cerr << "\n";
+            }
         }
         
-        // Debug: Show data segment contents
-        const auto& dataSegment = semantic.getSymbolTable().dataSegment;
-        std::cerr << "[INFO] Data segment: " << dataSegment.values.size() << " values\n";
-        if (!dataSegment.values.empty()) {
-            std::cerr << "[INFO] DATA values: ";
-            for (size_t i = 0; i < dataSegment.values.size() && i < 10; ++i) {
-                if (i > 0) std::cerr << ", ";
-                std::cerr << "\"" << dataSegment.values[i] << "\"";
+        // Dump the CFGs only if trace flag is enabled
+        if (g_traceCFG) {
+            std::cerr << "\n╔══════════════════════════════════════════════════════════════════════════╗\n";
+            std::cerr << "║                    PROGRAM CFG ANALYSIS REPORT                           ║\n";
+            std::cerr << "╚══════════════════════════════════════════════════════════════════════════╝\n\n";
+            
+            std::cerr << "Total CFGs: " << (1 + programCFG->functionCFGs.size()) << "\n";
+            std::cerr << "  - Main Program: 1\n";
+            std::cerr << "  - Functions/Subs: " << programCFG->functionCFGs.size() << "\n\n";
+            
+            // Dump main CFG with comprehensive analysis
+            CFGBuilder mainBuilder;
+            mainBuilder.setCFGForDump(programCFG->mainCFG.get());
+            mainBuilder.dumpCFG("Main Program");
+            mainBuilder.setCFGForDump(nullptr); // Clear to prevent deletion
+            
+            // Dump function/SUB CFGs with comprehensive analysis
+            for (const auto& [name, cfg] : programCFG->functionCFGs) {
+                CFGBuilder funcBuilder;
+                funcBuilder.setCFGForDump(cfg.get());
+                funcBuilder.dumpCFG(name);
+                funcBuilder.setCFGForDump(nullptr); // Clear to prevent deletion
             }
-            if (dataSegment.values.size() > 10) {
-                std::cerr << " ... (" << (dataSegment.values.size() - 10) << " more)";
-            }
-            std::cerr << "\n";
-        }
-        
-        // Always dump the CFGs for verification using comprehensive report
-        std::cerr << "\n╔══════════════════════════════════════════════════════════════════════════╗\n";
-        std::cerr << "║                    PROGRAM CFG ANALYSIS REPORT                           ║\n";
-        std::cerr << "╚══════════════════════════════════════════════════════════════════════════╝\n\n";
-        
-        std::cerr << "Total CFGs: " << (1 + programCFG->functionCFGs.size()) << "\n";
-        std::cerr << "  - Main Program: 1\n";
-        std::cerr << "  - Functions/Subs: " << programCFG->functionCFGs.size() << "\n\n";
-        
-        // Dump main CFG with comprehensive analysis
-        CFGBuilder mainBuilder;
-        mainBuilder.setCFGForDump(programCFG->mainCFG.get());
-        mainBuilder.dumpCFG("Main Program");
-        mainBuilder.setCFGForDump(nullptr); // Clear to prevent deletion
-        
-        // Dump function/SUB CFGs with comprehensive analysis
-        for (const auto& [name, cfg] : programCFG->functionCFGs) {
-            CFGBuilder funcBuilder;
-            funcBuilder.setCFGForDump(cfg.get());
-            funcBuilder.dumpCFG(name);
-            funcBuilder.setCFGForDump(nullptr); // Clear to prevent deletion
         }
         
         // Generate QBE IL using new code generator v2
-        std::cerr << "\n========================================\n";
-        std::cerr << "CODE GENERATION: V2 (CFG-aware)\n";
-        std::cerr << "========================================\n\n";
+        if (g_showIL) {
+            std::cerr << "\n========================================\n";
+            std::cerr << "CODE GENERATION: V2 (CFG-aware)\n";
+            std::cerr << "========================================\n\n";
+        }
         
         fbc::QBECodeGeneratorV2 codegen(semantic);
         codegen.setDataValues(dataResult);  // Pass DATA values to code generator
@@ -220,10 +232,12 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
             return nullptr;
         }
         
-        std::cerr << "[INFO] QBE IL generation successful (" << qbeIL.size() << " bytes)\n";
-        std::cerr << "\n=== GENERATED QBE IL ===\n";
-        std::cerr << qbeIL;
-        std::cerr << "\n=== END QBE IL ===\n\n";
+        if (g_showIL) {
+            std::cerr << "[INFO] QBE IL generation successful (" << qbeIL.size() << " bytes)\n";
+            std::cerr << "\n=== GENERATED QBE IL ===\n";
+            std::cerr << qbeIL;
+            std::cerr << "\n=== END QBE IL ===\n\n";
+        }
         
         // Allocate and copy the result
         char *result = (char*)malloc(qbeIL.size() + 1);
@@ -251,6 +265,19 @@ void set_trace_cfg_impl(int enable) {
 /* Enable/disable AST tracing */
 void set_trace_ast_impl(int enable) {
     g_traceAST = (enable != 0);
+}
+
+/* Enable/disable IL output */
+void set_show_il_impl(int enable) {
+    g_showIL = (enable != 0);
+    if (enable) {
+        g_verbose = true;  // IL output implies verbose
+    }
+}
+
+/* Enable/disable verbose output */
+void set_verbose_impl(int enable) {
+    g_verbose = (enable != 0);
 }
 
 } // extern "C"

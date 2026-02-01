@@ -312,11 +312,17 @@ bool SemanticAnalyzer::analyze(Program& program, const CompilerOptions& options)
     while (!m_repeatStack.empty()) m_repeatStack.pop();
     
     // Two-pass analysis
-    std::cerr << "[DEBUG] Starting pass1_collectDeclarations" << std::endl;
+    if (getenv("FASTERBASIC_DEBUG")) {
+        std::cerr << "[DEBUG] Starting pass1_collectDeclarations" << std::endl;
+    }
     pass1_collectDeclarations(program);
-    std::cerr << "[DEBUG] Starting pass2_validate" << std::endl;
+    if (getenv("FASTERBASIC_DEBUG")) {
+        std::cerr << "[DEBUG] Starting pass2_validate" << std::endl;
+    }
     pass2_validate(program);
-    std::cerr << "[DEBUG] Finished pass2_validate" << std::endl;
+    if (getenv("FASTERBASIC_DEBUG")) {
+        std::cerr << "[DEBUG] Finished pass2_validate" << std::endl;
+    }
     
     // Final validation
     validateControlFlow(program);
@@ -893,8 +899,10 @@ void SemanticAnalyzer::collectDataStatements(Program& program) {
             std::string effectiveLabel = dataLabel.empty() ? pendingLabel : dataLabel;
             
             // DEBUG
-            fprintf(stderr, "[collectDataStatements] Processing DATA on line %d with label '%s'\n", 
-                   lineNumber, effectiveLabel.c_str());
+            if (getenv("FASTERBASIC_DEBUG")) {
+                fprintf(stderr, "[collectDataStatements] Processing DATA on line %d with label '%s'\n", 
+                       lineNumber, effectiveLabel.c_str());
+            }
             
             for (const auto& stmt : line->statements) {
                 if (stmt->getType() == ASTNodeType::STMT_DATA) {
@@ -1250,16 +1258,20 @@ void SemanticAnalyzer::processDataStatement(const DataStatement& stmt, int lineN
     if (lineNumber > 0) {
         m_symbolTable.dataSegment.restorePoints[lineNumber] = currentIndex;
         // DEBUG
-        fprintf(stderr, "[processDataStatement] Recorded line %d -> index %zu\n", 
-               lineNumber, currentIndex);
+        if (getenv("FASTERBASIC_DEBUG")) {
+            fprintf(stderr, "[processDataStatement] Recorded line %d -> index %zu\n", 
+                   lineNumber, currentIndex);
+        }
     }
     
     // Record restore point by label (if present on this DATA line)
     if (!dataLabel.empty()) {
         m_symbolTable.dataSegment.labelRestorePoints[dataLabel] = currentIndex;
         // DEBUG
-        fprintf(stderr, "[processDataStatement] Recorded label '%s' -> index %zu\n", 
-               dataLabel.c_str(), currentIndex);
+        if (getenv("FASTERBASIC_DEBUG")) {
+            fprintf(stderr, "[processDataStatement] Recorded label '%s' -> index %zu\n", 
+                   dataLabel.c_str(), currentIndex);
+        }
     }
     
     // Add values to data segment
@@ -1288,9 +1300,13 @@ void SemanticAnalyzer::collectForEachVariables(Program& program) {
 // =============================================================================
 
 void SemanticAnalyzer::pass2_validate(Program& program) {
-    std::cerr << "[DEBUG] pass2_validate: processing " << program.lines.size() << " lines" << std::endl;
+    if (getenv("FASTERBASIC_DEBUG")) {
+        std::cerr << "[DEBUG] pass2_validate: processing " << program.lines.size() << " lines" << std::endl;
+    }
     for (const auto& line : program.lines) {
-        std::cerr << "[DEBUG] pass2_validate: line " << line->lineNumber << " has " << line->statements.size() << " statements" << std::endl;
+        if (getenv("FASTERBASIC_DEBUG")) {
+            std::cerr << "[DEBUG] pass2_validate: line " << line->lineNumber << " has " << line->statements.size() << " statements" << std::endl;
+        }
         validateProgramLine(*line);
     }
 }
@@ -1304,7 +1320,9 @@ void SemanticAnalyzer::validateProgramLine(const ProgramLine& line) {
 }
 
 void SemanticAnalyzer::validateStatement(const Statement& stmt) {
-    std::cerr << "[DEBUG] validateStatement called for type: " << (int)stmt.getType() << std::endl;
+    if (getenv("FASTERBASIC_DEBUG")) {
+        std::cerr << "[DEBUG] validateStatement called for type: " << (int)stmt.getType() << std::endl;
+    }
     switch (stmt.getType()) {
         case ASTNodeType::STMT_TRY_CATCH:
             validateTryCatchStatement(static_cast<const TryCatchStatement&>(stmt));
@@ -1955,7 +1973,9 @@ void SemanticAnalyzer::validateIfStatement(const IfStatement& stmt) {
 }
 
 void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
-    std::cerr << "[DEBUG] validateForStatement called for variable: " << stmt.variable << std::endl;
+    if (getenv("FASTERBASIC_DEBUG")) {
+        std::cerr << "[DEBUG] validateForStatement called for variable: " << stmt.variable << std::endl;
+    }
     // FOR loop variables are ALWAYS plain integers (no type suffix)
     // Strip any suffix from the variable name and register as INTEGER
     std::string plainVarName = stmt.variable;
@@ -1995,7 +2015,9 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
     ctx.variable = plainVarName;
     ctx.location = stmt.location;
     m_forStack.push(ctx);
-    std::cerr << "[DEBUG] FOR stack PUSH at " << stmt.location.toString() << ", stack size now: " << m_forStack.size() << std::endl;
+    if (getenv("FASTERBASIC_DEBUG")) {
+        std::cerr << "[DEBUG] FOR stack PUSH at " << stmt.location.toString() << ", stack size now: " << m_forStack.size() << std::endl;
+    }
     
     // Validate body statements
     for (const auto& bodyStmt : stmt.body) {
@@ -2003,9 +2025,13 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
     }
     
     // Pop stack since NEXT is now consumed by parser and body is self-contained
-    std::cerr << "[DEBUG] FOR stack POP after body, stack size before pop: " << m_forStack.size() << std::endl;
+    if (getenv("FASTERBASIC_DEBUG")) {
+        std::cerr << "[DEBUG] FOR stack POP after body, stack size before pop: " << m_forStack.size() << std::endl;
+    }
     m_forStack.pop();
-    std::cerr << "[DEBUG] FOR stack size after pop: " << m_forStack.size() << std::endl;
+    if (getenv("FASTERBASIC_DEBUG")) {
+        std::cerr << "[DEBUG] FOR stack size after pop: " << m_forStack.size() << std::endl;
+    }
 }
 
 void SemanticAnalyzer::validateForInStatement(ForInStatement& stmt) {
@@ -3339,11 +3365,15 @@ void SemanticAnalyzer::useVariable(const std::string& name, const SourceLocation
     if (!sym) {
         // Implicitly declare using TypeDescriptor
         TypeDescriptor typeDesc = inferTypeFromNameD(name);
-        std::cerr << "[DEBUG] useVariable: declaring '" << name << "' with inferred type=" 
-                  << static_cast<int>(typeDesc.baseType) << std::endl;
+        if (getenv("FASTERBASIC_DEBUG")) {
+            std::cerr << "[DEBUG] useVariable: declaring '" << name << "' with inferred type=" 
+                      << static_cast<int>(typeDesc.baseType) << std::endl;
+        }
         sym = declareVariableD(name, typeDesc, loc, false);
-        std::cerr << "[DEBUG] useVariable: after declareVariableD, sym->typeDesc.baseType=" 
-                  << static_cast<int>(sym->typeDesc.baseType) << std::endl;
+        if (getenv("FASTERBASIC_DEBUG")) {
+            std::cerr << "[DEBUG] useVariable: after declareVariableD, sym->typeDesc.baseType=" 
+                      << static_cast<int>(sym->typeDesc.baseType) << std::endl;
+        }
     }
     sym->isUsed = true;
 }
@@ -3458,11 +3488,15 @@ std::string SemanticAnalyzer::mangleNameWithSuffix(const std::string& name, Toke
 // =============================================================================
 
 void SemanticAnalyzer::validateControlFlow(Program& program) {
-    std::cerr << "[DEBUG] validateControlFlow called, FOR stack size: " << m_forStack.size() << std::endl;
+    if (getenv("FASTERBASIC_DEBUG")) {
+        std::cerr << "[DEBUG] validateControlFlow called, FOR stack size: " << m_forStack.size() << std::endl;
+    }
     // Check for unclosed loops
     if (!m_forStack.empty()) {
         const auto& ctx = m_forStack.top();
-        std::cerr << "[DEBUG] FOR stack NOT empty! Top entry: " << ctx.location.toString() << std::endl;
+        if (getenv("FASTERBASIC_DEBUG")) {
+            std::cerr << "[DEBUG] FOR stack NOT empty! Top entry: " << ctx.location.toString() << std::endl;
+        }
         error(SemanticErrorType::FOR_WITHOUT_NEXT,
               "FOR loop starting at " + ctx.location.toString() + " has no matching NEXT",
               ctx.location);

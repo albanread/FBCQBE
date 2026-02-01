@@ -623,10 +623,9 @@ void ASTEmitter::emitInputStatement(const InputStatement* stmt) {
 }
 
 void ASTEmitter::emitEndStatement(const EndStatement* stmt) {
-    // END statement - just a marker
-    // The CFG builder should have created edges to the exit block
-    // Don't emit anything here - let the CFG terminator handle the jump
-    builder_.emitComment("END statement");
+    // END statement - terminate execution
+    builder_.emitComment("END statement - program exit");
+    builder_.emitReturn("0");
 }
 
 void ASTEmitter::emitDimStatement(const DimStatement* stmt) {
@@ -1322,48 +1321,108 @@ std::string ASTEmitter::getQBEComparisonOp(TokenType op) {
 // === FOR Loop Helpers ===
 
 void ASTEmitter::emitForInit(const ForStatement* stmt) {
-    // Initialize loop variable: var = start
-    std::string startValue = emitExpression(stmt->start.get());
+    // FOR loop initialization: evaluate start, limit, and step ONCE
+    // All values must be treated as integers (BASIC requirement)
+    
+    // 1. Evaluate and store start value to loop variable
+    std::string startValue = emitExpressionAs(stmt->start.get(), BaseType::INTEGER);
     storeVariable(stmt->variable, startValue);
+    
+    // 2. Allocate and initialize limit variable (constant during loop)
+    std::string limitVar = "__for_limit_" + stmt->variable;
+    std::string limitAddr = builder_.newTemp();
+    builder_.emitRaw("    " + limitAddr + " =l alloc4 4");
+    std::string limitValue = emitExpressionAs(stmt->end.get(), BaseType::INTEGER);
+    builder_.emitRaw("    storew " + limitValue + ", " + limitAddr);
+    
+    // Store the address for later use (we'll use a map)
+    forLoopTempAddresses_[limitVar] = limitAddr;
+    
+    // 3. Allocate and initialize step variable (constant during loop, default to 1)
+    std::string stepVar = "__for_step_" + stmt->variable;
+    std::string stepAddr = builder_.newTemp();
+    builder_.emitRaw("    " + stepAddr + " =l alloc4 4");
+    std::string stepValue;
+    if (stmt->step) {
+        stepValue = emitExpressionAs(stmt->step.get(), BaseType::INTEGER);
+    } else {
+        // Default step is 1
+        stepValue = builder_.newTemp();
+        builder_.emitRaw("    " + stepValue + " =w copy 1");
+    }
+    builder_.emitRaw("    storew " + stepValue + ", " + stepAddr);
+    forLoopTempAddresses_[stepVar] = stepAddr;
 }
 
 std::string ASTEmitter::emitForCondition(const ForStatement* stmt) {
-    // Load loop variable
+    // FOR loop condition: check if loop should continue
+    // Load loop variable and limit, load step, and do simple comparison
+    
+    // Load loop variable (may have been modified in loop body)
     std::string loopVar = loadVariable(stmt->variable);
     
-    // Evaluate end value
-    std::string endValue = emitExpression(stmt->end.get());
+    // Load limit (constant, evaluated once at init)
+    std::string limitVar = "__for_limit_" + stmt->variable;
+    std::string limitAddr = forLoopTempAddresses_[limitVar];
+    std::string limitValue = builder_.newTemp();
+    builder_.emitRaw("    " + limitValue + " =w loadw " + limitAddr);
     
-    // Get variable type
-    BaseType varType = getVariableType(stmt->variable);
+    // Load step value to check sign
+    std::string stepVar = "__for_step_" + stmt->variable;
+    std::string stepAddr = forLoopTempAddresses_[stepVar];
+    std::string stepValue = builder_.newTemp();
+    builder_.emitRaw("    " + stepValue + " =w loadw " + stepAddr);
     
-    // Check if step is negative (TODO: handle negative step)
-    // For now, assume positive step: var <= end
+    // Check if step is negative
+    std::string stepIsNeg = builder_.newTemp();
+    builder_.emitRaw("    " + stepIsNeg + " =w csltw " + stepValue + ", 0");
+    
+    // For positive step: continue while loopVar <= limit
+    // For negative step: continue while loopVar >= limit
+    // We compute both and select based on sign
+    
+    // Positive case: loopVar <= limit is !(loopVar > limit)
+    std::string loopGtLimit = builder_.newTemp();
+    builder_.emitRaw("    " + loopGtLimit + " =w csgtw " + loopVar + ", " + limitValue);
+    std::string posCondition = builder_.newTemp();
+    builder_.emitRaw("    " + posCondition + " =w xor " + loopGtLimit + ", 1");
+    
+    // Negative case: loopVar >= limit is !(loopVar < limit)
+    std::string loopLtLimit = builder_.newTemp();
+    builder_.emitRaw("    " + loopLtLimit + " =w csltw " + loopVar + ", " + limitValue);
+    std::string negCondition = builder_.newTemp();
+    builder_.emitRaw("    " + negCondition + " =w xor " + loopLtLimit + ", 1");
+    
+    // Select: if stepIsNeg then negCondition else posCondition
+    // Use arithmetic: result = stepIsNeg * negCondition + (1 - stepIsNeg) * posCondition
+    std::string negPart = builder_.newTemp();
+    builder_.emitRaw("    " + negPart + " =w and " + stepIsNeg + ", " + negCondition);
+    std::string notStepIsNeg = builder_.newTemp();
+    builder_.emitRaw("    " + notStepIsNeg + " =w xor " + stepIsNeg + ", 1");
+    std::string posPart = builder_.newTemp();
+    builder_.emitRaw("    " + posPart + " =w and " + notStepIsNeg + ", " + posCondition);
     std::string result = builder_.newTemp();
-    builder_.emitCompare(result, typeManager_.getQBEType(varType), "sle", loopVar, endValue);
+    builder_.emitRaw("    " + result + " =w or " + negPart + ", " + posPart);
     
     return result;
 }
 
 void ASTEmitter::emitForIncrement(const ForStatement* stmt) {
-    // Load current loop variable value
+    // FOR loop increment: add step to loop variable
+    // Step was evaluated once at init and is constant
+    
+    // Load current loop variable value (may have been modified in body)
     std::string loopVar = loadVariable(stmt->variable);
     
-    // Get step value (default to 1 if not specified)
-    std::string stepValue;
-    if (stmt->step) {
-        stepValue = emitExpression(stmt->step.get());
-    } else {
-        stepValue = "1";
-    }
-    
-    // Get variable type
-    BaseType varType = getVariableType(stmt->variable);
-    std::string qbeType = typeManager_.getQBEType(varType);
+    // Load step value (constant, evaluated once at init)
+    std::string stepVar = "__for_step_" + stmt->variable;
+    std::string stepAddr = forLoopTempAddresses_[stepVar];
+    std::string stepValue = builder_.newTemp();
+    builder_.emitRaw("    " + stepValue + " =w loadw " + stepAddr);
     
     // Increment: var = var + step
     std::string newValue = builder_.newTemp();
-    builder_.emitBinary(newValue, qbeType, "add", loopVar, stepValue);
+    builder_.emitBinary(newValue, "w", "add", loopVar, stepValue);
     
     // Store back to variable
     storeVariable(stmt->variable, newValue);

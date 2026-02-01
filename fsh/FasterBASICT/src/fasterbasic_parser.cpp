@@ -174,9 +174,11 @@ std::unique_ptr<Program> Parser::parse(const std::vector<Token>& tokens, const s
     m_autoLineNumber = m_autoLineStart;
 
     // DEBUG: Show first 50 tokens to see if DATA is there
-    fprintf(stderr, "[Parser::parse] First 50 tokens:\n");
-    for (size_t i = 0; i < tokens.size() && i < 50; i++) {
-        fprintf(stderr, "  [%zu] type=%d value='%s'\n", i, (int)tokens[i].type, tokens[i].value.c_str());
+    if (getenv("FASTERBASIC_DEBUG")) {
+        fprintf(stderr, "[Parser::parse] First 50 tokens:\n");
+        for (size_t i = 0; i < tokens.size() && i < 50; i++) {
+            fprintf(stderr, "  [%zu] type=%d value='%s'\n", i, (int)tokens[i].type, tokens[i].value.c_str());
+        }
     }
 
     // FIRST: Expand all INCLUDE statements (preprocessing phase)
