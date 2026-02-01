@@ -109,6 +109,11 @@ public:
      * Emit runtime function declarations (external)
      */
     void emitRuntimeDeclarations();
+    
+    /**
+     * Emit GOSUB return stack (global data for GOSUB/RETURN)
+     */
+    void emitGosubReturnStack();
 
     // === Main Program Generation ===
     
@@ -217,10 +222,12 @@ private:
     // === String Collection (Phase 1) ===
     
     /**
-     * Collect all string literals from the program
+     * Collect all string literals from the program and all SUBs/FUNCTIONs
      * @param program Program AST
+     * @param programCFG Program CFG containing all function/sub CFGs
      */
-    void collectStringLiterals(const FasterBASIC::Program* program);
+    void collectStringLiterals(const FasterBASIC::Program* program,
+                              const FasterBASIC::ProgramCFG* programCFG);
     
     /**
      * Recursively collect strings from a statement

@@ -7,7 +7,7 @@
 # Don't exit on error - we want to run all tests
 # set -e
 
-COMPILER="./qbe_basic_integrated/qbe_basic"
+COMPILER="./qbe_basic_integrated/fbc_qbe"
 RUNTIME_DIR="./qbe_basic_integrated/runtime"
 TEST_DIR="./tests"
 TEMP_DIR="./test_output"
@@ -46,19 +46,11 @@ run_test() {
 
     echo -n "Testing: ${test_name} ... "
 
-    # Compile
-    if ! $COMPILER "$test_file" > "$TEMP_DIR/${test_name}.s" 2>"$TEMP_DIR/${test_name}_compile.err"; then
+    # Compile (fbc_qbe does compilation and linking)
+    if ! $COMPILER "$test_file" -o "$TEMP_DIR/${test_name}" >"$TEMP_DIR/${test_name}_compile.out" 2>&1; then
         echo -e "${RED}COMPILE FAIL${NC}"
         FAILED_TESTS=$((FAILED_TESTS + 1))
         FAILED_TEST_NAMES+=("$test_name (compile error)")
-        return 1
-    fi
-
-    # Link
-    if ! gcc "$TEMP_DIR/${test_name}.s" $RUNTIME_DIR/*.c -I$RUNTIME_DIR -lm -o "$TEMP_DIR/${test_name}" 2>"$TEMP_DIR/${test_name}_link.err"; then
-        echo -e "${RED}LINK FAIL${NC}"
-        FAILED_TESTS=$((FAILED_TESTS + 1))
-        FAILED_TEST_NAMES+=("$test_name (link error)")
         return 1
     fi
 

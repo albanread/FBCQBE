@@ -48,7 +48,13 @@ void CFGBuilder::addEdge(int fromBlockId, int toBlockId, const std::string& labe
     CFGEdge edge;
     edge.sourceBlock = fromBlockId;
     edge.targetBlock = toBlockId;
-    edge.type = EdgeType::FALLTHROUGH;
+    
+    // Set edge type based on label
+    if (label == "call") {
+        edge.type = EdgeType::CALL;
+    } else {
+        edge.type = EdgeType::FALLTHROUGH;
+    }
     edge.label = label;
     
     m_cfg->edges.push_back(edge);

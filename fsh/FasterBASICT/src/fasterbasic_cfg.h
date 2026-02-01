@@ -134,6 +134,9 @@ public:
     int entryBlock;     // Entry point (usually block 0)
     int exitBlock;      // Exit point
     
+    // GOSUB/RETURN tracking for sparse dispatch optimization
+    std::set<int> gosubReturnBlocks;  // Block IDs that are GOSUB return points
+    
     // DO loop tracking (for old codegen compatibility)
     struct DoLoopBlocks {
         int headerBlock;

@@ -41,7 +41,7 @@ std::string QBECodeGeneratorV2::generateProgram(const Program* program,
     symbolMapper_->reset();
     
     // PHASE 1: Collect all string literals from the entire program
-    collectStringLiterals(program);
+    collectStringLiterals(program, programCFG);
     
     // Emit file header
     emitFileHeader();
@@ -51,6 +51,9 @@ std::string QBECodeGeneratorV2::generateProgram(const Program* program,
     
     // PHASE 2: Emit string constant pool (global data section)
     builder_->emitStringPool();
+    
+    // Emit GOSUB return stack (global data for GOSUB/RETURN)
+    emitGosubReturnStack();
     
     // Emit DATA segment
     emitDataSegment();
@@ -234,6 +237,27 @@ void QBECodeGeneratorV2::emitRuntimeDeclarations() {
     builder_->emitBlankLine();
 }
 
+void QBECodeGeneratorV2::emitGosubReturnStack() {
+    builder_->emitBlankLine();
+    builder_->emitComment("=== GOSUB Return Stack ===");
+    builder_->emitComment("Stack for GOSUB/RETURN statements (16 levels deep)");
+    builder_->emitBlankLine();
+    
+    // Emit return stack: 16-word array to hold return block IDs
+    builder_->emitRaw("export data $gosub_return_stack = { ");
+    for (int i = 0; i < 16; i++) {
+        builder_->emitRaw("w 0");
+        if (i < 15) {
+            builder_->emitRaw(", ");
+        }
+    }
+    builder_->emitRaw(" }\n");
+    
+    // Emit stack pointer: current depth (0 = empty)
+    builder_->emitRaw("export data $gosub_return_sp = { w 0 }\n");
+    builder_->emitBlankLine();
+}
+
 // === Main Program Generation ===
 
 void QBECodeGeneratorV2::generateMainFunction(const ControlFlowGraph* cfg) {
@@ -370,16 +394,35 @@ std::vector<FunctionSymbol*> QBECodeGeneratorV2::getFunctions() {
 
 // === String Collection ===
 
-void QBECodeGeneratorV2::collectStringLiterals(const Program* program) {
+void QBECodeGeneratorV2::collectStringLiterals(const Program* program, const ProgramCFG* programCFG) {
     if (!program) return;
     
-    // Scan all program lines for string literals
+    // Scan all main program lines for string literals
     for (const auto& line : program->lines) {
         if (!line) continue;
         
         for (const auto& stmt : line->statements) {
             if (stmt) {
                 collectStringsFromStatement(stmt.get());
+            }
+        }
+    }
+    
+    // Scan all SUBs/FUNCTIONs for string literals
+    if (programCFG) {
+        for (const auto& [name, cfg] : programCFG->functionCFGs) {
+            if (!cfg) continue;
+            
+            // Scan all blocks in this function/sub CFG
+            for (const auto& block : cfg->blocks) {
+                if (!block) continue;
+                
+                // Scan all statements in this block
+                for (const Statement* stmt : block->statements) {
+                    if (stmt) {
+                        collectStringsFromStatement(stmt);
+                    }
+                }
             }
         }
     }
@@ -445,6 +488,17 @@ void QBECodeGeneratorV2::collectStringsFromStatement(const Statement* stmt) {
             }
             for (const auto& s : whileStmt->body) {
                 if (s) collectStringsFromStatement(s.get());
+            }
+            break;
+        }
+        
+        case ASTNodeType::STMT_CALL: {
+            const auto* callStmt = static_cast<const CallStatement*>(stmt);
+            // Scan arguments of the CALL statement
+            for (const auto& arg : callStmt->arguments) {
+                if (arg) {
+                    collectStringsFromExpression(arg.get());
+                }
             }
             break;
         }

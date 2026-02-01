@@ -80,6 +80,9 @@ BasicBlock* CFGBuilder::handleGosub(const GosubStatement& stmt, BasicBlock* inco
     // Create the return point block (where execution continues after RETURN)
     BasicBlock* returnBlock = createBlock("Return_Point");
     
+    // Track this block as a GOSUB return point for sparse dispatch optimization
+    m_cfg->gosubReturnBlocks.insert(returnBlock->id);
+    
     // Edge A: Call edge to subroutine target
     int targetBlockId = resolveLineNumberToBlock(stmt.lineNumber);
     
@@ -142,11 +145,17 @@ BasicBlock* CFGBuilder::handleReturn(const ReturnStatement& stmt, BasicBlock* in
             std::cout << "[CFG] RETURN jumps to return point block " << sub->returnBlockId << std::endl;
         }
     } else {
-        // RETURN outside of GOSUB context - this is an error in structured code
-        // but in BASIC it might just end the program
-        // We'll treat it as a terminator with no successor
+        // RETURN from GOSUB - create a RETURN edge (no static target)
+        // The code generator will emit runtime dispatch based on return stack
+        CFGEdge edge;
+        edge.sourceBlock = incoming->id;
+        edge.targetBlock = -1;  // No static target - determined at runtime
+        edge.type = EdgeType::RETURN;
+        edge.label = "return";
+        m_cfg->edges.push_back(edge);
+        
         if (m_debugMode) {
-            std::cout << "[CFG] Warning: RETURN outside of GOSUB context" << std::endl;
+            std::cout << "[CFG] RETURN creates dynamic return edge (GOSUB dispatch)" << std::endl;
         }
     }
     
@@ -245,6 +254,9 @@ BasicBlock* CFGBuilder::handleOnGosub(const OnGosubStatement& stmt, BasicBlock* 
     
     // Create return point block
     BasicBlock* returnBlock = createBlock("OnGosub_Return_Point");
+    
+    // Track this block as a GOSUB return point for sparse dispatch optimization
+    m_cfg->gosubReturnBlocks.insert(returnBlock->id);
     
     // Add call edges to all targets
     for (size_t i = 0; i < stmt.lineNumbers.size(); i++) {
