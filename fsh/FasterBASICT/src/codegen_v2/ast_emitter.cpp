@@ -263,9 +263,116 @@ std::string ASTEmitter::emitIIFExpression(const IIFExpression* expr) {
 }
 
 std::string ASTEmitter::emitFunctionCall(const FunctionCallExpression* expr) {
-    // TODO: Implement function calls
-    // This will handle intrinsic functions (LEN, CHR$, etc.) and user-defined functions
-    builder_.emitComment("TODO: function call " + expr->name);
+    std::string funcName = expr->name;
+    
+    // Convert to uppercase for case-insensitive matching
+    std::string upperName = funcName;
+    std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
+    
+    // Check for intrinsic/built-in functions
+    if (upperName == "LEN") {
+        // LEN(string$) - returns length of string
+        if (expr->arguments.size() != 1) {
+            builder_.emitComment("ERROR: LEN requires exactly 1 argument");
+            return "0";
+        }
+        std::string strArg = emitExpression(expr->arguments[0].get());
+        return runtime_.emitStringLen(strArg);
+    }
+    
+    if (upperName == "MID" || upperName == "MID$") {
+        // MID$(string$, start[, length]) - substring extraction
+        if (expr->arguments.size() < 2 || expr->arguments.size() > 3) {
+            builder_.emitComment("ERROR: MID$ requires 2 or 3 arguments");
+            return "0";
+        }
+        std::string strArg = emitExpression(expr->arguments[0].get());
+        std::string startArg = emitExpression(expr->arguments[1].get());
+        std::string lenArg = expr->arguments.size() == 3 ? 
+                             emitExpression(expr->arguments[2].get()) : "";
+        return runtime_.emitMid(strArg, startArg, lenArg);
+    }
+    
+    if (upperName == "LEFT" || upperName == "LEFT$") {
+        // LEFT$(string$, n) - left n characters
+        if (expr->arguments.size() != 2) {
+            builder_.emitComment("ERROR: LEFT$ requires exactly 2 arguments");
+            return "0";
+        }
+        std::string strArg = emitExpression(expr->arguments[0].get());
+        std::string lenArg = emitExpression(expr->arguments[1].get());
+        return runtime_.emitLeft(strArg, lenArg);
+    }
+    
+    if (upperName == "RIGHT" || upperName == "RIGHT$") {
+        // RIGHT$(string$, n) - right n characters
+        if (expr->arguments.size() != 2) {
+            builder_.emitComment("ERROR: RIGHT$ requires exactly 2 arguments");
+            return "0";
+        }
+        std::string strArg = emitExpression(expr->arguments[0].get());
+        std::string lenArg = emitExpression(expr->arguments[1].get());
+        return runtime_.emitRight(strArg, lenArg);
+    }
+    
+    if (upperName == "CHR" || upperName == "CHR$") {
+        // CHR$(n) - character from ASCII code
+        if (expr->arguments.size() != 1) {
+            builder_.emitComment("ERROR: CHR$ requires exactly 1 argument");
+            return "0";
+        }
+        std::string codeArg = emitExpression(expr->arguments[0].get());
+        return runtime_.emitChr(codeArg);
+    }
+    
+    if (upperName == "ASC") {
+        // ASC(string$) - ASCII code of first character
+        if (expr->arguments.size() != 1) {
+            builder_.emitComment("ERROR: ASC requires exactly 1 argument");
+            return "0";
+        }
+        std::string strArg = emitExpression(expr->arguments[0].get());
+        return runtime_.emitAsc(strArg);
+    }
+    
+    if (upperName == "STR" || upperName == "STR$") {
+        // STR$(n) - convert number to string
+        if (expr->arguments.size() != 1) {
+            builder_.emitComment("ERROR: STR$ requires exactly 1 argument");
+            return "0";
+        }
+        std::string numArg = emitExpression(expr->arguments[0].get());
+        BaseType argType = getExpressionType(expr->arguments[0].get());
+        return runtime_.emitStr(numArg, argType);
+    }
+    
+    if (upperName == "VAL") {
+        // VAL(string$) - convert string to number
+        if (expr->arguments.size() != 1) {
+            builder_.emitComment("ERROR: VAL requires exactly 1 argument");
+            return "0";
+        }
+        std::string strArg = emitExpression(expr->arguments[0].get());
+        return runtime_.emitVal(strArg);
+    }
+    
+    // Note: INSTR not yet implemented in runtime library
+    if (upperName == "INSTR") {
+        builder_.emitComment("TODO: INSTR function not yet implemented");
+        return "0";
+    }
+    
+    // Check for user-defined functions (DEF FN)
+    const auto& symbolTable = semantic_.getSymbolTable();
+    auto funcIt = symbolTable.functions.find(funcName);
+    if (funcIt != symbolTable.functions.end()) {
+        // User-defined function call
+        builder_.emitComment("TODO: user-defined function call " + funcName);
+        return "0";
+    }
+    
+    // Unknown function
+    builder_.emitComment("ERROR: unknown function " + funcName);
     return "0";
 }
 

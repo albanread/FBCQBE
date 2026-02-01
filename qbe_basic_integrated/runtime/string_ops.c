@@ -333,3 +333,23 @@ BasicString* str_replace(BasicString* str, BasicString* find, BasicString* repla
     
     return result;
 }
+
+// =============================================================================
+// BASIC Intrinsic Function Wrappers
+// =============================================================================
+
+// LEN(string$) - Return length of string
+int32_t basic_string_len(BasicString* str) {
+    return str_length(str);
+}
+
+// String concatenation wrapper for BASIC
+BasicString* basic_string_concat(BasicString* a, BasicString* b) {
+    return str_concat(a, b);
+}
+
+// String comparison wrapper for BASIC
+// Returns: -1 if a < b, 0 if a == b, 1 if a > b
+int32_t basic_string_compare(BasicString* a, BasicString* b) {
+    return str_compare(a, b);
+}

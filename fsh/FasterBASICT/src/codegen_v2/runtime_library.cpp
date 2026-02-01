@@ -41,7 +41,24 @@ std::string RuntimeLibrary::emitStringConcat(const std::string& left, const std:
 }
 
 std::string RuntimeLibrary::emitStringLen(const std::string& stringPtr) {
-    return emitRuntimeCall("basic_string_len", "w", "l " + stringPtr);
+    // BasicString struct layout:
+    //   offset 0: char* data
+    //   offset 8: size_t length (8 bytes on 64-bit)
+    //   offset 16: size_t capacity
+    //   offset 24: int32_t refcount
+    // We want to load the length field at offset 8
+    
+    std::string lengthAddr = builder_.newTemp();
+    builder_.emitBinary(lengthAddr, "l", "add", stringPtr, "8");
+    
+    std::string lengthVal = builder_.newTemp();
+    builder_.emitLoad(lengthVal, "l", lengthAddr);  // Load size_t (64-bit)
+    
+    // Truncate to 32-bit for BASIC INTEGER compatibility
+    std::string result = builder_.newTemp();
+    builder_.emitTrunc(result, "w", lengthVal);
+    
+    return result;
 }
 
 std::string RuntimeLibrary::emitChr(const std::string& charCode) {
