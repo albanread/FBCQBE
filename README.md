@@ -1,5 +1,7 @@
 # FBCQBE - FasterBASIC QBE Backend
 
+Working on V2 of the CFG and V2 of the codegen, so right now everything is very broken, but it should be more maintainable when it works.
+
 [![Build Status](https://github.com/albanread/FBCQBE/actions/workflows/build.yml/badge.svg)](https://github.com/albanread/FBCQBE/actions)
 
 A native-code ahead-of-time (AOT) compiler backend for FasterBASIC using the QBE intermediate language.
