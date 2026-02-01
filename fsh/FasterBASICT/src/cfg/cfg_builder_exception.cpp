@@ -99,8 +99,13 @@ BasicBlock* CFGBuilder::buildTryCatch(
         
         if (m_debugMode) {
             std::cout << "[CFG] Processing CATCH clause " << i;
-            if (!catchClause.exceptionVariable.empty()) {
-                std::cout << " (variable: " << catchClause.exceptionVariable << ")";
+            if (!catchClause.errorCodes.empty()) {
+                std::cout << " (error codes: ";
+                for (size_t j = 0; j < catchClause.errorCodes.size(); j++) {
+                    if (j > 0) std::cout << ", ";
+                    std::cout << catchClause.errorCodes[j];
+                }
+                std::cout << ")";
             }
             std::cout << std::endl;
         }

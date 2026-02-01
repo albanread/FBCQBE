@@ -52,18 +52,18 @@ void CFGBuilder::collectJumpTargetsFromStatement(const Statement* stmt) {
     
     // Check for GOTO statement
     if (auto* gotoStmt = dynamic_cast<const GotoStatement*>(stmt)) {
-        m_jumpTargets.insert(gotoStmt->targetLine);
+        m_jumpTargets.insert(gotoStmt->lineNumber);
         if (m_debugMode) {
-            std::cout << "[CFG] Found GOTO target: line " << gotoStmt->targetLine << std::endl;
+            std::cout << "[CFG] Found GOTO target: line " << gotoStmt->lineNumber << std::endl;
         }
         return;
     }
     
     // Check for GOSUB statement
     if (auto* gosubStmt = dynamic_cast<const GosubStatement*>(stmt)) {
-        m_jumpTargets.insert(gosubStmt->targetLine);
+        m_jumpTargets.insert(gosubStmt->lineNumber);
         if (m_debugMode) {
-            std::cout << "[CFG] Found GOSUB target: line " << gosubStmt->targetLine << std::endl;
+            std::cout << "[CFG] Found GOSUB target: line " << gosubStmt->lineNumber << std::endl;
         }
         return;
     }
