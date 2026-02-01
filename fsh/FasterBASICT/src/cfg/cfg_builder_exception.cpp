@@ -1,125 +1,159 @@
 //
 // cfg_builder_exception.cpp
-// FasterBASIC - Control Flow Graph Builder Exception Handlers
+// FasterBASIC - Control Flow Graph Builder Exception Handler (V2)
 //
-// Contains TRY/CATCH/FINALLY processing.
+// Contains TRY...CATCH...FINALLY statement processing.
 // Part of modular CFG builder split (February 2026).
+//
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
 //
 
 #include "cfg_builder.h"
-#include <algorithm>
-#include <sstream>
 #include <iostream>
-#include <functional>
+#include <stdexcept>
 
 namespace FasterBASIC {
 
 // =============================================================================
-// TRY/CATCH/FINALLY Handler
+// TRY...CATCH...FINALLY Handler
 // =============================================================================
-
-void CFGBuilder::processTryCatchStatement(const TryCatchStatement& stmt, BasicBlock* currentBlock) {
-    // TRY/CATCH/FINALLY creates an exception handling structure
-    // Structure:
-    //   - TRY block (current): Sets up exception context (setjmp)
-    //   - TRY body block: Executes TRY statements
-    //   - Dispatch block: Checks error code and routes to appropriate CATCH
-    //   - CATCH blocks: One per CATCH clause
-    //   - FINALLY block: Optional, executes cleanup code
-    //   - Exit block: Continue after END TRY
-    
-    // The TRY statement (setup) stays in current block
-    int trySetupBlockId = currentBlock->id;
-    
-    // Create TRY body block
-    BasicBlock* tryBodyBlock = createNewBlock("TRY Body");
-    int tryBodyBlockId = tryBodyBlock->id;
-    
-    // Process TRY block statements
-    m_currentBlock = tryBodyBlock;
-    for (const auto& tryStmt : stmt.tryBlock) {
-        if (tryStmt) {
-            processStatement(*tryStmt, m_currentBlock, 0);
-        }
+//
+// TRY...CATCH...FINALLY...END TRY
+// Creates blocks for try body, catch clauses, finally block, and exit
+// Exception edges connect throw points to catch handlers
+//
+BasicBlock* CFGBuilder::buildTryCatch(
+    const TryCatchStatement& stmt,
+    BasicBlock* incoming,
+    LoopContext* loop,
+    SelectContext* select,
+    TryContext* outerTry,
+    SubroutineContext* sub
+) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building TRY...CATCH...FINALLY statement" << std::endl;
     }
     
-    // Create exception dispatch block
-    BasicBlock* dispatchBlock = createNewBlock("Exception Dispatch");
-    int dispatchBlockId = dispatchBlock->id;
+    // TRY...CATCH...FINALLY structure:
+    // 1. TRY block - normal execution path
+    // 2. CATCH blocks - exception handlers (one per catch clause)
+    // 3. FINALLY block - always executes (cleanup code)
+    // 4. EXIT block - where control flows after try/catch/finally
     
-    // Create CATCH blocks
-    std::vector<int> catchBlockIds;
-    for (size_t i = 0; i < stmt.catchClauses.size(); i++) {
-        const auto& clause = stmt.catchClauses[i];
-        
-        std::string catchLabel = "CATCH";
-        if (!clause.errorCodes.empty()) {
-            catchLabel += " ";
-            for (size_t j = 0; j < clause.errorCodes.size(); j++) {
-                if (j > 0) catchLabel += ",";
-                catchLabel += std::to_string(clause.errorCodes[j]);
-            }
+    // Add TRY statement to incoming block
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // 1. Create blocks
+    BasicBlock* tryBlock = createBlock("Try_Block");
+    BasicBlock* finallyBlock = stmt.finallyBlock.empty() ? nullptr : createBlock("Finally_Block");
+    BasicBlock* exitBlock = createBlock("Try_Exit");
+    
+    // 2. Wire incoming to try block
+    if (!isTerminated(incoming)) {
+        addUnconditionalEdge(incoming->id, tryBlock->id);
+    }
+    
+    // 3. Create catch blocks (one per catch clause)
+    std::vector<BasicBlock*> catchBlocks;
+    for (size_t i = 0; i < stmt.catchBlocks.size(); i++) {
+        BasicBlock* catchBlock = createBlock("Catch_" + std::to_string(i));
+        catchBlocks.push_back(catchBlock);
+    }
+    
+    // If no catch blocks, create a default one
+    BasicBlock* defaultCatchBlock = nullptr;
+    if (catchBlocks.empty()) {
+        defaultCatchBlock = createBlock("Catch_Default");
+        catchBlocks.push_back(defaultCatchBlock);
+    }
+    
+    // 4. Create TRY context for nested THROW statements
+    TryContext tryCtx;
+    tryCtx.catchBlockId = catchBlocks[0]->id;  // Default to first catch block
+    tryCtx.finallyBlockId = finallyBlock ? finallyBlock->id : -1;
+    tryCtx.outerTry = outerTry;
+    
+    // 5. Recursively build TRY block with exception context
+    BasicBlock* tryExit = buildStatementRange(
+        stmt.tryBlock,
+        tryBlock,
+        loop,
+        select,
+        &tryCtx,  // Pass try context to nested statements
+        sub
+    );
+    
+    // 6. If TRY completes normally (no exception), go to FINALLY or EXIT
+    if (!isTerminated(tryExit)) {
+        if (finallyBlock) {
+            addUnconditionalEdge(tryExit->id, finallyBlock->id);
         } else {
-            catchLabel += " (all)";
+            addUnconditionalEdge(tryExit->id, exitBlock->id);
+        }
+    }
+    
+    // 7. Process each CATCH clause
+    for (size_t i = 0; i < stmt.catchBlocks.size(); i++) {
+        const auto& catchClause = stmt.catchBlocks[i];
+        BasicBlock* catchBlock = catchBlocks[i];
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] Processing CATCH clause " << i;
+            if (!catchClause.exceptionVariable.empty()) {
+                std::cout << " (variable: " << catchClause.exceptionVariable << ")";
+            }
+            std::cout << std::endl;
         }
         
-        BasicBlock* catchBlock = createNewBlock(catchLabel);
-        catchBlockIds.push_back(catchBlock->id);
+        // Recursively build catch block
+        BasicBlock* catchExit = buildStatementRange(
+            catchClause.statements,
+            catchBlock,
+            loop,
+            select,
+            &tryCtx,  // Nested try/catch is possible
+            sub
+        );
         
-        // Process CATCH block statements
-        m_currentBlock = catchBlock;
-        for (const auto& catchStmt : clause.block) {
-            if (catchStmt) {
-                processStatement(*catchStmt, m_currentBlock, 0);
+        // After catch, go to FINALLY or EXIT
+        if (!isTerminated(catchExit)) {
+            if (finallyBlock) {
+                addUnconditionalEdge(catchExit->id, finallyBlock->id);
+            } else {
+                addUnconditionalEdge(catchExit->id, exitBlock->id);
             }
         }
     }
     
-    // Create FINALLY block if present
-    int finallyBlockId = -1;
-    if (stmt.hasFinally) {
-        BasicBlock* finallyBlock = createNewBlock("FINALLY");
-        finallyBlockId = finallyBlock->id;
+    // 8. Process FINALLY block (if present)
+    if (finallyBlock) {
+        if (m_debugMode) {
+            std::cout << "[CFG] Processing FINALLY block" << std::endl;
+        }
         
-        // Process FINALLY block statements
-        m_currentBlock = finallyBlock;
-        for (const auto& finallyStmt : stmt.finallyBlock) {
-            if (finallyStmt) {
-                processStatement(*finallyStmt, m_currentBlock, 0);
-            }
+        // FINALLY always executes, regardless of exception
+        BasicBlock* finallyExit = buildStatementRange(
+            stmt.finallyBlock,
+            finallyBlock,
+            loop,
+            select,
+            &tryCtx,
+            sub
+        );
+        
+        // After finally, go to exit
+        if (!isTerminated(finallyExit)) {
+            addUnconditionalEdge(finallyExit->id, exitBlock->id);
         }
     }
     
-    // Create exit block
-    BasicBlock* exitBlock = createNewBlock("After TRY");
-    int exitBlockId = exitBlock->id;
+    if (m_debugMode) {
+        std::cout << "[CFG] TRY...CATCH...FINALLY complete, exit block: " 
+                  << exitBlock->id << std::endl;
+    }
     
-    // Store TRY/CATCH structure info for buildEdges phase
-    TryCatchContext ctx;
-    ctx.tryBlock = trySetupBlockId;
-    ctx.tryBodyBlock = tryBodyBlockId;
-    ctx.dispatchBlock = dispatchBlockId;
-    ctx.catchBlocks = catchBlockIds;
-    ctx.finallyBlock = finallyBlockId;
-    ctx.exitBlock = exitBlockId;
-    ctx.hasFinally = stmt.hasFinally;
-    ctx.tryStatement = &stmt;
-    m_tryCatchStack.push_back(ctx);
-    
-    // Also store in the CFG for later reference
-    ControlFlowGraph::TryCatchBlocks cfgBlocks;
-    cfgBlocks.tryBlock = trySetupBlockId;
-    cfgBlocks.tryBodyBlock = tryBodyBlockId;
-    cfgBlocks.dispatchBlock = dispatchBlockId;
-    cfgBlocks.catchBlocks = catchBlockIds;
-    cfgBlocks.finallyBlock = finallyBlockId;
-    cfgBlocks.exitBlock = exitBlockId;
-    cfgBlocks.hasFinally = stmt.hasFinally;
-    cfgBlocks.tryStatement = &stmt;
-    m_currentCFG->tryCatchStructure[trySetupBlockId] = cfgBlocks;
-    
-    // Continue with exit block
-    m_currentBlock = exitBlock;
+    // 9. Return exit block
+    return exitBlock;
 }
 
 } // namespace FasterBASIC
