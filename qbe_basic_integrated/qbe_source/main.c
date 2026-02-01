@@ -341,15 +341,30 @@ main(int ac, char *av[])
 			if (outf != stdout)
 				fclose(outf);
 				
-		} else if (is_basic && output_file && !compile_only) {
-			/* BASIC file with -o but no -c or -i: compile to executable */
+		} else if (is_basic && !il_only) {
+			/* BASIC file: compile to assembly and link to executable */
+			/* Generate a default output name if not specified */
+			char default_output[256];
+			if (!output_file) {
+				/* Strip .bas extension and use as executable name */
+				const char *base = strrchr(f, '/');
+				base = base ? base + 1 : f;
+				char *dot = strrchr(base, '.');
+				if (dot && (strcmp(dot, ".bas") == 0 || strcmp(dot, ".BAS") == 0)) {
+					snprintf(default_output, sizeof(default_output), "%.*s", (int)(dot - base), base);
+				} else {
+					snprintf(default_output, sizeof(default_output), "%s.out", base);
+				}
+				output_file = default_output;
+			}
+			
 			snprintf(temp_asm, sizeof(temp_asm), "/tmp/qbe_basic_%d.s", getpid());
 			outf = fopen(temp_asm, "w");
 			if (!outf) {
 				fprintf(stderr, "cannot create temp file '%s'\n", temp_asm);
 				exit(1);
 			}
-			need_linking = 1;
+			need_linking = !compile_only;
 			
 			parse(inf, f, dbgfile, data, func);
 			fclose(inf);

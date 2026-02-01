@@ -132,23 +132,38 @@ int DataPreprocessor::extractLineNumber(const std::string& line, size_t& pos) {
 }
 
 // Extract label from a BASIC line (if present)
+// Format: LABEL_NAME: (label followed by colon)
 std::string DataPreprocessor::extractLabel(const std::string& line, size_t& pos) {
-    // Check for colon (label marker)
-    if (pos >= line.length() || line[pos] != ':') {
-        return "";
-    }
-    
-    pos++; // Skip colon
-    
-    // Extract label name (alphanumeric + underscore)
+    // Extract label name first (alphanumeric + underscore)
     std::string label;
+    size_t startPos = pos;
+    
     while (pos < line.length() && 
            (std::isalnum(line[pos]) || line[pos] == '_')) {
         label += line[pos];
         pos++;
     }
     
-    // Skip whitespace after label
+    // If no label characters found, not a label
+    if (label.empty()) {
+        return "";
+    }
+    
+    // Skip whitespace after label name
+    while (pos < line.length() && isWhitespace(line[pos])) {
+        pos++;
+    }
+    
+    // Check for colon after label
+    if (pos >= line.length() || line[pos] != ':') {
+        // Not a label, restore position
+        pos = startPos;
+        return "";
+    }
+    
+    pos++; // Skip colon
+    
+    // Skip whitespace after colon
     while (pos < line.length() && isWhitespace(line[pos])) {
         pos++;
     }
@@ -165,14 +180,18 @@ bool DataPreprocessor::isDataLine(const std::string& line) {
     while (pos < line.length() && std::isdigit(line[pos])) pos++;
     while (pos < line.length() && isWhitespace(line[pos])) pos++;
     
-    // Skip label if present
-    if (pos < line.length() && line[pos] == ':') {
+    // Skip label if present (format: LABEL_NAME:)
+    size_t labelStart = pos;
+    while (pos < line.length() && 
+           (std::isalnum(line[pos]) || line[pos] == '_')) {
         pos++;
-        while (pos < line.length() && 
-               (std::isalnum(line[pos]) || line[pos] == '_')) {
-            pos++;
-        }
+    }
+    if (pos > labelStart && pos < line.length() && line[pos] == ':') {
+        pos++; // Skip colon
         while (pos < line.length() && isWhitespace(line[pos])) pos++;
+    } else {
+        // Not a label, restore position
+        pos = labelStart;
     }
     
     // Check for DATA keyword (case insensitive)

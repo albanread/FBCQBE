@@ -78,7 +78,12 @@ void CFGBuilder::addConditionalEdge(int fromBlockId, int toBlockId, const std::s
     CFGEdge edge;
     edge.sourceBlock = fromBlockId;
     edge.targetBlock = toBlockId;
-    edge.type = EdgeType::CONDITIONAL_TRUE;  // Can distinguish TRUE/FALSE if needed
+    // Set edge type based on condition label
+    if (condition == "false" || condition == "else") {
+        edge.type = EdgeType::CONDITIONAL_FALSE;
+    } else {
+        edge.type = EdgeType::CONDITIONAL_TRUE;
+    }
     edge.label = condition;
     
     m_cfg->edges.push_back(edge);

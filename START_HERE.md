@@ -1,5 +1,12 @@
 # FasterBASIC QBE Compiler - Developer Guide
 
+**🚨 IMPORTANT: Code Generator V2 Development in Progress**
+
+We are currently implementing a new code generator (codegen_v2) that works with CFG v2. 
+**If you're working on code generation, start with [docs/CODEGEN_V2_START_HERE.md](docs/CODEGEN_V2_START_HERE.md)**
+
+---
+
 **Welcome!** This guide will help you build, use, and develop the FasterBASIC QBE compiler.
 
 > **⚠️ CRITICAL: TEST RUNNER LOCATION**
@@ -16,6 +23,31 @@
 > The `qbe_basic` executable at the project root is a **symlink** to `qbe_basic_integrated/qbe_basic`.
 > Always build using `cd qbe_basic_integrated && ./build_qbe_basic.sh` to ensure you have the latest code.
 > See [BUILD.md](BUILD.md) for detailed build instructions.
+
+## Quick Links
+
+### 🚀 Code Generator V2 (Current Development)
+- **[CODEGEN_V2_START_HERE.md](docs/CODEGEN_V2_START_HERE.md)** - New developer quick start
+- **[STATUS_AND_NEXT_STEPS.md](docs/STATUS_AND_NEXT_STEPS.md)** - Current status & roadmap
+- **[CODEGEN_V2_ACTION_PLAN.md](docs/CODEGEN_V2_ACTION_PLAN.md)** - Step-by-step implementation (READ FIRST)
+- **[CODEGEN_V2_DESIGN_PLAN.md](docs/CODEGEN_V2_DESIGN_PLAN.md)** - Complete architectural design
+- **[CODEGEN_REFACTOR_SUMMARY.md](docs/CODEGEN_REFACTOR_SUMMARY.md)** - Executive summary
+
+### ✅ CFG v2 (Complete)
+- **[CFG_V2_COMPLETION_STATUS.md](docs/CFG_V2_COMPLETION_STATUS.md)** - Final status
+- **[CFG_V2_STATUS.md](docs/CFG_V2_STATUS.md)** - Detailed status report
+- **[CFG_TEST_RESULTS_2026_02_01.md](docs/CFG_TEST_RESULTS_2026_02_01.md)** - Test results
+
+### 📊 Unreachable Code Analysis
+- **[unreachable_code_analysis.md](docs/unreachable_code_analysis.md)** - Complete analysis (18KB)
+- **[unreachable_warnings_summary.md](docs/unreachable_warnings_summary.md)** - Quick reference
+- **[unreachable_patterns_diagram.md](docs/unreachable_patterns_diagram.md)** - Visual diagrams
+- **[unreachable_trace_examples.md](docs/unreachable_trace_examples.md)** - Execution traces
+
+### 📚 Reference
+- **[oldcodegen/README_ARCHIVE.md](fsh/FasterBASICT/src/oldcodegen/README_ARCHIVE.md)** - Old generator archive (reference only)
+
+---
 
 ## Table of Contents
 
@@ -932,6 +964,35 @@ gcc /tmp/t.s fsh/FasterBASICT/runtime_c/*.c -I fsh/FasterBASICT/runtime_c -lm -o
 # View assembly
 ./qbe_basic_integrated/qbe_basic program.bas 2>&1 | less
 ```
+
+---
+
+## Code Generator V2 Development
+
+**Current Status:** Planning complete, ready to implement
+
+### Quick Start for Code Generator Work
+1. Read **[docs/CODEGEN_V2_START_HERE.md](docs/CODEGEN_V2_START_HERE.md)**
+2. Review **[docs/CODEGEN_V2_ACTION_PLAN.md](docs/CODEGEN_V2_ACTION_PLAN.md)**
+3. Create `codegen_v2/` directory
+4. Implement components bottom-up (QBEBuilder → ... → QBECodeGeneratorV2)
+5. Test with `-i` flag to review generated IL
+
+### 7 Components to Build
+1. **QBEBuilder** - Low-level IL emission
+2. **TypeManager** - Type conversions
+3. **SymbolMapper** - Name mangling
+4. **RuntimeLibrary** - Runtime call wrappers
+5. **ASTEmitter** - Statements/expressions
+6. **CFGEmitter** - Blocks/edges
+7. **QBECodeGeneratorV2** - Main orchestrator
+
+### Timeline
+- **Week 1:** Core components (QBEBuilder → RuntimeLibrary)
+- **Week 2:** AST/CFG emitters
+- **Week 3:** Integration and validation
+
+See **[docs/STATUS_AND_NEXT_STEPS.md](docs/STATUS_AND_NEXT_STEPS.md)** for complete roadmap.
 
 ---
 

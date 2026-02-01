@@ -14,10 +14,10 @@
 #include "fasterbasic_semantic.h"
 #include "fasterbasic_cfg.h"
 #include "fasterbasic_data_preprocessor.h"
-// #include "fasterbasic_qbe_codegen.h"  // DISABLED - codegen needs to be adapted to new CFG
 #include "fasterbasic_ast_dump.h"
 #include "modular_commands.h"
 #include "command_registry_core.h"
+#include "codegen_v2/qbe_codegen_v2.h"
 
 using namespace FasterBASIC;
 
@@ -55,6 +55,30 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
         // Preprocess DATA statements
         DataPreprocessor dataPreprocessor;
         DataPreprocessorResult dataResult = dataPreprocessor.process(source);
+        
+        // Debug: Show what DATA preprocessor collected
+        std::cerr << "[INFO] DataPreprocessor collected " << dataResult.values.size() << " DATA values\n";
+        if (!dataResult.values.empty()) {
+            std::cerr << "[INFO] DATA values: ";
+            for (size_t i = 0; i < dataResult.values.size() && i < 10; ++i) {
+                if (i > 0) std::cerr << ", ";
+                // Print the value based on its type
+                if (std::holds_alternative<int>(dataResult.values[i])) {
+                    std::cerr << std::get<int>(dataResult.values[i]);
+                } else if (std::holds_alternative<double>(dataResult.values[i])) {
+                    std::cerr << std::get<double>(dataResult.values[i]);
+                } else if (std::holds_alternative<std::string>(dataResult.values[i])) {
+                    std::cerr << "\"" << std::get<std::string>(dataResult.values[i]) << "\"";
+                }
+            }
+            if (dataResult.values.size() > 10) {
+                std::cerr << " ... (" << (dataResult.values.size() - 10) << " more)";
+            }
+            std::cerr << "\n";
+        }
+        std::cerr << "[INFO] DATA line restore points: " << dataResult.lineRestorePoints.size() << "\n";
+        std::cerr << "[INFO] DATA label restore points: " << dataResult.labelRestorePoints.size() << "\n";
+        
         source = dataResult.cleanedSource;  // Use cleaned source
         
         // Lexer
@@ -133,6 +157,32 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
         std::cerr << "[INFO] Main program CFG + " << programCFG->functionCFGs.size() 
                   << " function/subroutine CFGs\n";
         
+        // Debug: Show what lines are in the program
+        std::cerr << "[INFO] Program has " << ast->lines.size() << " lines\n";
+        for (size_t i = 0; i < ast->lines.size() && i < 20; ++i) {
+            const auto& line = ast->lines[i];
+            std::cerr << "[INFO]   Line " << line->lineNumber << " has " << line->statements.size() << " statements: ";
+            for (const auto& stmt : line->statements) {
+                std::cerr << static_cast<int>(stmt->getType()) << " ";
+            }
+            std::cerr << "\n";
+        }
+        
+        // Debug: Show data segment contents
+        const auto& dataSegment = semantic.getSymbolTable().dataSegment;
+        std::cerr << "[INFO] Data segment: " << dataSegment.values.size() << " values\n";
+        if (!dataSegment.values.empty()) {
+            std::cerr << "[INFO] DATA values: ";
+            for (size_t i = 0; i < dataSegment.values.size() && i < 10; ++i) {
+                if (i > 0) std::cerr << ", ";
+                std::cerr << "\"" << dataSegment.values[i] << "\"";
+            }
+            if (dataSegment.values.size() > 10) {
+                std::cerr << " ... (" << (dataSegment.values.size() - 10) << " more)";
+            }
+            std::cerr << "\n";
+        }
+        
         // Always dump the CFGs for verification using comprehensive report
         std::cerr << "\n╔══════════════════════════════════════════════════════════════════════════╗\n";
         std::cerr << "║                    PROGRAM CFG ANALYSIS REPORT                           ║\n";
@@ -156,26 +206,34 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
             funcBuilder.setCFGForDump(nullptr); // Clear to prevent deletion
         }
         
+        // Generate QBE IL using new code generator v2
+        std::cerr << "\n========================================\n";
+        std::cerr << "CODE GENERATION: V2 (CFG-aware)\n";
+        std::cerr << "========================================\n\n";
+        
+        fbc::QBECodeGeneratorV2 codegen(semantic);
+        codegen.setDataValues(dataResult);  // Pass DATA values to code generator
+        std::string qbeIL = codegen.generateProgram(ast.get(), programCFG);
+        
         delete programCFG;
         
-        // CODE GENERATION DISABLED
-        // The codegen layer needs to be updated to work with the new CFG structure
-        // For now, we only verify CFG generation is correct
-        std::cerr << "\n========================================\n";
-        std::cerr << "CODE GENERATION: DISABLED\n";
-        std::cerr << "========================================\n";
-        std::cerr << "The new CFG builder generates correct control flow graphs.\n";
-        std::cerr << "Code generation will be re-enabled after adapting the\n";
-        std::cerr << "QBE code generator to work with the new CFG structure.\n";
-        std::cerr << "\nTo test CFG generation:\n";
-        std::cerr << "  ./qbe_basic -G program.bas\n";
-        std::cerr << "\n========================================\n\n";
-        
-        // Return empty string to indicate CFG-only mode
-        char *result = (char*)malloc(1);
-        if (result) {
-            result[0] = '\0';
+        if (qbeIL.empty()) {
+            std::cerr << "[ERROR] Code generation produced empty IL\n";
+            return nullptr;
         }
+        
+        std::cerr << "[INFO] QBE IL generation successful (" << qbeIL.size() << " bytes)\n";
+        std::cerr << "\n=== GENERATED QBE IL ===\n";
+        std::cerr << qbeIL;
+        std::cerr << "\n=== END QBE IL ===\n\n";
+        
+        // Allocate and copy the result
+        char *result = (char*)malloc(qbeIL.size() + 1);
+        if (!result) {
+            std::cerr << "[ERROR] Failed to allocate memory for IL\n";
+            return nullptr;
+        }
+        std::strcpy(result, qbeIL.c_str());
         return result;
         
     } catch (const std::exception& e) {

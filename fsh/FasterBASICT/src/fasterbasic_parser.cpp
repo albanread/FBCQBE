@@ -173,6 +173,12 @@ std::unique_ptr<Program> Parser::parse(const std::vector<Token>& tokens, const s
     // Reset auto line numbering for each parse
     m_autoLineNumber = m_autoLineStart;
 
+    // DEBUG: Show first 50 tokens to see if DATA is there
+    fprintf(stderr, "[Parser::parse] First 50 tokens:\n");
+    for (size_t i = 0; i < tokens.size() && i < 50; i++) {
+        fprintf(stderr, "  [%zu] type=%d value='%s'\n", i, (int)tokens[i].type, tokens[i].value.c_str());
+    }
+
     // FIRST: Expand all INCLUDE statements (preprocessing phase)
     expandIncludes(tokens);
 
@@ -3454,6 +3460,7 @@ StatementPtr Parser::parseSharedStatement() {
 }
 
 StatementPtr Parser::parseDataStatement() {
+    fprintf(stderr, "[parseDataStatement] Called at line %d\n", m_currentLineNumber);
     auto stmt = std::make_unique<DataStatement>();
     advance(); // consume DATA
 
@@ -3487,6 +3494,7 @@ StatementPtr Parser::parseDataStatement() {
         }
     } while (match(TokenType::COMMA));
 
+    fprintf(stderr, "[parseDataStatement] Parsed DATA with %zu values\n", stmt->values.size());
     return stmt;
 }
 

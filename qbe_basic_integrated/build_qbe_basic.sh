@@ -1,9 +1,9 @@
 #!/bin/bash
-# Build QBE with integrated FasterBASIC frontend
+# Build QBE with integrated FasterBASIC frontend (Code Generator V2)
 
 set -e
 
-echo "=== Building QBE with FasterBASIC Integration ==="
+echo "=== Building QBE with FasterBASIC Integration (CodeGen V2) ==="
 
 cd "$(dirname "$0")"
 
@@ -23,8 +23,8 @@ echo "Compiling FasterBASIC compiler sources..."
 mkdir -p obj
 
 # Compile each FasterBASIC C++ source
-# NOTE: Using modular CFG structure (February 2026 refactor)
-# NOTE: Codegen disabled - needs adaptation to CFG v2
+# NOTE: Using modular CFG v2 structure (February 2026 refactor)
+# NOTE: Using NEW codegen_v2 (CFG-v2 compatible)
 clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -c \
     "$FASTERBASIC_SRC/fasterbasic_lexer.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_parser.cpp" \
@@ -44,16 +44,18 @@ clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -c \
     "$FASTERBASIC_SRC/fasterbasic_ast_dump.cpp" \
     "$FASTERBASIC_SRC/modular_commands.cpp" \
     "$FASTERBASIC_SRC/command_registry_core.cpp" \
-    "$FASTERBASIC_SRC/../runtime/ConstantsManager.cpp"
-#    "$FASTERBASIC_SRC/codegen/qbe_codegen_main.cpp" \
-#    "$FASTERBASIC_SRC/codegen/qbe_codegen_statements.cpp" \
-#    "$FASTERBASIC_SRC/codegen/qbe_codegen_expressions.cpp" \
-#    "$FASTERBASIC_SRC/codegen/qbe_codegen_helpers.cpp" \
-#    "$FASTERBASIC_SRC/codegen/qbe_codegen_runtime.cpp"
+    "$FASTERBASIC_SRC/../runtime/ConstantsManager.cpp" \
+    "$FASTERBASIC_SRC/codegen_v2/qbe_builder.cpp" \
+    "$FASTERBASIC_SRC/codegen_v2/type_manager.cpp" \
+    "$FASTERBASIC_SRC/codegen_v2/symbol_mapper.cpp" \
+    "$FASTERBASIC_SRC/codegen_v2/runtime_library.cpp" \
+    "$FASTERBASIC_SRC/codegen_v2/ast_emitter.cpp" \
+    "$FASTERBASIC_SRC/codegen_v2/cfg_emitter.cpp" \
+    "$FASTERBASIC_SRC/codegen_v2/qbe_codegen_v2.cpp"
 
 mv *.o obj/ 2>/dev/null || true
 
-echo "  ✓ FasterBASIC compiled"
+echo "  ✓ FasterBASIC compiled (with codegen_v2)"
 
 # Step 2: Compile runtime library
 echo "Compiling BASIC runtime library..."
@@ -143,7 +145,7 @@ echo "  ✓ QBE objects ready"
 # Step 6: Link everything together
 echo "Linking QBE with FasterBASIC support..."
 
-clang++ -O2 -o "$PROJECT_ROOT/qbe_basic" \
+clang++ -O2 -o "$PROJECT_ROOT/fbc_qbe" \
     main.o parse.o ssa.o live.o copy.o fold.o simpl.o ifopt.o gcm.o gvn.o \
     mem.o alias.o load.o util.o rega.o emit.o cfg.o abi.o spill.o \
     amd64/*.o \
@@ -151,14 +153,22 @@ clang++ -O2 -o "$PROJECT_ROOT/qbe_basic" \
     rv64/*.o \
     "$PROJECT_ROOT/obj"/*.o
 
+# Create symlink for backward compatibility
+cd "$PROJECT_ROOT"
+ln -sf fbc_qbe qbe_basic
+
 echo ""
 echo "=== Build Complete ==="
-echo "Executable: $PROJECT_ROOT/qbe_basic"
+echo "Executable: $PROJECT_ROOT/fbc_qbe"
+echo "Symlink:    $PROJECT_ROOT/qbe_basic -> fbc_qbe (for backward compatibility)"
 echo ""
 echo "Usage:"
-echo "  ./qbe_basic input.bas -o program      # Compile to executable"
-echo "  ./qbe_basic -i -o output.qbe input.bas # Generate QBE IL only"
-echo "  ./qbe_basic -c -o output.s input.bas   # Generate assembly only"
+echo "  ./fbc_qbe input.bas -o program         # Compile to executable"
+echo "  ./fbc_qbe --emit-qbe input.bas         # Generate QBE IL only"
+echo "  ./fbc_qbe --emit-asm input.bas         # Generate assembly only"
+echo "  ./fbc_qbe --run input.bas              # Compile and run immediately"
+echo ""
+echo "  (or use ./qbe_basic for backward compatibility)"
 echo ""
 echo "Note: Runtime library will be built automatically on first use"
 echo "      and cached in runtime/.obj/ for faster subsequent builds."

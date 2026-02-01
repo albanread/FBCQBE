@@ -1,0 +1,2423 @@
+//
+// qbe_codegen_expressions.cpp
+// FasterBASIC QBE Code Generator - Expression Emission
+//
+// This file contains all expression emission code:
+// - emitExpression() dispatcher
+// - Binary operations (arithmetic, comparison, logical)
+// - Unary operations (negation, NOT)
+// - Literals (numbers, strings)
+// - Variables and array access
+// - Function calls
+//
+
+#include "../fasterbasic_qbe_codegen.h"
+#include "../modular_commands.h"
+#include <sstream>
+#include <cmath>
+#include <algorithm>
+#include <unordered_set>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// Constant Folding Helpers
+// =============================================================================
+
+// Check if expression is a number literal and return its value
+bool QBECodeGenerator::isNumberLiteral(const Expression* expr, double& value) {
+    if (!expr || expr->getType() != ASTNodeType::EXPR_NUMBER) {
+        return false;
+    }
+    const NumberExpression* numExpr = static_cast<const NumberExpression*>(expr);
+    value = numExpr->value;
+    return true;
+}
+
+// Check if a value is a power of 2 and return the shift amount
+// Returns -1 if not a power of 2
+int QBECodeGenerator::getPowerOf2ShiftAmount(const Expression* expr) {
+    double value;
+    if (!isNumberLiteral(expr, value)) {
+        return -1;
+    }
+    
+    // Check if it's a positive integer
+    if (value <= 0 || value != std::floor(value)) {
+        return -1;
+    }
+    
+    int64_t intValue = static_cast<int64_t>(value);
+    
+    // Check if it's a power of 2 using bit manipulation
+    // A number is power of 2 if it has exactly one bit set
+    if ((intValue & (intValue - 1)) != 0) {
+        return -1;
+    }
+    
+    // Calculate the shift amount (log2)
+    int shiftAmount = 0;
+    int64_t temp = intValue;
+    while (temp > 1) {
+        temp >>= 1;
+        shiftAmount++;
+    }
+    
+    return shiftAmount;
+}
+
+// Check if two expressions are both number literals
+bool QBECodeGenerator::areNumberLiterals(const Expression* expr1, const Expression* expr2, double& val1, double& val2) {
+    return isNumberLiteral(expr1, val1) && isNumberLiteral(expr2, val2);
+}
+
+// Emit a constant integer value
+std::string QBECodeGenerator::emitIntConstant(int64_t value) {
+    std::string temp = allocTemp("w");
+    emit("    " + temp + " =w copy " + std::to_string(value) + "\n");
+    m_stats.instructionsGenerated++;
+    return temp;
+}
+
+// =============================================================================
+// Expression Dispatcher
+// =============================================================================
+
+std::string QBECodeGenerator::emitExpression(const Expression* expr) {
+    if (!expr) {
+        std::string temp = allocTemp("w");
+        emit("    " + temp + " =w copy 0\n");
+        return temp;
+    }
+    
+    // Dispatch based on AST node type
+    ASTNodeType nodeType = expr->getType();
+    
+    switch (nodeType) {
+        case ASTNodeType::EXPR_NUMBER:
+            return emitNumberLiteral(static_cast<const NumberExpression*>(expr));
+            
+        case ASTNodeType::EXPR_STRING:
+            return emitStringLiteral(static_cast<const StringExpression*>(expr));
+            
+        case ASTNodeType::EXPR_VARIABLE:
+            return emitVariableRef(static_cast<const VariableExpression*>(expr));
+            
+        case ASTNodeType::EXPR_BINARY:
+            return emitBinaryOp(static_cast<const BinaryExpression*>(expr));
+            
+        case ASTNodeType::EXPR_UNARY:
+            return emitUnaryOp(static_cast<const UnaryExpression*>(expr));
+            
+        case ASTNodeType::EXPR_FUNCTION_CALL:
+            return emitFunctionCall(static_cast<const FunctionCallExpression*>(expr));
+            
+        case ASTNodeType::EXPR_ARRAY_ACCESS:
+            return emitArrayAccessExpr(static_cast<const ArrayAccessExpression*>(expr));
+            
+        case ASTNodeType::EXPR_MEMBER_ACCESS:
+            return emitMemberAccessExpr(static_cast<const MemberAccessExpression*>(expr));
+            
+        case ASTNodeType::EXPR_IIF:
+            return emitIIF(static_cast<const IIFExpression*>(expr));
+            
+        default:
+            emitComment("TODO: Unhandled expression type " + std::to_string(static_cast<int>(nodeType)));
+            std::string temp = allocTemp("w");
+            emit("    " + temp + " =w copy 0\n");
+            m_stats.instructionsGenerated++;
+            return temp;
+    }
+}
+
+// =============================================================================
+// Number Literal
+// =============================================================================
+
+std::string QBECodeGenerator::emitNumberLiteral(const NumberExpression* expr) {
+    if (!expr) {
+        std::string temp = allocTemp("w");
+        emit("    " + temp + " =w copy 0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    double value = expr->value;
+    
+    // Check if this is an integer literal (no decimal point, no exponent)
+    bool isInteger = (value == std::floor(value)) && 
+                     (value >= std::numeric_limits<int64_t>::min()) && 
+                     (value <= std::numeric_limits<int64_t>::max());
+    
+    if (isInteger) {
+        // Emit as 64-bit integer (long)
+        std::string temp = allocTemp("l");
+        int64_t intValue = static_cast<int64_t>(value);
+        emit("    " + temp + " =l copy " + std::to_string(intValue) + "\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    } else {
+        // Emit as double for floating-point values
+        std::string temp = allocTemp("d");
+        std::ostringstream oss;
+        oss << std::fixed << value;
+        emit("    " + temp + " =d copy d_" + oss.str() + "\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+}
+
+// =============================================================================
+// String Literal
+// =============================================================================
+
+std::string QBECodeGenerator::emitStringLiteral(const StringExpression* expr) {
+    if (!expr) {
+        std::string temp = allocTemp("l");
+        emit("    " + temp + " =l copy 0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    return emitStringConstant(expr->value);
+}
+
+// =============================================================================
+// Variable Reference
+// =============================================================================
+
+std::string QBECodeGenerator::emitVariableRef(const VariableExpression* expr) {
+    if (!expr) {
+        std::string temp = allocTemp("w");
+        emit("    " + temp + " =w copy 0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    // Check if this is a constant (compile-time value)
+    // Constants are stored in lowercase for case-insensitive lookup
+    if (m_symbols) {
+        std::string lowerName = expr->name;
+        std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+        auto it = m_symbols->constants.find(lowerName);
+        if (it != m_symbols->constants.end()) {
+            // This is a constant - emit its literal value
+            const ConstantSymbol& constSym = it->second;
+            
+            if (constSym.type == ConstantSymbol::Type::INTEGER) {
+                std::string temp = allocTemp("w");
+                emit("    " + temp + " =w copy " + std::to_string(constSym.intValue) + "\n");
+                m_stats.instructionsGenerated++;
+                return temp;
+            } else if (constSym.type == ConstantSymbol::Type::DOUBLE) {
+                std::string temp = allocTemp("d");
+                std::ostringstream oss;
+                oss << std::fixed << constSym.doubleValue;
+                emit("    " + temp + " =d copy d_" + oss.str() + "\n");
+                m_stats.instructionsGenerated++;
+                return temp;
+            } else if (constSym.type == ConstantSymbol::Type::STRING) {
+                // String constant - use string literal mechanism
+                return emitStringConstant(constSym.stringValue);
+            }
+        }
+    }
+    
+    // Not a constant - choose variable or array reference
+    if (m_symbols) {
+        auto arrIt = m_symbols->arrays.find(expr->name);
+        if (arrIt != m_symbols->arrays.end()) {
+            return getArrayRef(expr->name);
+        }
+    }
+
+    return getVariableRef(expr->name);
+}
+
+// =============================================================================
+// Binary Operations
+// =============================================================================
+
+std::string QBECodeGenerator::emitBinaryOp(const BinaryExpression* expr) {
+    if (!expr || !expr->left || !expr->right) {
+        std::string temp = allocTemp("d");
+        emit("    " + temp + " =d copy d_0.0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    // Evaluate operands
+    std::string leftTemp = emitExpression(expr->left.get());
+    std::string rightTemp = emitExpression(expr->right.get());
+    
+    // Infer operand types
+    VariableType leftType = inferExpressionType(expr->left.get());
+    VariableType rightType = inferExpressionType(expr->right.get());
+    
+    TokenType op = expr->op;
+    
+    // Special handling for string concatenation (supports STRING + STRING, STRING + UNICODE, UNICODE + STRING, UNICODE + UNICODE)
+    // The runtime library automatically promotes ASCII strings to UTF-32 when mixing encodings
+    if (op == TokenType::PLUS && 
+        (leftType == VariableType::STRING || leftType == VariableType::UNICODE) &&
+        (rightType == VariableType::STRING || rightType == VariableType::UNICODE)) {
+        return emitStringConcat(leftTemp, rightTemp);
+    }
+    
+    // Special handling for string comparison operators (supports STRING and UNICODE)
+    bool isComparison = (op == TokenType::EQUAL || op == TokenType::NOT_EQUAL ||
+                         op == TokenType::LESS_THAN || op == TokenType::LESS_EQUAL ||
+                         op == TokenType::GREATER_THAN || op == TokenType::GREATER_EQUAL);
+    
+    if (isComparison && 
+        (leftType == VariableType::STRING || leftType == VariableType::UNICODE) &&
+        (rightType == VariableType::STRING || rightType == VariableType::UNICODE)) {
+        // Call string_compare runtime function
+        std::string cmpResult = allocTemp("w");
+        emit("    " + cmpResult + " =w call $string_compare(l " + leftTemp + ", l " + rightTemp + ")\n");
+        m_stats.instructionsGenerated++;
+        
+        // Convert comparison result to boolean based on operator
+        std::string resultTemp = allocTemp("w");
+        std::string zero = allocTemp("w");
+        emit("    " + zero + " =w copy 0\n");
+        m_stats.instructionsGenerated++;
+        
+        switch (op) {
+            case TokenType::EQUAL:
+                emit("    " + resultTemp + " =w ceqw " + cmpResult + ", " + zero + "\n");
+                break;
+            case TokenType::NOT_EQUAL:
+                emit("    " + resultTemp + " =w cnew " + cmpResult + ", " + zero + "\n");
+                break;
+            case TokenType::LESS_THAN:
+                emit("    " + resultTemp + " =w csltw " + cmpResult + ", " + zero + "\n");
+                break;
+            case TokenType::LESS_EQUAL:
+                emit("    " + resultTemp + " =w cslew " + cmpResult + ", " + zero + "\n");
+                break;
+            case TokenType::GREATER_THAN:
+                emit("    " + resultTemp + " =w csgtw " + cmpResult + ", " + zero + "\n");
+                break;
+            case TokenType::GREATER_EQUAL:
+                emit("    " + resultTemp + " =w csgew " + cmpResult + ", " + zero + "\n");
+                break;
+            default:
+                emit("    " + resultTemp + " =w copy 0\n");
+                break;
+        }
+        m_stats.instructionsGenerated++;
+        
+        return resultTemp;
+    }
+    
+    // MOD and INT_DIVIDE operations REQUIRE integers
+    // AND/OR/XOR work on both booleans (w) and integers (l), so don't force type
+    bool requiresInteger = (op == TokenType::MOD || op == TokenType::INT_DIVIDE);
+    
+    // Determine operation type
+    VariableType opType;
+    if (requiresInteger) {
+        opType = VariableType::INT;
+    } else if (op == TokenType::DIVIDE) {
+        // Division operator (/) always performs floating-point division in BASIC
+        // Use \ (INT_DIVIDE) for integer division
+        opType = VariableType::DOUBLE;
+    } else if (leftType == VariableType::DOUBLE || rightType == VariableType::DOUBLE) {
+        opType = VariableType::DOUBLE;  // DOUBLE is default, promotes from INT
+    } else if (leftType == VariableType::FLOAT || rightType == VariableType::FLOAT) {
+        opType = VariableType::DOUBLE;  // FLOAT maps to DOUBLE in QBE
+    } else if (leftType == VariableType::INT && rightType == VariableType::INT) {
+        opType = VariableType::INT;     // Both INT → INT result
+    } else {
+        opType = VariableType::DOUBLE;  // Default to DOUBLE
+    }
+    
+    // Promote operands to operation type
+    // For INT types, we need to check the actual QBE type (w vs l)
+    if (leftType != opType) {
+        std::string leftActualQBE = (leftType == VariableType::INT) ? getActualQBEType(expr->left.get()) : "";
+        leftTemp = promoteToType(leftTemp, leftType, opType, leftActualQBE);
+    }
+    if (rightType != opType) {
+        std::string rightActualQBE = (rightType == VariableType::INT) ? getActualQBEType(expr->right.get()) : "";
+        rightTemp = promoteToType(rightTemp, rightType, opType, rightActualQBE);
+    }
+    
+    // Get QBE type suffix
+    std::string qbeType = getQBEType(opType);
+    std::string typeSuffix = (opType == VariableType::INT) ? "l" : "d";  // INT is now 64-bit long
+    
+    // For INT operations, ensure both operands are actually 'l' (not 'w')
+    // Array elements may be loaded as 'w' even though their semantic type is INT
+    if (opType == VariableType::INT) {
+        std::string leftQBEType = getActualQBEType(expr->left.get());
+        std::string rightQBEType = getActualQBEType(expr->right.get());
+        
+        // Extend word operands to longs if needed
+        if (leftQBEType == "w") {
+            std::string extendedLeft = allocTemp("l");
+            emit("    " + extendedLeft + " =l extsw " + leftTemp + "\n");
+            m_stats.instructionsGenerated++;
+            leftTemp = extendedLeft;
+        }
+        if (rightQBEType == "w") {
+            std::string extendedRight = allocTemp("l");
+            emit("    " + extendedRight + " =l extsw " + rightTemp + "\n");
+            m_stats.instructionsGenerated++;
+            rightTemp = extendedRight;
+        }
+    }
+    
+    std::string resultTemp = allocTemp(qbeType);
+    
+    switch (op) {
+        // Arithmetic operators
+        case TokenType::PLUS:
+            emit("    " + resultTemp + " =" + typeSuffix + " add " + leftTemp + ", " + rightTemp + "\n");
+            break;
+            
+        case TokenType::MINUS:
+            emit("    " + resultTemp + " =" + typeSuffix + " sub " + leftTemp + ", " + rightTemp + "\n");
+            break;
+            
+        case TokenType::MULTIPLY: {
+            // Optimize multiplication by power of 2 to left shift (for integers)
+            if (opType == VariableType::INT) {
+                int shiftAmount = getPowerOf2ShiftAmount(expr->right.get());
+                if (shiftAmount >= 0) {
+                    // x * 2^n  =>  x << n
+                    std::string shiftTemp = allocTemp("w");
+                    emit("    " + shiftTemp + " =w copy " + std::to_string(shiftAmount) + "\n");
+                    emit("    " + resultTemp + " =l shl " + leftTemp + ", " + shiftTemp + "\n");
+                    m_stats.instructionsGenerated += 2;
+                    break;
+                }
+            }
+            emit("    " + resultTemp + " =" + typeSuffix + " mul " + leftTemp + ", " + rightTemp + "\n");
+            break;
+        }
+            
+        case TokenType::DIVIDE:
+            emit("    " + resultTemp + " =" + typeSuffix + " div " + leftTemp + ", " + rightTemp + "\n");
+            break;
+            
+        case TokenType::INT_DIVIDE: {
+            // Integer division: operands already promoted to integer (l) by requiresInteger flag
+            // Optimize division by power of 2 using corrected arithmetic shift
+            // To match standard division (truncate toward zero), we add a bias for negative numbers
+            int shiftAmount = getPowerOf2ShiftAmount(expr->right.get());
+            if (shiftAmount >= 0) {
+                // Corrected shift for signed division: (x < 0 ? (x + (2^n - 1)) : x) >> n
+                int64_t divisor = 1LL << shiftAmount;
+                int64_t bias = divisor - 1;
+                
+                // 1. Extract sign bit (shift right by 63 for 64-bit)
+                std::string signTemp = allocTemp("l");
+                emit("    " + signTemp + " =l sar " + leftTemp + ", 63\n");
+                
+                // 2. Create bias: sign & (divisor - 1)
+                // If negative (sign = -1 = all 1s), this gives (divisor - 1)
+                // If positive (sign = 0), this gives 0
+                std::string biasTemp = allocTemp("l");
+                emit("    " + biasTemp + " =l and " + signTemp + ", " + std::to_string(bias) + "\n");
+                
+                // 3. Add bias to dividend
+                std::string biasedTemp = allocTemp("l");
+                emit("    " + biasedTemp + " =l add " + leftTemp + ", " + biasTemp + "\n");
+                
+                // 4. Perform the shift
+                std::string shiftAmtTemp = allocTemp("w");
+                emit("    " + shiftAmtTemp + " =w copy " + std::to_string(shiftAmount) + "\n");
+                emit("    " + resultTemp + " =l sar " + biasedTemp + ", " + shiftAmtTemp + "\n");
+                
+                m_stats.instructionsGenerated += 5;
+                break;
+            }
+            // Fall back to normal division
+            emit("    " + resultTemp + " =l div " + leftTemp + ", " + rightTemp + "\n");
+            break;
+        }
+            
+        case TokenType::POWER: {
+            // Exponentiation: call C pow() function
+            // Convert operands to double if needed
+            std::string leftDouble = leftTemp;
+            std::string rightDouble = rightTemp;
+            
+            if (typeSuffix == "l") {
+                leftDouble = allocTemp("d");
+                emit("    " + leftDouble + " =d swtof " + leftTemp + "\n");
+                m_stats.instructionsGenerated++;
+                rightDouble = allocTemp("d");
+                emit("    " + rightDouble + " =d swtof " + rightTemp + "\n");
+                m_stats.instructionsGenerated++;
+            }
+            
+            // Call pow(left, right) - always returns double
+            std::string powResult = allocTemp("d");
+            emit("    " + powResult + " =d call $pow(d " + leftDouble + ", d " + rightDouble + ")\n");
+            
+            // Convert back to integer if original operands were integers
+            if (typeSuffix == "l") {
+                resultTemp = allocTemp("l");
+                emit("    " + resultTemp + " =l dtosi " + powResult + "\n");
+                m_stats.instructionsGenerated++;
+            } else {
+                resultTemp = powResult;
+            }
+            break;
+        }
+            
+        case TokenType::MOD: {
+            // MOD is integer-only operation (64-bit)
+            // Optimize: x MOD 2^n  =>  x & (2^n - 1)  (for positive divisors)
+            int shiftAmount = getPowerOf2ShiftAmount(expr->right.get());
+            if (shiftAmount >= 0) {
+                // Calculate mask: 2^n - 1
+                int64_t mask = (1LL << shiftAmount) - 1;
+                std::string maskTemp = allocTemp("l");
+                emit("    " + maskTemp + " =l copy " + std::to_string(mask) + "\n");
+                emit("    " + resultTemp + " =l and " + leftTemp + ", " + maskTemp + "\n");
+                m_stats.instructionsGenerated += 2;
+                break;
+            }
+            emit("    " + resultTemp + " =l rem " + leftTemp + ", " + rightTemp + "\n");
+            break;
+        }
+            
+        // Comparison operators (return integer 0 or 1)
+        case TokenType::EQUAL:
+            resultTemp = allocTemp("w");  // Comparisons return integer
+            emit("    " + resultTemp + " =w ceq" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
+            break;
+            
+        case TokenType::NOT_EQUAL:
+            resultTemp = allocTemp("w");
+            emit("    " + resultTemp + " =w cne" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
+            break;
+            
+        case TokenType::LESS_THAN:
+            resultTemp = allocTemp("w");
+            // For integers use 'cslt', for floats use 'clt'
+            // INT is 64-bit long ('l'), so use csltl for integers
+            emit("    " + resultTemp + " =w c" + (typeSuffix == "l" ? "s" : "") + "lt" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
+            break;
+            
+        case TokenType::LESS_EQUAL:
+            resultTemp = allocTemp("w");
+            // For integers use 'csle', for floats use 'cle'
+            emit("    " + resultTemp + " =w c" + (typeSuffix == "l" ? "s" : "") + "le" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
+            break;
+            
+        case TokenType::GREATER_THAN:
+            resultTemp = allocTemp("w");
+            // For integers use 'csgt', for floats use 'cgt'
+            emit("    " + resultTemp + " =w c" + (typeSuffix == "l" ? "s" : "") + "gt" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
+            break;
+            
+        case TokenType::GREATER_EQUAL:
+            resultTemp = allocTemp("w");
+            // For integers use 'csge', for floats use 'cge'
+            emit("    " + resultTemp + " =w c" + (typeSuffix == "l" ? "s" : "") + "ge" + typeSuffix + " " + leftTemp + ", " + rightTemp + "\n");
+            break;
+            
+        // Logical/Bitwise operators - work on both w (comparisons) and l (integers)
+        case TokenType::AND:
+        case TokenType::OR:
+        case TokenType::XOR: {
+            // Get actual QBE types of operands (w for comparisons, l for integers)
+            std::string leftQBEType = getActualQBEType(expr->left.get());
+            std::string rightQBEType = getActualQBEType(expr->right.get());
+            
+            // Determine operation type - promote w to l if mixed
+            std::string opQBEType;
+            if (leftQBEType == "l" || rightQBEType == "l") {
+                opQBEType = "l";  // Use l if either operand is l
+                // Extend w operands to l if needed
+                if (leftQBEType == "w") {
+                    std::string extendedLeft = allocTemp("l");
+                    emit("    " + extendedLeft + " =l extsw " + leftTemp + "\n");
+                    m_stats.instructionsGenerated++;
+                    leftTemp = extendedLeft;
+                }
+                if (rightQBEType == "w") {
+                    std::string extendedRight = allocTemp("l");
+                    emit("    " + extendedRight + " =l extsw " + rightTemp + "\n");
+                    m_stats.instructionsGenerated++;
+                    rightTemp = extendedRight;
+                }
+            } else {
+                opQBEType = "w";  // Both are w, use w
+            }
+            
+            // Allocate result temp with correct type
+            resultTemp = allocTemp(opQBEType);
+            
+            // Emit the operation with correct type
+            const char* opName = (op == TokenType::AND) ? "and" : 
+                                 (op == TokenType::OR) ? "or" : "xor";
+            emit("    " + resultTemp + " =" + opQBEType + " " + opName + " " + leftTemp + ", " + rightTemp + "\n");
+            break;
+        }
+            
+        default:
+            emitComment("Unknown operator: " + std::to_string(static_cast<int>(op)));
+            emit("    " + resultTemp + " =" + typeSuffix + " copy " + (typeSuffix == "d" ? "d_0.0" : "0") + "\n");
+            break;
+    }
+    
+    m_stats.instructionsGenerated++;
+    return resultTemp;
+}
+
+// =============================================================================
+// Unary Operations
+// =============================================================================
+
+std::string QBECodeGenerator::emitUnaryOp(const UnaryExpression* expr) {
+    if (!expr || !expr->expr) {
+        std::string temp = allocTemp("d");
+        emit("    " + temp + " =d copy d_0.0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    std::string operandTemp = emitExpression(expr->expr.get());
+    VariableType operandType = inferExpressionType(expr->expr.get());
+    
+    TokenType op = expr->op;
+    
+    // Determine result type
+    std::string qbeType = getQBEType(operandType);
+    std::string typeSuffix = (operandType == VariableType::INT) ? "l" : "d";
+    std::string resultTemp = allocTemp(qbeType);
+    
+    switch (op) {
+        case TokenType::MINUS:
+            // Negation: 0 - operand
+            if (operandType == VariableType::INT) {
+                emit("    " + resultTemp + " =l sub 0, " + operandTemp + "\n");
+            } else {
+                emit("    " + resultTemp + " =d sub d_0.0, " + operandTemp + "\n");
+            }
+            break;
+            
+        case TokenType::NOT: {
+            // Bitwise NOT: flip all bits - always returns integer
+            // In BASIC, NOT is bitwise, not logical
+            // Like SGN/ABS/CINT, coerce argument to integer and return 'w' type
+            
+            std::string notOperand = operandTemp;
+            std::string actualQBEType = getActualQBEType(expr->expr.get());
+            
+            // Coerce to 32-bit integer if needed
+            if (operandType == VariableType::DOUBLE || operandType == VariableType::FLOAT) {
+                // Convert double/float to 32-bit integer for bitwise operation
+                notOperand = allocTemp("w");
+                emit("    " + notOperand + " =w dtosi " + operandTemp + "\n");
+                m_stats.instructionsGenerated++;
+            } else if (operandType == VariableType::INT) {
+                // If it's already INT but stored as 'l' (64-bit), truncate to 'w' (32-bit)
+                // QBE allows 'copy' to truncate from l to w
+                if (actualQBEType == "l") {
+                    std::string truncated = allocTemp("w");
+                    emit("    " + truncated + " =w copy " + notOperand + "\n");
+                    notOperand = truncated;
+                    m_stats.instructionsGenerated++;
+                }
+                // else already 'w', use as-is
+            } else {
+                // String or other type - treat as integer 0
+                notOperand = allocTemp("w");
+                emit("    " + notOperand + " =w copy 0\n");
+                m_stats.instructionsGenerated++;
+            }
+            
+            // Perform bitwise NOT using XOR with -1 on 32-bit value
+            std::string notResult = allocTemp("w");
+            emit("    " + notResult + " =w xor " + notOperand + ", -1\n");
+            m_stats.instructionsGenerated++;
+            return notResult;  // Return 'w' type, consistent with other integer intrinsics
+        }
+            
+        case TokenType::PLUS:
+            // Unary plus: just copy
+            emit("    " + resultTemp + " =" + typeSuffix + " copy " + operandTemp + "\n");
+            break;
+            
+        default:
+            emitComment("Unknown unary operator: " + std::to_string(static_cast<int>(op)));
+            emit("    " + resultTemp + " =" + typeSuffix + " copy " + operandTemp + "\n");
+            break;
+    }
+    
+    m_stats.instructionsGenerated++;
+    return resultTemp;
+}
+
+// =============================================================================
+// Function Calls
+// =============================================================================
+
+std::string QBECodeGenerator::emitFunctionCall(const FunctionCallExpression* expr) {
+    if (!expr) {
+        std::string temp = allocTemp("w");
+        emit("    " + temp + " =w copy 0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    std::string funcName = expr->name;
+    std::string upper = funcName;
+    for (char& c : upper) c = std::toupper(c);
+    
+    emit("    # DEBUG emitFunctionCall: funcName=" + funcName + " upper=" + upper + " args=" + std::to_string(expr->arguments.size()) + "\n");
+    
+    // Special case: LEN() - just load the length field from StringDescriptor (offset 8)
+    if (upper == "LEN" && expr->arguments.size() == 1) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string lenPtr = allocTemp("l");
+        std::string result = allocTemp("l");
+        emit("    " + lenPtr + " =l add " + strTemp + ", 8\n");  // offset to length field
+        emit("    " + result + " =l loadl " + lenPtr + "\n");
+        m_stats.instructionsGenerated += 2;
+        return result;
+    }
+    
+    // Special case: STRTYPE() - load encoding type from StringDescriptor (offset 28)
+    // Returns: 0 = ASCII, 1 = UTF-32
+    if (upper == "STRTYPE" && expr->arguments.size() == 1) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string encPtr = allocTemp("l");
+        std::string result = allocTemp("w");
+        emit("    " + encPtr + " =l add " + strTemp + ", 28\n");  // offset to encoding field
+        emit("    " + result + " =w loadub " + encPtr + "\n");     // load encoding byte (0 or 1)
+        m_stats.instructionsGenerated += 2;
+        return result;
+    }
+    
+    // Special case: ASC() - load first code point from StringDescriptor
+    // Need to check encoding type: ASCII (offset 28) = 0 uses loadub, UTF-32 = 1 uses loaduw
+    if (upper == "ASC" && expr->arguments.size() == 1) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        
+        // Check if string is NULL or empty - need to check length first
+        std::string lenPtr = allocTemp("l");
+        std::string len = allocTemp("l");
+        emit("    " + lenPtr + " =l add " + strTemp + ", 8\n");  // offset to length field
+        emit("    " + len + " =l loadl " + lenPtr + "\n");
+        
+        // Check if length > 0
+        std::string hasChars = allocTemp("w");
+        emit("    " + hasChars + " =w csgtl " + len + ", 0\n");  // signed greater than
+        
+        std::string validLabel = allocLabel();
+        std::string emptyLabel = allocLabel();
+        std::string endLabel = allocLabel();
+        
+        emit("    jnz " + hasChars + ", @" + validLabel + ", @" + emptyLabel + "\n");
+        m_stats.instructionsGenerated += 4;
+        
+        // Valid string - check encoding type and load first character
+        emit("@" + validLabel + "\n");
+        
+        // Load encoding byte at offset 28
+        std::string encodingPtr = allocTemp("l");
+        std::string encoding = allocTemp("w");
+        emit("    " + encodingPtr + " =l add " + strTemp + ", 28\n");
+        emit("    " + encoding + " =w loadub " + encodingPtr + "\n");  // load encoding byte
+        
+        // Load data pointer at offset 0
+        std::string dataPtr = allocTemp("l");
+        emit("    " + dataPtr + " =l loadl " + strTemp + "\n");
+        
+        // Check encoding: 0=ASCII, 1=UTF-32
+        std::string isASCII = allocTemp("w");
+        emit("    " + isASCII + " =w ceqw " + encoding + ", 0\n");
+        
+        std::string asciiLabel = allocLabel();
+        std::string utf32Label = allocLabel();
+        
+        emit("    jnz " + isASCII + ", @" + asciiLabel + ", @" + utf32Label + "\n");
+        m_stats.instructionsGenerated += 6;
+        
+        // ASCII path - load 1 byte
+        emit("@" + asciiLabel + "\n");
+        std::string asciiChar = allocTemp("w");
+        emit("    " + asciiChar + " =w loadub " + dataPtr + "\n");
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w copy " + asciiChar + "\n");
+        emit("    jmp @" + endLabel + "\n");
+        m_stats.instructionsGenerated += 3;
+        
+        // UTF-32 path - load 4 bytes
+        emit("@" + utf32Label + "\n");
+        std::string utf32Char = allocTemp("w");
+        emit("    " + utf32Char + " =w loaduw " + dataPtr + "\n");
+        emit("    " + result + " =w copy " + utf32Char + "\n");
+        emit("    jmp @" + endLabel + "\n");
+        m_stats.instructionsGenerated += 3;
+        
+        // Empty string - return 0
+        emit("@" + emptyLabel + "\n");
+        emit("    " + result + " =w copy 0\n");
+        m_stats.instructionsGenerated++;
+        
+        emit("@" + endLabel + "\n");
+        return result;
+    }
+    
+    // Special case: INKEY$ - Non-blocking keyboard input
+    if (upper == "INKEY" || upper == "INKEY$") {
+        emitComment("INKEY$ - Non-blocking keyboard input");
+        std::string result = allocTemp("l");
+        emit("    " + result + " =l call $basic_inkey()\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // Special case: CSRLIN - Get current cursor row
+    if (upper == "CSRLIN") {
+        emitComment("CSRLIN - Get cursor row");
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w call $basic_csrlin()\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // Special case: POS - Get current cursor column
+    if (upper == "POS" && expr->arguments.size() == 1) {
+        emitComment("POS - Get cursor column");
+        // The argument is always 0 (dummy parameter), evaluate it but ignore result
+        emitExpression(expr->arguments[0].get());
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w call $basic_pos(w 0)\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // Special case: String slicing s$(start TO end) - converted to __string_slice
+    if (upper == "__STRING_SLICE" && expr->arguments.size() == 3) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string startTemp = emitExpression(expr->arguments[1].get());
+        std::string endTemp = emitExpression(expr->arguments[2].get());
+        
+        // Ensure start and end are int64_t (l type)
+        VariableType startType = inferExpressionType(expr->arguments[1].get());
+        if (startType == VariableType::DOUBLE) {
+            std::string startInt = allocTemp("w");
+            emit("    " + startInt + " =w dtosi " + startTemp + "\n");
+            std::string startLong = allocTemp("l");
+            emit("    " + startLong + " =l extsw " + startInt + "\n");
+            startTemp = startLong;
+        } else if (startType == VariableType::INT) {
+            std::string startLong = allocTemp("l");
+            emit("    " + startLong + " =l extsw " + startTemp + "\n");
+            startTemp = startLong;
+        }
+        
+        VariableType endType = inferExpressionType(expr->arguments[2].get());
+        if (endType == VariableType::DOUBLE) {
+            std::string endInt = allocTemp("w");
+            emit("    " + endInt + " =w dtosi " + endTemp + "\n");
+            std::string endLong = allocTemp("l");
+            emit("    " + endLong + " =l extsw " + endInt + "\n");
+            endTemp = endLong;
+        } else if (endType == VariableType::INT) {
+            std::string endLong = allocTemp("l");
+            emit("    " + endLong + " =l extsw " + endTemp + "\n");
+            endTemp = endLong;
+        }
+        
+        std::string result = allocTemp("l");
+        emit("    " + result + " =l call $string_slice(l " + strTemp + ", l " + startTemp + ", l " + endTemp + ")\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // Special case: MID$(str, start, length) - substring extraction
+    if ((upper == "MID" || upper == "MID$") && expr->arguments.size() == 3) {
+        emit("    # DEBUG: MID$ special case matched, name=" + expr->name + ", args=" + std::to_string(expr->arguments.size()) + "\n");
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string startTemp = emitExpression(expr->arguments[1].get());
+        std::string lenTemp = emitExpression(expr->arguments[2].get());
+        emit("    # DEBUG: startTemp=" + startTemp + ", lenTemp=" + lenTemp + "\n");
+        
+        // Ensure start and length are int64_t (l type)
+        VariableType startType = inferExpressionType(expr->arguments[1].get());
+        emit("    # DEBUG: startType=" + std::to_string(static_cast<int>(startType)) + "\n");
+        if (startType == VariableType::DOUBLE) {
+            emit("    # DEBUG: Converting startTemp from DOUBLE to INT64\n");
+            // Convert double to int64_t
+            std::string startInt = allocTemp("w");
+            emit("    " + startInt + " =w dtosi " + startTemp + "\n");
+            std::string startLong = allocTemp("l");
+            emit("    " + startLong + " =l extsw " + startInt + "\n");
+            startTemp = startLong;
+        } else if (startType == VariableType::INT) {
+            std::string startLong = allocTemp("l");
+            emit("    " + startLong + " =l extsw " + startTemp + "\n");
+            startTemp = startLong;
+        }
+        
+        VariableType lenType = inferExpressionType(expr->arguments[2].get());
+        if (lenType == VariableType::DOUBLE) {
+            // Convert double to int64_t
+            std::string lenInt = allocTemp("w");
+            emit("    " + lenInt + " =w dtosi " + lenTemp + "\n");
+            std::string lenLong = allocTemp("l");
+            emit("    " + lenLong + " =l extsw " + lenInt + "\n");
+            lenTemp = lenLong;
+        } else if (lenType == VariableType::INT) {
+            std::string lenLong = allocTemp("l");
+            emit("    " + lenLong + " =l extsw " + lenTemp + "\n");
+            lenTemp = lenLong;
+        }
+        
+        // BASIC uses 1-based indexing, but C runtime uses 0-based
+        // Subtract 1 from start position
+        std::string adjustedStart = allocTemp("l");
+        emit("    " + adjustedStart + " =l sub " + startTemp + ", 1\n");
+        
+        std::string result = allocTemp("l");
+        emit("    " + result + " =l call $string_mid(l " + strTemp + ", l " + adjustedStart + ", l " + lenTemp + ")\n");
+        m_stats.instructionsGenerated += 2;
+        return result;
+    }
+    
+    // Special case: LEFT$(str, count) - left substring
+    if ((upper == "LEFT" || upper == "LEFT$") && expr->arguments.size() == 2) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string countTemp = emitExpression(expr->arguments[1].get());
+        
+        // Ensure count is int64_t
+        VariableType countType = inferExpressionType(expr->arguments[1].get());
+        if (countType == VariableType::DOUBLE) {
+            // Convert double to int64_t
+            std::string countInt = allocTemp("w");
+            emit("    " + countInt + " =w dtosi " + countTemp + "\n");
+            std::string countLong = allocTemp("l");
+            emit("    " + countLong + " =l extsw " + countInt + "\n");
+            countTemp = countLong;
+        } else if (countType == VariableType::INT) {
+            std::string countLong = allocTemp("l");
+            emit("    " + countLong + " =l extsw " + countTemp + "\n");
+            countTemp = countLong;
+        }
+        
+        std::string result = allocTemp("l");
+        emit("    " + result + " =l call $string_left(l " + strTemp + ", l " + countTemp + ")\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // Special case: RIGHT$(str, count) - right substring
+    if ((upper == "RIGHT" || upper == "RIGHT$") && expr->arguments.size() == 2) {
+        std::string strTemp = emitExpression(expr->arguments[0].get());
+        std::string countTemp = emitExpression(expr->arguments[1].get());
+        
+        // Ensure count is int64_t
+        VariableType countType = inferExpressionType(expr->arguments[1].get());
+        if (countType == VariableType::DOUBLE) {
+            // Convert double to int64_t
+            std::string countInt = allocTemp("w");
+            emit("    " + countInt + " =w dtosi " + countTemp + "\n");
+            std::string countLong = allocTemp("l");
+            emit("    " + countLong + " =l extsw " + countInt + "\n");
+            countTemp = countLong;
+        } else if (countType == VariableType::INT) {
+            std::string countLong = allocTemp("l");
+            emit("    " + countLong + " =l extsw " + countTemp + "\n");
+            countTemp = countLong;
+        }
+        
+        std::string result = allocTemp("l");
+        emit("    " + result + " =l call $string_right(l " + strTemp + ", l " + countTemp + ")\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // Special case: RAND(n) - convert argument to int32_t
+    if (upper == "RAND" && expr->arguments.size() == 1) {
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        VariableType argType = inferExpressionType(expr->arguments[0].get());
+        
+        // Convert argument to int if it's not already
+        if (argType == VariableType::DOUBLE || argType == VariableType::FLOAT) {
+            std::string intArg = allocTemp("w");
+            emit("    " + intArg + " =w dtosi " + argTemp + "\n");
+            argTemp = intArg;
+            m_stats.instructionsGenerated++;
+        } else if (argType == VariableType::INT) {
+            // Already int, use as-is
+        } else {
+            // For other types, convert to int
+            std::string intArg = allocTemp("w");
+            emit("    " + intArg + " =w copy " + argTemp + "\n");
+            argTemp = intArg;
+            m_stats.instructionsGenerated++;
+        }
+        
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w call $basic_rand(w " + argTemp + ")\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // =========================================================================
+    // INTRINSIC FUNCTIONS - Generate inline code instead of function calls
+    // =========================================================================
+    
+    // FIX(d) - Truncate toward zero using dtosi
+    if (upper == "FIX" && expr->arguments.size() == 1) {
+        // Check for constant folding
+        double constValue;
+        if (isNumberLiteral(expr->arguments[0].get(), constValue)) {
+            // Constant fold: truncate toward zero
+            int64_t result = static_cast<int64_t>(constValue);
+            return emitIntConstant(result);
+        }
+        
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        VariableType argType = inferExpressionType(expr->arguments[0].get());
+        
+        // Convert to double if needed
+        if (argType == VariableType::INT) {
+            std::string doubleArg = allocTemp("d");
+            emit("    " + doubleArg + " =d swtof " + argTemp + "\n");
+            argTemp = doubleArg;
+            m_stats.instructionsGenerated++;
+        }
+        
+        // Truncate toward zero using dtosi
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w dtosi " + argTemp + "\n");
+        m_stats.instructionsGenerated++;
+        return result;
+    }
+    
+    // CINT(d) - Round to nearest integer
+    if (upper == "CINT" && expr->arguments.size() == 1) {
+        // Check for constant folding
+        double constValue;
+        if (isNumberLiteral(expr->arguments[0].get(), constValue)) {
+            // Constant fold: add 0.5 and truncate toward zero (matches dtosi behavior)
+            int64_t result = static_cast<int64_t>(std::trunc(constValue + 0.5));
+            return emitIntConstant(result);
+        }
+        
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        VariableType argType = inferExpressionType(expr->arguments[0].get());
+        
+        // Convert to double if needed
+        if (argType == VariableType::INT) {
+            std::string doubleArg = allocTemp("d");
+            emit("    " + doubleArg + " =d swtof " + argTemp + "\n");
+            argTemp = doubleArg;
+            m_stats.instructionsGenerated++;
+        }
+        
+        // Simple rounding: add 0.5 and truncate
+        // This approximates banker's rounding for most cases
+        std::string adjusted = allocTemp("d");
+        emit("    " + adjusted + " =d add " + argTemp + ", d_0.5\n");
+        
+        // Truncate to int
+        std::string result = allocTemp("w");
+        emit("    " + result + " =w dtosi " + adjusted + "\n");
+        m_stats.instructionsGenerated += 2;
+        return result;
+    }
+    
+    // ABS(x) - Absolute value
+    if (upper == "ABS" && expr->arguments.size() == 1) {
+        // Check for constant folding
+        double constValue;
+        if (isNumberLiteral(expr->arguments[0].get(), constValue)) {
+            // Constant fold: absolute value, but keep as double to match the
+            // runtime signature (avoids emitting w-typed temps fed into
+            // basic_print_double).
+            double absVal = std::abs(constValue);
+            std::string temp = allocTemp("d");
+            std::ostringstream oss;
+            oss << std::fixed << absVal;
+            emit("    " + temp + " =d copy d_" + oss.str() + "\n");
+            m_stats.instructionsGenerated++;
+            return temp;
+        }
+        
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        VariableType argType = inferExpressionType(expr->arguments[0].get());
+        
+        if (argType == VariableType::INT) {
+            // For integers: if negative, negate using conditional branches
+            // Check actual QBE type (w or l)
+            std::string argQBEType = getActualQBEType(expr->arguments[0].get());
+            if (argQBEType != "w" && argQBEType != "l") {
+                argQBEType = "l";  // Default to long for INT
+            }
+            
+            std::string isNeg = allocTemp("w");
+            if (argQBEType == "l") {
+                emit("    " + isNeg + " =w csltl " + argTemp + ", 0\n");
+            } else {
+                emit("    " + isNeg + " =w csltw " + argTemp + ", 0\n");
+            }
+            
+            std::string negVal = allocTemp(argQBEType);
+            emit("    " + negVal + " =" + argQBEType + " neg " + argTemp + "\n");
+            
+            // Use conditional branch pattern
+            std::string thenLabel = allocLabel();
+            std::string elseLabel = allocLabel();
+            std::string endLabel = allocLabel();
+            std::string result = allocTemp(argQBEType);
+            
+            emit("    jnz " + isNeg + ", @" + thenLabel + ", @" + elseLabel + "\n");
+            emit("@" + thenLabel + "\n");
+            emit("    " + result + " =" + argQBEType + " copy " + negVal + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + elseLabel + "\n");
+            emit("    " + result + " =" + argQBEType + " copy " + argTemp + "\n");
+            emit("@" + endLabel + "\n");
+            
+            m_stats.instructionsGenerated += 8;
+            m_stats.labelsGenerated += 3;
+            return result;
+        } else {
+            // For doubles: use runtime function (fabs)
+            // Could be made intrinsic with conditional logic but keep simple for now
+        }
+    }
+    
+    // SGN(x) - Sign function (-1, 0, or 1)
+    if (upper == "SGN" && expr->arguments.size() == 1) {
+        // Check for constant folding
+        double constValue;
+        if (isNumberLiteral(expr->arguments[0].get(), constValue)) {
+            // Constant fold: sign function
+            int64_t result = (constValue > 0) ? 1 : ((constValue < 0) ? -1 : 0);
+            return emitIntConstant(result);
+        }
+        
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        VariableType argType = inferExpressionType(expr->arguments[0].get());
+        
+        if (argType == VariableType::INT) {
+            // For integers: branchless using (x > 0) - (x < 0)
+            std::string zero = allocTemp("w");
+            emit("    " + zero + " =w copy 0\n");
+            
+            std::string isNeg = allocTemp("w");
+            emit("    " + isNeg + " =w csltw " + argTemp + ", " + zero + "\n");
+            
+            std::string isPos = allocTemp("w");
+            emit("    " + isPos + " =w csgtw " + argTemp + ", " + zero + "\n");
+            
+            // SGN(x) = (x > 0) - (x < 0)
+            std::string result = allocTemp("w");
+            emit("    " + result + " =w sub " + isPos + ", " + isNeg + "\n");
+            
+            m_stats.instructionsGenerated += 4;
+            return result;
+        } else {
+            // For doubles: use runtime function
+        }
+    }
+    
+    // MIN(a, b) - Minimum of two values
+    if (upper == "MIN" && expr->arguments.size() == 2) {
+        // Check for constant folding
+        double val1, val2;
+        if (areNumberLiterals(expr->arguments[0].get(), expr->arguments[1].get(), val1, val2)) {
+            // Constant fold: minimum
+            int64_t result = static_cast<int64_t>(std::min(val1, val2));
+            return emitIntConstant(result);
+        }
+        
+        std::string leftTemp = emitExpression(expr->arguments[0].get());
+        std::string rightTemp = emitExpression(expr->arguments[1].get());
+        VariableType leftType = inferExpressionType(expr->arguments[0].get());
+        VariableType rightType = inferExpressionType(expr->arguments[1].get());
+        
+        // Ensure both operands are the same type
+        if (leftType != rightType) {
+            // Promote to double if types differ
+            if (leftType == VariableType::INT) {
+                std::string promoted = allocTemp("d");
+                emit("    " + promoted + " =d swtof " + leftTemp + "\n");
+                leftTemp = promoted;
+                m_stats.instructionsGenerated++;
+            }
+            if (rightType == VariableType::INT) {
+                std::string promoted = allocTemp("d");
+                emit("    " + promoted + " =d swtof " + rightTemp + "\n");
+                rightTemp = promoted;
+                m_stats.instructionsGenerated++;
+            }
+        }
+        
+        if (leftType == VariableType::INT || (leftType == rightType && leftType == VariableType::INT)) {
+            // Integer minimum using conditional branches
+            std::string isLess = allocTemp("w");
+            emit("    " + isLess + " =w csltw " + leftTemp + ", " + rightTemp + "\n");
+            
+            std::string thenLabel = allocLabel();
+            std::string elseLabel = allocLabel();
+            std::string endLabel = allocLabel();
+            std::string result = allocTemp("w");
+            
+            emit("    jnz " + isLess + ", @" + thenLabel + ", @" + elseLabel + "\n");
+            emit("@" + thenLabel + "\n");
+            emit("    " + result + " =w copy " + leftTemp + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + elseLabel + "\n");
+            emit("    " + result + " =w copy " + rightTemp + "\n");
+            emit("@" + endLabel + "\n");
+            
+            m_stats.instructionsGenerated += 8;
+            m_stats.labelsGenerated += 3;
+            return result;
+        } else {
+            // Double minimum using conditional branches
+            std::string isLess = allocTemp("w");
+            emit("    " + isLess + " =w cltd " + leftTemp + ", " + rightTemp + "\n");
+            
+            std::string thenLabel = allocLabel();
+            std::string elseLabel = allocLabel();
+            std::string endLabel = allocLabel();
+            std::string result = allocTemp("d");
+            
+            emit("    jnz " + isLess + ", @" + thenLabel + ", @" + elseLabel + "\n");
+            emit("@" + thenLabel + "\n");
+            emit("    " + result + " =d copy " + leftTemp + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + elseLabel + "\n");
+            emit("    " + result + " =d copy " + rightTemp + "\n");
+            emit("@" + endLabel + "\n");
+            
+            m_stats.instructionsGenerated += 8;
+            m_stats.labelsGenerated += 3;
+            return result;
+        }
+    }
+    
+    // MAX(a, b) - Maximum of two values
+    if (upper == "MAX" && expr->arguments.size() == 2) {
+        // Check for constant folding
+        double val1, val2;
+        if (areNumberLiterals(expr->arguments[0].get(), expr->arguments[1].get(), val1, val2)) {
+            // Constant fold: maximum
+            int64_t result = static_cast<int64_t>(std::max(val1, val2));
+            return emitIntConstant(result);
+        }
+        
+        std::string leftTemp = emitExpression(expr->arguments[0].get());
+        std::string rightTemp = emitExpression(expr->arguments[1].get());
+        VariableType leftType = inferExpressionType(expr->arguments[0].get());
+        VariableType rightType = inferExpressionType(expr->arguments[1].get());
+        
+        // Ensure both operands are the same type
+        if (leftType != rightType) {
+            // Promote to double if types differ
+            if (leftType == VariableType::INT) {
+                std::string promoted = allocTemp("d");
+                emit("    " + promoted + " =d swtof " + leftTemp + "\n");
+                leftTemp = promoted;
+                m_stats.instructionsGenerated++;
+            }
+            if (rightType == VariableType::INT) {
+                std::string promoted = allocTemp("d");
+                emit("    " + promoted + " =d swtof " + rightTemp + "\n");
+                rightTemp = promoted;
+                m_stats.instructionsGenerated++;
+            }
+        }
+        
+        if (leftType == VariableType::INT || (leftType == rightType && leftType == VariableType::INT)) {
+            // Integer maximum using conditional branches
+            std::string isGreater = allocTemp("w");
+            emit("    " + isGreater + " =w csgtw " + leftTemp + ", " + rightTemp + "\n");
+            
+            std::string thenLabel = allocLabel();
+            std::string elseLabel = allocLabel();
+            std::string endLabel = allocLabel();
+            std::string result = allocTemp("w");
+            
+            emit("    jnz " + isGreater + ", @" + thenLabel + ", @" + elseLabel + "\n");
+            emit("@" + thenLabel + "\n");
+            emit("    " + result + " =w copy " + leftTemp + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + elseLabel + "\n");
+            emit("    " + result + " =w copy " + rightTemp + "\n");
+            emit("@" + endLabel + "\n");
+            
+            m_stats.instructionsGenerated += 8;
+            m_stats.labelsGenerated += 3;
+            return result;
+        } else {
+            // Double maximum using conditional branches
+            std::string isGreater = allocTemp("w");
+            emit("    " + isGreater + " =w cgtd " + leftTemp + ", " + rightTemp + "\n");
+            
+            std::string thenLabel = allocLabel();
+            std::string elseLabel = allocLabel();
+            std::string endLabel = allocLabel();
+            std::string result = allocTemp("d");
+            
+            emit("    jnz " + isGreater + ", @" + thenLabel + ", @" + elseLabel + "\n");
+            emit("@" + thenLabel + "\n");
+            emit("    " + result + " =d copy " + leftTemp + "\n");
+            emit("    jmp @" + endLabel + "\n");
+            emit("@" + elseLabel + "\n");
+            emit("    " + result + " =d copy " + rightTemp + "\n");
+            emit("@" + endLabel + "\n");
+            
+            m_stats.instructionsGenerated += 8;
+            m_stats.labelsGenerated += 3;
+            return result;
+        }
+    }
+    
+    // Evaluate arguments (get raw temporaries)
+    std::vector<std::string> argTemps;
+    std::vector<VariableType> argTypes;
+    for (const auto& arg : expr->arguments) {
+        argTemps.push_back(emitExpression(arg.get()));
+        argTypes.push_back(inferExpressionType(arg.get()));
+    }
+    
+    // Check if this is a user-defined function
+    bool isUserFunction = false;
+    const ControlFlowGraph* funcCFG = nullptr;
+    if (m_programCFG) {
+        funcCFG = m_programCFG->getFunctionCFG(funcName);
+        isUserFunction = (funcCFG != nullptr);
+    }
+    
+    // Determine return type
+    std::string returnType = "l";  // Default to long (64-bit INT)
+    if (isUserFunction && funcCFG) {
+        if (funcCFG->returnType == VariableType::DOUBLE || funcCFG->returnType == VariableType::FLOAT) {
+            returnType = "d";
+        } else if (funcCFG->returnType == VariableType::STRING) {
+            returnType = "l";
+        }
+    } else {
+        // Builtins ending with $ return pointers
+        if (!upper.empty() && upper.back() == '$') {
+            returnType = "l";
+        }
+        // Check for builtin string functions
+        if (upper == "CHR$" || upper == "LEFT$" || upper == "RIGHT$" || 
+            upper == "MID$" || upper == "__STRING_SLICE" ||
+            upper == "STR$" || upper == "STRING$" || upper == "SPACE$" ||
+            upper == "LTRIM$" || upper == "RTRIM$" || upper == "TRIM$" ||
+            upper == "REPLACE$" || upper == "REVERSE$" || upper == "INSERT$" ||
+            upper == "DELETE$" || upper == "REMOVE$" || upper == "EXTRACT$" ||
+            upper == "LPAD$" || upper == "RPAD$" || upper == "CENTER$" ||
+            upper == "STRREV$" || upper == "HEX$" || upper == "BIN$" ||
+            upper == "OCT$" || upper == "JOIN$" || upper == "SPLIT$") {
+            returnType = "l";  // String functions return pointers
+        }
+    }
+    
+    // Pre-convert arguments to match parameter types BEFORE emitting the call
+    std::vector<std::string> convertedArgTemps;
+    std::vector<std::string> convertedArgTypes;
+    
+    if (isUserFunction) {
+        for (size_t i = 0; i < argTemps.size(); ++i) {
+            std::string argTemp = argTemps[i];
+            VariableType argType = argTypes[i];
+            VariableType paramType = VariableType::DOUBLE;  // Default
+            
+            // Look up actual parameter type if available
+            if (funcCFG && i < funcCFG->parameterTypes.size()) {
+                paramType = funcCFG->parameterTypes[i];
+            } else if (m_symbols) {
+                // Try to find in symbol table
+                auto it = m_symbols->functions.find(funcName);
+                if (it != m_symbols->functions.end() && i < it->second.parameterTypes.size()) {
+                    paramType = it->second.parameterTypes[i];
+                }
+            }
+            
+            // Coerce argument to match parameter type (this emits conversion instructions)
+            if (argType != paramType) {
+                argTemp = promoteToType(argTemp, argType, paramType);
+            }
+            
+            convertedArgTemps.push_back(argTemp);
+            convertedArgTypes.push_back(getQBEType(paramType));
+        }
+    } else {
+        // For runtime functions, check registry for parameter types and convert if needed
+        auto& registry = FasterBASIC::ModularCommands::getGlobalCommandRegistry();
+        
+        // Convert mangled names back to original form for registry lookup
+        // e.g., MID_STRING -> MID$, STR_STRING -> STR$
+        std::string registryName = funcName;
+        if (upper.length() > 7 && upper.substr(upper.length() - 7) == "_STRING") {
+            registryName = upper.substr(0, upper.length() - 7) + "$";
+        }
+        
+        emit("    # DEBUG: Looking for '" + registryName + "' in registry (original: " + funcName + ")\n");
+        emit("    # DEBUG: hasFunction(\"MID$\") = " + std::to_string(registry.hasFunction("MID$")) + "\n");
+        emit("    # DEBUG: hasFunction(\"" + registryName + "\") = " + std::to_string(registry.hasFunction(registryName)) + "\n");
+        
+        bool hasRegistryInfo = registry.hasFunction(registryName);
+        
+        if (hasRegistryInfo) {
+            const auto* funcDef = registry.getFunction(registryName);
+            emit("    # DEBUG: Found registry function: " + registryName + " (from " + funcName + ") with " + std::to_string(funcDef->parameters.size()) + " params\n");
+            
+            for (size_t i = 0; i < argTemps.size(); ++i) {
+                std::string argTemp = argTemps[i];
+                VariableType argType = argTypes[i];
+                
+                // Check if registry specifies parameter type
+                VariableType expectedType = VariableType::DOUBLE;  // Default
+                if (i < funcDef->parameters.size()) {
+                    // Convert registry ParameterType to VariableType
+                    auto paramType = funcDef->parameters[i].type;
+                    emit("    # DEBUG: Param " + std::to_string(i) + " registry type=" + std::to_string(static_cast<int>(paramType)) + ", argType=" + std::to_string(static_cast<int>(argType)) + "\n");
+                    if (paramType == FasterBASIC::ModularCommands::ParameterType::INT) {
+                        expectedType = VariableType::INT;
+                    } else if (paramType == FasterBASIC::ModularCommands::ParameterType::FLOAT) {
+                        expectedType = VariableType::DOUBLE;
+                    } else if (paramType == FasterBASIC::ModularCommands::ParameterType::STRING) {
+                        expectedType = VariableType::STRING;
+                    }
+                    
+                    // Convert if types don't match
+                    if (argType != expectedType && argType != VariableType::UNKNOWN) {
+                        emit("    # DEBUG: Type mismatch - converting from " + std::to_string(static_cast<int>(argType)) + " to " + std::to_string(static_cast<int>(expectedType)) + "\n");
+                        if (argType == VariableType::DOUBLE && expectedType == VariableType::INT) {
+                            // Convert double to int64_t
+                            emit("    # DEBUG: Converting DOUBLE to INT64\n");
+                            std::string intTemp = allocTemp("w");
+                            emit("    " + intTemp + " =w dtosi " + argTemp + "\n");
+                            std::string longTemp = allocTemp("l");
+                            emit("    " + longTemp + " =l extsw " + intTemp + "\n");
+                            argTemp = longTemp;
+                            emit("    # DEBUG: Converted " + argTemps[i] + " to " + argTemp + "\n");
+                        } else if (argType == VariableType::INT && expectedType == VariableType::DOUBLE) {
+                            // Convert int to double
+                            argTemp = promoteToType(argTemp, argType, expectedType);
+                        }
+                    }
+                }
+                
+                convertedArgTemps.push_back(argTemp);
+                // Get the actual QBE type from the expression (or converted value)
+                std::string actualType = getActualQBEType(expr->arguments[i].get());
+                // Update type if we converted
+                if (argTemp != argTemps[i]) {
+                    if (expectedType == VariableType::INT) {
+                        actualType = "l";
+                    } else if (expectedType == VariableType::DOUBLE) {
+                        actualType = "d";
+                    } else if (expectedType == VariableType::STRING) {
+                        actualType = "l";  // StringDescriptor*
+                    }
+                }
+                convertedArgTypes.push_back(actualType);
+            }
+        } else {
+            emit("    # DEBUG: Function " + funcName + " (tried " + registryName + ") NOT in registry\n");
+            // No registry info - use actual types
+            for (size_t i = 0; i < argTemps.size(); ++i) {
+                convertedArgTemps.push_back(argTemps[i]);
+                std::string actualType = getActualQBEType(expr->arguments[i].get());
+                convertedArgTypes.push_back(actualType);
+            }
+        }
+    }
+    
+    std::string resultTemp = allocTemp(returnType);
+    
+    if (isUserFunction) {
+        // Call user-defined function with pre-converted arguments
+        emit("    " + resultTemp + " =" + returnType + " call $" + funcName + "(");
+        
+        for (size_t i = 0; i < convertedArgTemps.size(); ++i) {
+            if (i > 0) emit(", ");
+            emit(convertedArgTypes[i] + " " + convertedArgTemps[i]);
+        }
+        
+        emit(")\n");
+    } else {
+        // Call runtime library function
+        std::string runtimeFunc = mapToRuntimeFunction(funcName);
+        
+        // Determine correct return type for runtime function
+        std::string upper = funcName;
+        for (char& c : upper) c = std::toupper(c);
+        
+        // Handle mangled string function names (e.g., STR_STRING -> STR$, CHR_STRING -> CHR$)
+        if (upper.length() > 7 && upper.substr(upper.length() - 7) == "_STRING") {
+            upper = upper.substr(0, upper.length() - 7) + "$";
+        }
+        
+        static const std::unordered_set<std::string> wordReturn = {
+            "ASC"  // Returns uint32_t (character code)
+        };
+
+        static const std::unordered_set<std::string> longReturn = {
+            "LEN", "INSTR", "INSTRREV", "TALLY"
+        };
+
+        static const std::unordered_set<std::string> stringReturn = {
+            "CHR$", "LEFT$", "RIGHT$", "MID$", "STR$", "SPACE$", "STRING$",
+            "UCASE$", "LCASE$", "TRIM$", "LTRIM$", "RTRIM$", "REPLACE$",
+            "REVERSE$", "INSERT$", "DELETE$", "REMOVE$", "EXTRACT$", "LPAD$",
+            "RPAD$", "CENTER$", "STRREV$", "HEX$", "BIN$", "OCT$", "JOIN$",
+            "SPLIT$"
+        };
+
+        static const std::unordered_set<std::string> doubleReturn = {
+            "VAL", "RND", "SIN", "COS", "TAN", "ATAN", "ATAN2", "LOG", "EXP", "SQRT",
+            "ABS", "POW", "TIMER", "SQR", "LN", "ATN", "ASIN", "ACOS",
+            "SINH", "COSH", "TANH", "ASINH", "ACOSH", "ATANH",
+            "LOG10", "LOG1P", "EXP2", "EXPM1", "CBRT", "HYPOT", "FMOD", "REMAINDER",
+            "FLOOR", "CEIL", "TRUNC", "ROUND", "COPYSIGN",
+            "ERF", "ERFC", "TGAMMA", "LGAMMA", "NEXTAFTER", "FMAX", "FMIN", "FMA",
+            "DEG", "RAD", "SIGMOID", "LOGIT", "NORMPDF", "NORMCDF", "FACT", "FACTORIAL",
+            "COMB", "PERM", "CLAMP", "LERP", "PMT", "PV", "FV"
+        };
+
+        std::string callReturnType = "w";  // Default to word
+        if (!upper.empty() && upper.back() == '$') {
+            callReturnType = "l";
+        }
+        if (wordReturn.count(upper)) {
+            callReturnType = "w";  // uint32_t -> word
+        } else if (longReturn.count(upper)) {
+            callReturnType = "l";  // int64_t -> long
+        } else if (stringReturn.count(upper)) {
+            callReturnType = "l";  // StringDescriptor* -> long pointer
+        } else if (doubleReturn.count(upper)) {
+            callReturnType = "d";  // double
+        }
+        
+        resultTemp = allocTemp(callReturnType);
+        emit("    " + resultTemp + " =" + callReturnType + " call $" + runtimeFunc + "(");
+        
+        for (size_t i = 0; i < convertedArgTemps.size(); ++i) {
+            if (i > 0) emit(", ");
+            emit(convertedArgTypes[i] + " " + convertedArgTemps[i]);
+        }
+        
+        emit(")\n");
+    }
+    
+    m_stats.instructionsGenerated++;
+    return resultTemp;
+}
+
+// =============================================================================
+// Array Access Expression
+// =============================================================================
+
+std::string QBECodeGenerator::emitArrayAccessExpr(const ArrayAccessExpression* expr) {
+    if (!expr) {
+        std::string temp = allocTemp("w");
+        emit("    " + temp + " =w copy 0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    // Check if this is actually a function call (not an array access)
+    // Function names are mangled with type suffixes (e.g., Factorial% -> Factorial_INT)
+    std::string mangledName = expr->name;
+    if (expr->typeSuffix != TokenType::UNKNOWN) {
+        // Mangle the name with its type suffix
+        switch (expr->typeSuffix) {
+            case TokenType::TYPE_STRING:
+                mangledName += "_STRING";
+                break;
+            case TokenType::TYPE_INT:
+                mangledName += "_INT";
+                break;
+            case TokenType::TYPE_DOUBLE:
+                mangledName += "_DOUBLE";
+                break;
+            case TokenType::TYPE_FLOAT:
+                mangledName += "_FLOAT";
+                break;
+            default:
+                break;
+        }
+    }
+    
+    // Check if this is a declared function
+    if (m_symbols && m_symbols->functions.find(mangledName) != m_symbols->functions.end()) {
+        // This is a function call, not array access - emit as function call
+        const auto& funcSym = m_symbols->functions.at(mangledName);
+        
+        // Emit function call
+        emitComment("Function call: " + mangledName);
+        
+        // Evaluate arguments
+        std::vector<std::string> argTemps;
+        std::vector<std::string> argTypes; // "w", "d", "l" for QBE
+        
+        for (const auto& argExpr : expr->indices) {
+            std::string argTemp = emitExpression(argExpr.get());
+            VariableType argType = inferExpressionType(argExpr.get());
+            
+            // Determine QBE type suffix
+            std::string qbeType;
+            if (argType == VariableType::STRING || argType == VariableType::UNICODE) {
+                qbeType = "l";  // strings are pointers
+            } else if (argType == VariableType::DOUBLE || argType == VariableType::FLOAT) {
+                qbeType = "d";  // floats are doubles in QBE
+            } else {
+                qbeType = "w";  // integers
+            }
+            
+            argTemps.push_back(argTemp);
+            argTypes.push_back(qbeType);
+        }
+        
+        // Build argument list
+        std::string argList;
+        for (size_t i = 0; i < argTemps.size(); ++i) {
+            if (i > 0) argList += ", ";
+            argList += argTypes[i] + " " + argTemps[i];
+        }
+        
+        // Determine return type
+        std::string retType;
+        if (funcSym.returnType == VariableType::STRING || funcSym.returnType == VariableType::UNICODE) {
+            retType = "l";
+        } else if (funcSym.returnType == VariableType::DOUBLE || funcSym.returnType == VariableType::FLOAT) {
+            retType = "d";
+        } else {
+            retType = "w";
+        }
+        
+        // Emit the call
+        std::string resultTemp = allocTemp(retType);
+        emit("    " + resultTemp + " =" + retType + " call $" + mangledName + "(" + argList + ")\n");
+        m_stats.instructionsGenerated++;
+        
+        return resultTemp;
+    }
+    
+    // Not a function - proceed with array access
+    // Evaluate indices - array indices MUST be integers
+    std::vector<std::string> indexTemps;
+    for (const auto& indexExpr : expr->indices) {
+        std::string indexTemp = emitExpression(indexExpr.get());
+        VariableType indexType = inferExpressionType(indexExpr.get());
+        
+        // Convert to integer if needed (array indices are always integers)
+        if (indexType != VariableType::INT) {
+            indexTemp = promoteToType(indexTemp, indexType, VariableType::INT);
+        }
+        
+        indexTemps.push_back(indexTemp);
+    }
+    
+    // Support 1D and 2D arrays
+    if (indexTemps.size() > 2) {
+        emitComment("ERROR: Arrays with more than 2 dimensions not supported");
+        // Call runtime error function and halt execution
+        emit("    call $basic_error_multidim_arrays()\n");
+        m_stats.instructionsGenerated++;
+        // Return a dummy value (won't be reached after error)
+        std::string temp = allocTemp("l");
+        emit("    " + temp + " =l copy 0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    bool is2D = (indexTemps.size() == 2);
+    std::string indexTemp1 = indexTemps[0];
+    std::string indexTemp2 = is2D ? indexTemps[1] : "";
+    
+    // Get array descriptor pointer - use directly without copying to avoid register allocation issues
+    std::string arrayRef = getArrayRef(expr->name);
+    
+    if (m_options.boundsChecking) {
+        emitComment("Array access " + expr->name + " with bounds check");
+    } else {
+        emitComment("Array access " + expr->name + " (bounds checking disabled)");
+    }
+    
+    // Load bounds and index for offset calculation
+    // These are needed even without bounds checking to compute the array offset
+    std::string lowerBound1Addr = allocTemp("l");
+    emit("    " + lowerBound1Addr + " =l add " + arrayRef + ", 8\n");
+    std::string lowerBound1 = allocTemp("l");
+    emit("    " + lowerBound1 + " =l loadl " + lowerBound1Addr + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    std::string upperBound1Addr = allocTemp("l");
+    emit("    " + upperBound1Addr + " =l add " + arrayRef + ", 16\n");
+    std::string upperBound1 = allocTemp("l");
+    emit("    " + upperBound1 + " =l loadl " + upperBound1Addr + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // Convert index1 to long for offset calculation
+    std::string indexLong1 = allocTemp("l");
+    emit("    " + indexLong1 + " =l extsw " + indexTemp1 + "\n");
+    m_stats.instructionsGenerated++;
+    
+    std::string indexLong2, lowerBound2, upperBound2;
+    
+    if (is2D) {
+        // Load lowerBound2 from descriptor (offset 24)
+        std::string lowerBound2Addr = allocTemp("l");
+        emit("    " + lowerBound2Addr + " =l add " + arrayRef + ", 24\n");
+        lowerBound2 = allocTemp("l");
+        emit("    " + lowerBound2 + " =l loadl " + lowerBound2Addr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Load upperBound2 from descriptor (offset 32)
+        std::string upperBound2Addr = allocTemp("l");
+        emit("    " + upperBound2Addr + " =l add " + arrayRef + ", 32\n");
+        upperBound2 = allocTemp("l");
+        emit("    " + upperBound2 + " =l loadl " + upperBound2Addr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Convert index2 to long for offset calculation
+        indexLong2 = allocTemp("l");
+        emit("    " + indexLong2 + " =l extsw " + indexTemp2 + "\n");
+        m_stats.instructionsGenerated++;
+    }
+    
+    // Perform bounds checking if enabled
+    if (m_options.boundsChecking) {
+        // Bounds check: index1 >= lowerBound1
+        std::string checkLower1 = allocTemp("w");
+        emit("    " + checkLower1 + " =w csgel " + indexLong1 + ", " + lowerBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Bounds check: index1 <= upperBound1
+        std::string checkUpper1 = allocTemp("w");
+        emit("    " + checkUpper1 + " =w cslel " + indexLong1 + ", " + upperBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Combined check for dimension 1
+        std::string checkBoth1 = allocTemp("w");
+        emit("    " + checkBoth1 + " =w and " + checkLower1 + ", " + checkUpper1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        std::string checkBothFinal;
+        
+        if (is2D) {
+            // Bounds check: index2 >= lowerBound2
+            std::string checkLower2 = allocTemp("w");
+            emit("    " + checkLower2 + " =w csgel " + indexLong2 + ", " + lowerBound2 + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Bounds check: index2 <= upperBound2
+            std::string checkUpper2 = allocTemp("w");
+            emit("    " + checkUpper2 + " =w cslel " + indexLong2 + ", " + upperBound2 + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Combined check for dimension 2
+            std::string checkBoth2 = allocTemp("w");
+            emit("    " + checkBoth2 + " =w and " + checkLower2 + ", " + checkUpper2 + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Final check: both dimensions must be in bounds
+            checkBothFinal = allocTemp("w");
+            emit("    " + checkBothFinal + " =w and " + checkBoth1 + ", " + checkBoth2 + "\n");
+            m_stats.instructionsGenerated++;
+        } else {
+            checkBothFinal = checkBoth1;
+        }
+        
+        // Branch: if out of bounds, call error handler
+        std::string boundsOkLabel = allocLabel();
+        std::string boundsErrLabel = allocLabel();
+        
+        emit("    jnz " + checkBothFinal + ", @" + boundsOkLabel + ", @" + boundsErrLabel + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Bounds error block
+        emit("@" + boundsErrLabel + "\n");
+        if (is2D) {
+            emit("    call $basic_array_bounds_error_2d(l " + indexLong1 + ", l " + lowerBound1 + ", l " + upperBound1 + ", l " + indexLong2 + ", l " + lowerBound2 + ", l " + upperBound2 + ")\n");
+        } else {
+            emit("    call $basic_array_bounds_error(l " + indexLong1 + ", l " + lowerBound1 + ", l " + upperBound1 + ")\n");
+        }
+        m_stats.instructionsGenerated++;
+        
+        // Bounds OK block
+        emit("@" + boundsOkLabel + "\n");
+    }
+    
+    // Calculate offset
+    std::string byteOffset;
+    
+    if (is2D) {
+        // 2D array: offset = ((index1 - lowerBound1) * dim2_size + (index2 - lowerBound2)) * elementSize
+        // Calculate dim2_size = upperBound2 - lowerBound2 + 1
+        std::string dim2Size = allocTemp("l");
+        emit("    " + dim2Size + " =l sub " + upperBound2 + ", " + lowerBound2 + "\n");
+        std::string dim2SizePlusOne = allocTemp("l");
+        emit("    " + dim2SizePlusOne + " =l add " + dim2Size + ", 1\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // adjustedIndex1 = index1 - lowerBound1
+        std::string adjustedIndex1 = allocTemp("l");
+        emit("    " + adjustedIndex1 + " =l sub " + indexLong1 + ", " + lowerBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // adjustedIndex2 = index2 - lowerBound2
+        std::string adjustedIndex2 = allocTemp("l");
+        emit("    " + adjustedIndex2 + " =l sub " + indexLong2 + ", " + lowerBound2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // rowOffset = adjustedIndex1 * dim2_size
+        std::string rowOffset = allocTemp("l");
+        emit("    " + rowOffset + " =l mul " + adjustedIndex1 + ", " + dim2SizePlusOne + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // linearIndex = rowOffset + adjustedIndex2
+        std::string linearIndex = allocTemp("l");
+        emit("    " + linearIndex + " =l add " + rowOffset + ", " + adjustedIndex2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Load elementSize from descriptor (offset 40)
+        std::string elemSizeAddr = allocTemp("l");
+        emit("    " + elemSizeAddr + " =l add " + arrayRef + ", 40\n");
+        std::string elemSize = allocTemp("l");
+        emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // byteOffset = linearIndex * elementSize
+        byteOffset = allocTemp("l");
+        emit("    " + byteOffset + " =l mul " + linearIndex + ", " + elemSize + "\n");
+        m_stats.instructionsGenerated++;
+    } else {
+        // 1D array: offset = (index - lowerBound) * elementSize
+        std::string adjustedIndex = allocTemp("l");
+        emit("    " + adjustedIndex + " =l sub " + indexLong1 + ", " + lowerBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Load elementSize from descriptor (offset 40)
+        std::string elemSizeAddr = allocTemp("l");
+        emit("    " + elemSizeAddr + " =l add " + arrayRef + ", 40\n");
+        std::string elemSize = allocTemp("l");
+        emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Calculate byte offset
+        byteOffset = allocTemp("l");
+        emit("    " + byteOffset + " =l mul " + adjustedIndex + ", " + elemSize + "\n");
+        m_stats.instructionsGenerated++;
+    }
+    
+    // Load data pointer from descriptor (offset 0) - use arrayRef directly
+    std::string dataPtr = allocTemp("l");
+    emit("    " + dataPtr + " =l loadl " + arrayRef + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Calculate element address
+    std::string elementPtr = allocTemp("l");
+    emit("    " + elementPtr + " =l add " + dataPtr + ", " + byteOffset + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Check if this is a UDT array - return pointer for member access
+    auto elemTypeIt = m_arrayElementTypes.find(expr->name);
+    if (elemTypeIt != m_arrayElementTypes.end()) {
+        // UDT array - return pointer so member access can work
+        return elementPtr;
+    }
+    
+    // Regular scalar array - load and return the value
+    // Determine array element type from symbol table using TypeDescriptor
+    TypeDescriptor elementTypeDesc = TypeDescriptor(BaseType::INTEGER); // Default
+    if (m_symbols && m_symbols->arrays.find(expr->name) != m_symbols->arrays.end()) {
+        const auto& arraySym = m_symbols->arrays.at(expr->name);
+        // Use TypeDescriptor if available, otherwise convert from legacy type
+        if (arraySym.elementTypeDesc.baseType != BaseType::UNKNOWN) {
+            elementTypeDesc = arraySym.elementTypeDesc;
+        } else {
+            elementTypeDesc = legacyTypeToDescriptor(arraySym.type);
+        }
+    }
+    
+    std::string valueTemp;
+    std::string qbeType = getQBETypeD(elementTypeDesc);
+    std::string loadOp = getQBELoadOpD(elementTypeDesc);
+    
+    // Allocate temporary with correct QBE type
+    valueTemp = allocTemp(qbeType);
+    
+    // Load with correct operation (handles sign/zero extension for byte/short)
+    emit("    " + valueTemp + " =" + qbeType + " load" + loadOp + " " + elementPtr + "\n");
+    m_stats.instructionsGenerated++;
+    
+    return valueTemp;
+}
+
+// Helper to get array element pointer without loading (for lvalue assignment)
+std::string QBECodeGenerator::emitArrayElementPtr(const std::string& arrayName, 
+                                                    const std::vector<std::unique_ptr<Expression>>& indices) {
+    if (indices.size() > 2) {
+        emitComment("ERROR: Arrays with more than 2 dimensions not supported");
+        // Call runtime error function and halt execution
+        emit("    call $basic_error_multidim_arrays()\n");
+        m_stats.instructionsGenerated++;
+        // Return a dummy value (won't be reached after error)
+        std::string temp = allocTemp("l");
+        emit("    " + temp + " =l copy 0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    bool is2D = (indices.size() == 2);
+    
+    // Evaluate indices
+    std::string indexTemp1 = emitExpression(indices[0].get());
+    VariableType indexType1 = inferExpressionType(indices[0].get());
+    
+    // Convert to integer if needed
+    if (indexType1 != VariableType::INT) {
+        indexTemp1 = promoteToType(indexTemp1, indexType1, VariableType::INT);
+    }
+    
+    std::string indexTemp2;
+    if (is2D) {
+        indexTemp2 = emitExpression(indices[1].get());
+        VariableType indexType2 = inferExpressionType(indices[1].get());
+        
+        // Convert to integer if needed
+        if (indexType2 != VariableType::INT) {
+            indexTemp2 = promoteToType(indexTemp2, indexType2, VariableType::INT);
+        }
+    }
+    
+    // Get array descriptor pointer - use directly without copying
+    std::string arrayRef = getArrayRef(arrayName);
+    
+    if (m_options.boundsChecking) {
+        emitComment("Get array element pointer for " + arrayName + " with bounds check");
+    } else {
+        emitComment("Get array element pointer for " + arrayName + " (bounds checking disabled)");
+    }
+    
+    // Load bounds - needed for offset calculation even without bounds checking
+    std::string lowerBound1Addr = allocTemp("l");
+    emit("    " + lowerBound1Addr + " =l add " + arrayRef + ", 8\n");
+    std::string lowerBound1 = allocTemp("l");
+    emit("    " + lowerBound1 + " =l loadl " + lowerBound1Addr + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    std::string upperBound1Addr = allocTemp("l");
+    emit("    " + upperBound1Addr + " =l add " + arrayRef + ", 16\n");
+    std::string upperBound1 = allocTemp("l");
+    emit("    " + upperBound1 + " =l loadl " + upperBound1Addr + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // Convert index1 to long for offset calculation
+    std::string indexLong1 = allocTemp("l");
+    emit("    " + indexLong1 + " =l extsw " + indexTemp1 + "\n");
+    m_stats.instructionsGenerated++;
+    
+    std::string indexLong2, lowerBound2, upperBound2;
+    
+    if (is2D) {
+        // Load lowerBound2 from descriptor (offset 24)
+        std::string lowerBound2Addr = allocTemp("l");
+        emit("    " + lowerBound2Addr + " =l add " + arrayRef + ", 24\n");
+        lowerBound2 = allocTemp("l");
+        emit("    " + lowerBound2 + " =l loadl " + lowerBound2Addr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Load upperBound2 from descriptor (offset 32)
+        std::string upperBound2Addr = allocTemp("l");
+        emit("    " + upperBound2Addr + " =l add " + arrayRef + ", 32\n");
+        upperBound2 = allocTemp("l");
+        emit("    " + upperBound2 + " =l loadl " + upperBound2Addr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Convert index2 to long for offset calculation
+        indexLong2 = allocTemp("l");
+        emit("    " + indexLong2 + " =l extsw " + indexTemp2 + "\n");
+        m_stats.instructionsGenerated++;
+    }
+    
+    // Perform bounds checking if enabled
+    if (m_options.boundsChecking) {
+        // Bounds check: index1 >= lowerBound1
+        std::string checkLower1 = allocTemp("w");
+        emit("    " + checkLower1 + " =w csgel " + indexLong1 + ", " + lowerBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Bounds check: index1 <= upperBound1
+        std::string checkUpper1 = allocTemp("w");
+        emit("    " + checkUpper1 + " =w cslel " + indexLong1 + ", " + upperBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Combined check for dimension 1
+        std::string checkBoth1 = allocTemp("w");
+        emit("    " + checkBoth1 + " =w and " + checkLower1 + ", " + checkUpper1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        std::string checkBothFinal;
+        
+        if (is2D) {
+            // Bounds check: index2 >= lowerBound2
+            std::string checkLower2 = allocTemp("w");
+            emit("    " + checkLower2 + " =w csgel " + indexLong2 + ", " + lowerBound2 + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Bounds check: index2 <= upperBound2
+            std::string checkUpper2 = allocTemp("w");
+            emit("    " + checkUpper2 + " =w cslel " + indexLong2 + ", " + upperBound2 + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Combined check for dimension 2
+            std::string checkBoth2 = allocTemp("w");
+            emit("    " + checkBoth2 + " =w and " + checkLower2 + ", " + checkUpper2 + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Final check: both dimensions must be in bounds
+            checkBothFinal = allocTemp("w");
+            emit("    " + checkBothFinal + " =w and " + checkBoth1 + ", " + checkBoth2 + "\n");
+            m_stats.instructionsGenerated++;
+        } else {
+            checkBothFinal = checkBoth1;
+        }
+        
+        // Branch: if out of bounds, call error handler
+        std::string boundsOkLabel = allocLabel();
+        std::string boundsErrLabel = allocLabel();
+        
+        emit("    jnz " + checkBothFinal + ", @" + boundsOkLabel + ", @" + boundsErrLabel + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Bounds error block
+        emit("@" + boundsErrLabel + "\n");
+        if (is2D) {
+            emit("    call $basic_array_bounds_error_2d(l " + indexLong1 + ", l " + lowerBound1 + ", l " + upperBound1 + ", l " + indexLong2 + ", l " + lowerBound2 + ", l " + upperBound2 + ")\n");
+        } else {
+            emit("    call $basic_array_bounds_error(l " + indexLong1 + ", l " + lowerBound1 + ", l " + upperBound1 + ")\n");
+        }
+        m_stats.instructionsGenerated++;
+        
+        // Bounds OK block
+        emit("@" + boundsOkLabel + "\n");
+    }
+    
+    // Calculate offset
+    std::string byteOffset;
+    
+    if (is2D) {
+        // 2D array: offset = ((index1 - lowerBound1) * dim2_size + (index2 - lowerBound2)) * elementSize
+        // Calculate dim2_size = upperBound2 - lowerBound2 + 1
+        std::string dim2Size = allocTemp("l");
+        emit("    " + dim2Size + " =l sub " + upperBound2 + ", " + lowerBound2 + "\n");
+        std::string dim2SizePlusOne = allocTemp("l");
+        emit("    " + dim2SizePlusOne + " =l add " + dim2Size + ", 1\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // adjustedIndex1 = index1 - lowerBound1
+        std::string adjustedIndex1 = allocTemp("l");
+        emit("    " + adjustedIndex1 + " =l sub " + indexLong1 + ", " + lowerBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // adjustedIndex2 = index2 - lowerBound2
+        std::string adjustedIndex2 = allocTemp("l");
+        emit("    " + adjustedIndex2 + " =l sub " + indexLong2 + ", " + lowerBound2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // rowOffset = adjustedIndex1 * dim2_size
+        std::string rowOffset = allocTemp("l");
+        emit("    " + rowOffset + " =l mul " + adjustedIndex1 + ", " + dim2SizePlusOne + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // linearIndex = rowOffset + adjustedIndex2
+        std::string linearIndex = allocTemp("l");
+        emit("    " + linearIndex + " =l add " + rowOffset + ", " + adjustedIndex2 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Load elementSize from descriptor (offset 40)
+        std::string elemSizeAddr = allocTemp("l");
+        emit("    " + elemSizeAddr + " =l add " + arrayRef + ", 40\n");
+        std::string elemSize = allocTemp("l");
+        emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // byteOffset = linearIndex * elementSize
+        byteOffset = allocTemp("l");
+        emit("    " + byteOffset + " =l mul " + linearIndex + ", " + elemSize + "\n");
+        m_stats.instructionsGenerated++;
+    } else {
+        // 1D array: offset = (index - lowerBound) * elementSize
+        std::string adjustedIndex = allocTemp("l");
+        emit("    " + adjustedIndex + " =l sub " + indexLong1 + ", " + lowerBound1 + "\n");
+        m_stats.instructionsGenerated++;
+        
+        // Load elementSize from descriptor (offset 40)
+        std::string elemSizeAddr = allocTemp("l");
+        emit("    " + elemSizeAddr + " =l add " + arrayRef + ", 40\n");
+        std::string elemSize = allocTemp("l");
+        emit("    " + elemSize + " =l loadl " + elemSizeAddr + "\n");
+        m_stats.instructionsGenerated += 2;
+        
+        // Calculate byte offset
+        byteOffset = allocTemp("l");
+        emit("    " + byteOffset + " =l mul " + adjustedIndex + ", " + elemSize + "\n");
+        m_stats.instructionsGenerated++;
+    }
+    
+    // Load data pointer from descriptor (offset 0) - use arrayRef directly
+    std::string dataPtr = allocTemp("l");
+    emit("    " + dataPtr + " =l loadl " + arrayRef + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // Calculate element address
+    std::string elementPtr = allocTemp("l");
+    emit("    " + elementPtr + " =l add " + dataPtr + ", " + byteOffset + "\n");
+    m_stats.instructionsGenerated++;
+    
+    return elementPtr;
+}
+
+// =============================================================================
+// Member Access Expression (User-Defined Types)
+// =============================================================================
+
+std::string QBECodeGenerator::emitMemberAccessExpr(const MemberAccessExpression* expr) {
+    if (!expr) {
+        std::string temp = allocTemp("d");
+        emit("    " + temp + " =d copy d_0.0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    // 1. Get base object (can be variable, array element, or another member access)
+    std::string baseTemp = emitExpression(expr->object.get());
+    
+    // 2. Determine the type of the base object
+    std::string baseTypeName = inferMemberAccessType(expr->object.get());
+    
+    if (baseTypeName.empty()) {
+        emitComment("ERROR: Member access on non-UDT type");
+        std::string temp = allocTemp("d");
+        emit("    " + temp + " =d copy d_0.0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    // 3. Look up field in type definition
+    const TypeSymbol* typeSymbol = getTypeSymbol(baseTypeName);
+    if (!typeSymbol) {
+        emitComment("ERROR: Type not found: " + baseTypeName);
+        std::string temp = allocTemp("d");
+        emit("    " + temp + " =d copy d_0.0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    const TypeSymbol::Field* field = typeSymbol->findField(expr->memberName);
+    if (!field) {
+        emitComment("ERROR: Field not found: " + expr->memberName + " in type " + baseTypeName);
+        std::string temp = allocTemp("d");
+        emit("    " + temp + " =d copy d_0.0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    // 4. Calculate field offset
+    size_t offset = calculateFieldOffset(baseTypeName, expr->memberName);
+    
+    // 5. Compute member address (base pointer + offset)
+    std::string memberPtr = allocTemp("l");
+    if (offset == 0) {
+        // No offset, just use base pointer
+        emit("    " + memberPtr + " =l copy " + baseTemp + "\n");
+    } else {
+        emit("    " + memberPtr + " =l add " + baseTemp + ", " + std::to_string(offset) + "\n");
+    }
+    m_stats.instructionsGenerated++;
+    
+    // 6. Load value based on field type (use TypeDescriptor for correct QBE type)
+    std::string resultTemp;
+    
+    if (field->isBuiltIn) {
+        // Built-in type - load the value using TypeDescriptor
+        TypeDescriptor fieldTypeDesc = field->typeDesc;
+        std::string qbeType = fieldTypeDesc.toQBEType();
+        std::string memOp = fieldTypeDesc.toQBEMemOp();
+        
+        emitComment("Field type: " + fieldTypeDesc.toString() + " -> QBE type: " + qbeType);
+        
+        // For INTEGER fields (TypeDescriptor -> "w"), we need to load a word and potentially extend
+        if (qbeType == "w") {
+            // Load 32-bit word
+            resultTemp = allocTemp("w");
+            emit("    " + resultTemp + " =w load" + memOp + " " + memberPtr + "\n");
+            m_stats.instructionsGenerated++;
+            
+            // Sign-extend to long for arithmetic operations that expect 'l'
+            // Most operations in QBE work with long integers, so we extend here
+            std::string extendedTemp = allocTemp("l");
+            emit("    " + extendedTemp + " =l extsw " + resultTemp + "\n");
+            m_stats.instructionsGenerated++;
+            resultTemp = extendedTemp;
+        } else if (qbeType == "d") {
+            resultTemp = allocTemp("d");
+            emit("    " + resultTemp + " =d load" + memOp + " " + memberPtr + "\n");
+            m_stats.instructionsGenerated++;
+        } else if (qbeType == "l") {
+            resultTemp = allocTemp("l");
+            emit("    " + resultTemp + " =l load" + memOp + " " + memberPtr + "\n");
+            m_stats.instructionsGenerated++;
+        } else if (qbeType == "s") {
+            resultTemp = allocTemp("s");
+            emit("    " + resultTemp + " =s load" + memOp + " " + memberPtr + "\n");
+            m_stats.instructionsGenerated++;
+        } else {
+            // Default to word with sign extension
+            resultTemp = allocTemp("w");
+            emit("    " + resultTemp + " =w loadw " + memberPtr + "\n");
+            m_stats.instructionsGenerated++;
+            std::string extendedTemp = allocTemp("l");
+            emit("    " + extendedTemp + " =l extsw " + resultTemp + "\n");
+            m_stats.instructionsGenerated++;
+            resultTemp = extendedTemp;
+        }
+    } else {
+        // Nested UDT - return the pointer (no load)
+        // This allows further member access: Player.Position.X
+        resultTemp = memberPtr;
+    }
+    
+    return resultTemp;
+}
+
+// =============================================================================
+// Helper: Map BASIC Function to Runtime Function
+// =============================================================================
+
+std::string QBECodeGenerator::mapToRuntimeFunction(const std::string& basicFunc) {
+    // Convert BASIC function names to runtime library names
+    // TODO: Build comprehensive mapping table
+    
+    std::string upper = basicFunc;
+    for (char& c : upper) {
+        c = std::toupper(c);
+    }
+    
+    // Handle mangled string function names (e.g., STR_STRING -> STR$, CHR_STRING -> CHR$)
+    if (upper.length() > 7 && upper.substr(upper.length() - 7) == "_STRING") {
+        upper = upper.substr(0, upper.length() - 7) + "$";
+    }
+    
+    // Special cases that don't follow uppercase pattern
+    if (upper == "TIMER") return "basic_timer";
+    if (upper == "RND") return "basic_rnd";
+    if (upper == "RAND") return "basic_rand";
+    
+    // Common math functions
+    if (upper == "ABS") return "basic_abs_double";  // runtime provides typed variants
+    if (upper == "SIN") return "basic_sin";
+    if (upper == "COS") return "basic_cos";
+    if (upper == "TAN") return "basic_tan";
+    if (upper == "ATAN" || upper == "ATN") return "basic_atan";
+    if (upper == "SQRT" || upper == "SQR") return "basic_sqrt";
+    if (upper == "LOG" || upper == "LN") return "basic_log";
+    if (upper == "LOG10") return "basic_log10";
+    if (upper == "LOG1P") return "basic_log1p";
+    if (upper == "EXP") return "basic_exp";
+    if (upper == "EXP2") return "basic_exp2";
+    if (upper == "EXPM1") return "basic_expm1";
+    if (upper == "POW") return "basic_pow";
+    if (upper == "ATAN2") return "basic_atan2";
+    if (upper == "ASIN" || upper == "ASN") return "basic_asin";
+    if (upper == "ACOS" || upper == "ACS") return "basic_acos";
+    if (upper == "SINH") return "basic_sinh";
+    if (upper == "COSH") return "basic_cosh";
+    if (upper == "TANH") return "basic_tanh";
+    if (upper == "ASINH") return "basic_asinh";
+    if (upper == "ACOSH") return "basic_acosh";
+    if (upper == "ATANH") return "basic_atanh";
+    if (upper == "CBRT") return "basic_cbrt";
+    if (upper == "HYPOT") return "basic_hypot";
+    if (upper == "FMOD") return "basic_fmod";
+    if (upper == "REMAINDER") return "basic_remainder";
+    if (upper == "FLOOR") return "basic_floor";
+    if (upper == "CEIL") return "basic_ceil";
+    if (upper == "TRUNC") return "basic_trunc";
+    if (upper == "ROUND") return "basic_round";
+    if (upper == "COPYSIGN") return "basic_copysign";
+    if (upper == "ERF") return "basic_erf";
+    if (upper == "ERFC") return "basic_erfc";
+    if (upper == "TGAMMA") return "basic_tgamma";
+    if (upper == "LGAMMA") return "basic_lgamma";
+    if (upper == "NEXTAFTER") return "basic_nextafter";
+    if (upper == "FMAX") return "basic_fmax";
+    if (upper == "FMIN") return "basic_fmin";
+    if (upper == "FMA") return "basic_fma";
+    if (upper == "DEG") return "basic_deg";
+    if (upper == "RAD") return "basic_rad";
+    if (upper == "SIGMOID") return "basic_sigmoid";
+    if (upper == "LOGIT") return "basic_logit";
+    if (upper == "NORMPDF") return "basic_normpdf";
+    if (upper == "NORMCDF") return "basic_normcdf";
+    if (upper == "FACT" || upper == "FACTORIAL") return "basic_fact";
+    if (upper == "COMB") return "basic_comb";
+    if (upper == "PERM") return "basic_perm";
+    if (upper == "CLAMP") return "basic_clamp";
+    if (upper == "LERP") return "basic_lerp";
+    if (upper == "PMT") return "basic_pmt";
+    if (upper == "PV") return "basic_pv";
+    if (upper == "FV") return "basic_fv";
+    if (upper == "INT") return "basic_int";
+    if (upper == "FIX") return "basic_fix";
+    if (upper == "CINT") return "math_cint";
+    if (upper == "RND") return "basic_rnd";
+    if (upper == "SGN") return "basic_sgn";
+    
+    // String functions - UTF-32 runtime
+    if (upper == "LEN") return "basic_len";          // Returns int64_t
+    if (upper == "LEFT$") return "string_left";      // Returns StringDescriptor*
+    if (upper == "RIGHT$") return "string_right";    // Returns StringDescriptor*
+    if (upper == "MID$") return "string_mid";        // Returns StringDescriptor*
+    if (upper == "CHR$") return "basic_chr";         // Returns StringDescriptor*
+    if (upper == "ASC") return "basic_asc";          // Returns uint32_t
+    if (upper == "STR$") return "basic_str_double";  // Returns StringDescriptor*
+    if (upper == "VAL") return "basic_val";          // Returns double
+    if (upper == "SPACE$") return "basic_space";     // Returns StringDescriptor*
+    if (upper == "STRING$") return "basic_string_repeat"; // Returns StringDescriptor*
+    if (upper == "UCASE$") return "string_upper";    // Returns StringDescriptor*
+    if (upper == "LCASE$") return "string_lower";    // Returns StringDescriptor*
+    if (upper == "TRIM$") return "string_trim";      // Returns StringDescriptor*
+    if (upper == "LTRIM$") return "string_ltrim";    // Returns StringDescriptor*
+    if (upper == "RTRIM$") return "string_rtrim";    // Returns StringDescriptor*
+    if (upper == "INSTR") return "string_instr";     // Returns int64_t
+    if (upper == "INSTRREV") return "string_instrrev"; // Returns int64_t
+    if (upper == "REPLACE$") return "string_replace";
+    if (upper == "REVERSE$") return "string_reverse";
+    if (upper == "TALLY") return "string_tally";      // Returns int64_t
+    if (upper == "INSERT$") return "string_insert";
+    if (upper == "DELETE$") return "string_delete";
+    if (upper == "REMOVE$") return "string_remove";
+    if (upper == "EXTRACT$") return "string_extract";
+    if (upper == "LPAD$") return "string_lpad";
+    if (upper == "RPAD$") return "string_rpad";
+    if (upper == "CENTER$") return "string_center";
+    if (upper == "STRREV$") return "string_reverse";
+    if (upper == "HEX$") return "HEX_STRING";
+    if (upper == "BIN$") return "BIN_STRING";
+    if (upper == "OCT$") return "OCT_STRING";
+    if (upper == "JOIN$") return "string_join";
+    if (upper == "SPLIT$") return "string_split";
+    
+    // Exception handling functions
+    if (upper == "ERR") return "basic_err";
+    if (upper == "ERL") return "basic_erl";
+    
+    // Default: prefix with basic_
+    return "basic_" + upper;
+}
+
+// =============================================================================
+// IIF (Immediate IF) Expression - Inline Conditional
+// =============================================================================
+
+std::string QBECodeGenerator::emitIIF(const IIFExpression* expr) {
+    if (!expr || !expr->condition || !expr->trueValue || !expr->falseValue) {
+        std::string temp = allocTemp("w");
+        emit("    " + temp + " =w copy 0\n");
+        m_stats.instructionsGenerated++;
+        return temp;
+    }
+    
+    emitComment("IIF expression");
+    
+    // Infer the result type from the true/false branches
+    VariableType trueType = inferExpressionType(expr->trueValue.get());
+    VariableType falseType = inferExpressionType(expr->falseValue.get());
+    
+    // Determine result type (should be compatible)
+    VariableType resultType = trueType;
+    if (trueType != falseType) {
+        // If types differ, promote to the "wider" type
+        if (trueType == VariableType::DOUBLE || falseType == VariableType::DOUBLE) {
+            resultType = VariableType::DOUBLE;
+        } else if (trueType == VariableType::FLOAT || falseType == VariableType::FLOAT) {
+            resultType = VariableType::FLOAT;
+        } else if (trueType == VariableType::STRING || falseType == VariableType::STRING) {
+            resultType = VariableType::STRING;
+        }
+    }
+    
+    std::string qbeType = getQBEType(resultType);
+    
+    // Allocate result temporary
+    std::string resultTemp = allocTemp(qbeType);
+    
+    // Create labels for true branch, false branch, and end
+    std::string trueLabel = makeLabel("iif_true");
+    std::string falseLabel = makeLabel("iif_false");
+    std::string endLabel = makeLabel("iif_end");
+    
+    // Evaluate condition
+    std::string condTemp = emitExpression(expr->condition.get());
+    VariableType condType = inferExpressionType(expr->condition.get());
+    
+    // Convert condition to integer if needed before boolean test
+    if (condType == VariableType::DOUBLE || condType == VariableType::FLOAT) {
+        // Convert double/float to int first
+        std::string intTemp = allocTemp("w");
+        emit("    " + intTemp + " =w dtosi " + condTemp + "\n");
+        condTemp = intTemp;
+        m_stats.instructionsGenerated++;
+    }
+    
+    // Convert condition to boolean (0 or 1)
+    std::string boolTemp = allocTemp("w");
+    emit("    " + boolTemp + " =w cnew " + condTemp + ", 0\n");
+    m_stats.instructionsGenerated++;
+    
+    // Branch based on condition
+    emit("    jnz " + boolTemp + ", @" + trueLabel + ", @" + falseLabel + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // True branch
+    emit("@" + trueLabel + "\n");
+    m_stats.labelsGenerated++;
+    std::string trueTemp = emitExpression(expr->trueValue.get());
+    
+    // Convert true value to result type if needed
+    if (trueType != resultType) {
+        trueTemp = promoteToType(trueTemp, trueType, resultType);
+    }
+    
+    emit("    " + resultTemp + " =" + qbeType + " copy " + trueTemp + "\n");
+    emit("    jmp @" + endLabel + "\n");
+    m_stats.instructionsGenerated += 2;
+    
+    // False branch
+    emit("@" + falseLabel + "\n");
+    m_stats.labelsGenerated++;
+    std::string falseTemp = emitExpression(expr->falseValue.get());
+    
+    // Convert false value to result type if needed
+    if (falseType != resultType) {
+        falseTemp = promoteToType(falseTemp, falseType, resultType);
+    }
+    
+    emit("    " + resultTemp + " =" + qbeType + " copy " + falseTemp + "\n");
+    m_stats.instructionsGenerated++;
+    
+    // End label
+    emit("@" + endLabel + "\n");
+    m_stats.labelsGenerated++;
+    
+    return resultTemp;
+}
+
+} // namespace FasterBASIC
