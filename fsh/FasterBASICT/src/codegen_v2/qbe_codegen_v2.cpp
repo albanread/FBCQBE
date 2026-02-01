@@ -561,6 +561,27 @@ void QBECodeGeneratorV2::collectStringsFromExpression(const Expression* expr) {
             break;
         }
         
+        case ASTNodeType::EXPR_IIF: {
+            const auto* iifExpr = static_cast<const IIFExpression*>(expr);
+            if (iifExpr->condition) collectStringsFromExpression(iifExpr->condition.get());
+            if (iifExpr->trueValue) collectStringsFromExpression(iifExpr->trueValue.get());
+            if (iifExpr->falseValue) collectStringsFromExpression(iifExpr->falseValue.get());
+            break;
+        }
+        
+        case ASTNodeType::EXPR_MEMBER_ACCESS: {
+            const auto* memberExpr = static_cast<const MemberAccessExpression*>(expr);
+            if (memberExpr->object) collectStringsFromExpression(memberExpr->object.get());
+            break;
+        }
+        
+        case ASTNodeType::EXPR_ARRAY_BINOP: {
+            const auto* arrBinOp = static_cast<const ArrayBinaryOpExpression*>(expr);
+            if (arrBinOp->leftArray) collectStringsFromExpression(arrBinOp->leftArray.get());
+            if (arrBinOp->rightExpr) collectStringsFromExpression(arrBinOp->rightExpr.get());
+            break;
+        }
+        
         // Add more expression types as needed
         default:
             break;

@@ -23,7 +23,8 @@ void RuntimeLibrary::emitPrintDouble(const std::string& value) {
 }
 
 void RuntimeLibrary::emitPrintString(const std::string& stringPtr) {
-    emitRuntimeCallVoid("basic_print_string", "l " + stringPtr);
+    // Use StringDescriptor version for UTF-32 support
+    emitRuntimeCallVoid("basic_print_string_desc", "l " + stringPtr);
 }
 
 void RuntimeLibrary::emitPrintNewline() {
@@ -37,7 +38,8 @@ void RuntimeLibrary::emitPrintTab() {
 // === String Operations ===
 
 std::string RuntimeLibrary::emitStringConcat(const std::string& left, const std::string& right) {
-    return emitRuntimeCall("basic_string_concat", "l", "l " + left + ", l " + right);
+    // Use StringDescriptor version for UTF-32 support
+    return emitRuntimeCall("string_concat", "l", "l " + left + ", l " + right);
 }
 
 std::string RuntimeLibrary::emitStringLen(const std::string& stringPtr) {
@@ -62,6 +64,7 @@ std::string RuntimeLibrary::emitStringLen(const std::string& stringPtr) {
 }
 
 std::string RuntimeLibrary::emitChr(const std::string& charCode) {
+    // basic_chr already uses StringDescriptor and takes uint32_t codepoint
     return emitRuntimeCall("basic_chr", "l", "w " + charCode);
 }
 
@@ -73,7 +76,9 @@ std::string RuntimeLibrary::emitMid(const std::string& stringPtr, const std::str
                                    const std::string& length) {
     if (length.empty()) {
         // MID$(s$, start) - to end of string
-        return emitRuntimeCall("basic_mid_toend", "l", "l " + stringPtr + ", w " + start);
+        // Pass very large length to get remainder
+        return emitRuntimeCall("basic_mid", "l", 
+            "l " + stringPtr + ", w " + start + ", w 999999");
     } else {
         // MID$(s$, start, length)
         return emitRuntimeCall("basic_mid", "l", 
@@ -89,8 +94,19 @@ std::string RuntimeLibrary::emitRight(const std::string& stringPtr, const std::s
     return emitRuntimeCall("basic_right", "l", "l " + stringPtr + ", w " + count);
 }
 
+std::string RuntimeLibrary::emitUCase(const std::string& stringPtr) {
+    // string_upper works with StringDescriptor (UTF-32 aware)
+    return emitRuntimeCall("string_upper", "l", "l " + stringPtr);
+}
+
+std::string RuntimeLibrary::emitLCase(const std::string& stringPtr) {
+    // string_lower works with StringDescriptor (UTF-32 aware)
+    return emitRuntimeCall("string_lower", "l", "l " + stringPtr);
+}
+
 std::string RuntimeLibrary::emitStringCompare(const std::string& left, const std::string& right) {
-    return emitRuntimeCall("basic_string_compare", "w", "l " + left + ", l " + right);
+    // Use StringDescriptor version for UTF-32 support
+    return emitRuntimeCall("string_compare", "w", "l " + left + ", l " + right);
 }
 
 void RuntimeLibrary::emitStringAssign(const std::string& dest, const std::string& src) {
@@ -98,7 +114,8 @@ void RuntimeLibrary::emitStringAssign(const std::string& dest, const std::string
 }
 
 std::string RuntimeLibrary::emitStringLiteral(const std::string& stringConstant) {
-    return emitRuntimeCall("str_new", "l", "l $" + stringConstant);
+    // Use string_new_utf8 which auto-detects ASCII vs UTF-32
+    return emitRuntimeCall("string_new_utf8", "l", "l $" + stringConstant);
 }
 
 // === Array Operations ===
@@ -216,11 +233,21 @@ void RuntimeLibrary::emitInputString(const std::string& dest) {
 
 std::string RuntimeLibrary::emitStr(const std::string& value, BasicType valueType) {
     if (typeManager_.isIntegral(valueType)) {
-        return emitRuntimeCall("basic_str_int", "l", "w " + value);
+        // string_from_int takes int64_t (l type)
+        // Convert smaller integers to long first
+        std::string qbeType = typeManager_.getQBEType(valueType);
+        std::string longValue = value;
+        if (qbeType == "w") {
+            // Convert 32-bit int to 64-bit long
+            longValue = builder_.newTemp();
+            builder_.emitConvert(longValue, "l", "sextw", value);
+        }
+        return emitRuntimeCall("string_from_int", "l", "l " + longValue);
     } else if (valueType == BasicType::SINGLE) {
-        return emitRuntimeCall("basic_str_float", "l", "s " + value);
+        // Note: may need string_from_float if it exists, using double for now
+        return emitRuntimeCall("string_from_double", "l", "d " + value);
     } else {
-        return emitRuntimeCall("basic_str_double", "l", "d " + value);
+        return emitRuntimeCall("string_from_double", "l", "d " + value);
     }
 }
 

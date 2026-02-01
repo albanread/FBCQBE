@@ -434,6 +434,26 @@ std::string ASTEmitter::emitFunctionCall(const FunctionCallExpression* expr) {
         return runtime_.emitVal(strArg);
     }
     
+    if (upperName == "UCASE" || upperName == "UCASE$") {
+        // UCASE$(string$) - convert to uppercase
+        if (expr->arguments.size() != 1) {
+            builder_.emitComment("ERROR: UCASE$ requires exactly 1 argument");
+            return "0";
+        }
+        std::string strArg = emitExpression(expr->arguments[0].get());
+        return runtime_.emitUCase(strArg);
+    }
+    
+    if (upperName == "LCASE" || upperName == "LCASE$") {
+        // LCASE$(string$) - convert to lowercase
+        if (expr->arguments.size() != 1) {
+            builder_.emitComment("ERROR: LCASE$ requires exactly 1 argument");
+            return "0";
+        }
+        std::string strArg = emitExpression(expr->arguments[0].get());
+        return runtime_.emitLCase(strArg);
+    }
+    
     // Note: INSTR not yet implemented in runtime library
     if (upperName == "INSTR") {
         builder_.emitComment("TODO: INSTR function not yet implemented");

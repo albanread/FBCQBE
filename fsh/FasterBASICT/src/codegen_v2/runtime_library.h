@@ -120,6 +120,20 @@ public:
     std::string emitRight(const std::string& stringPtr, const std::string& count);
     
     /**
+     * Emit an UCASE$() call (convert to uppercase)
+     * @param stringPtr String descriptor pointer
+     * @return Temporary holding uppercase string descriptor
+     */
+    std::string emitUCase(const std::string& stringPtr);
+    
+    /**
+     * Emit an LCASE$() call (convert to lowercase)
+     * @param stringPtr String descriptor pointer
+     * @return Temporary holding lowercase string descriptor
+     */
+    std::string emitLCase(const std::string& stringPtr);
+    
+    /**
      * Emit a string comparison call
      * @param left Left string descriptor
      * @param right Right string descriptor

@@ -353,3 +353,23 @@ BasicString* basic_string_concat(BasicString* a, BasicString* b) {
 int32_t basic_string_compare(BasicString* a, BasicString* b) {
     return str_compare(a, b);
 }
+
+// MID$(string$, start, length) - Extract substring
+// Note: BASIC uses 1-based indexing, but string_mid expects 0-based
+// Call the UTF-32 aware version from string_utf32.c
+StringDescriptor* basic_mid(StringDescriptor* str, int32_t start, int32_t length) {
+    // Convert from 1-based BASIC indexing to 0-based C indexing
+    return string_mid(str, start - 1, length);
+}
+
+// LEFT$(string$, count) - Extract leftmost characters
+// Call the UTF-32 aware version from string_utf32.c
+StringDescriptor* basic_left(StringDescriptor* str, int32_t count) {
+    return string_left(str, count);
+}
+
+// RIGHT$(string$, count) - Extract rightmost characters
+// Call the UTF-32 aware version from string_utf32.c
+StringDescriptor* basic_right(StringDescriptor* str, int32_t count) {
+    return string_right(str, count);
+}

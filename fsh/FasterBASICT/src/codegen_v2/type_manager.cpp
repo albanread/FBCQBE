@@ -160,10 +160,22 @@ bool TypeManager::needsConversion(BasicType fromType, BasicType toType) const {
 
 BasicType TypeManager::getPromotedType(BasicType type1, BasicType type2) const {
     // Type promotion rules (similar to C):
-    // 1. DOUBLE beats everything
-    // 2. SINGLE beats integers
-    // 3. LONG beats smaller integers
-    // 4. INTEGER beats smaller integers
+    // 1. STRING stays STRING (no promotion with other types)
+    // 2. DOUBLE beats everything (numeric)
+    // 3. SINGLE beats integers
+    // 4. LONG beats smaller integers
+    // 5. INTEGER beats smaller integers
+    
+    // If both are STRING, stay STRING
+    if (type1 == BasicType::STRING && type2 == BasicType::STRING) {
+        return BasicType::STRING;
+    }
+    
+    // If one is STRING and the other isn't, keep STRING
+    // (this handles IIF with string branches)
+    if (type1 == BasicType::STRING || type2 == BasicType::STRING) {
+        return BasicType::STRING;
+    }
     
     // If either is DOUBLE, promote to DOUBLE
     if (type1 == BasicType::DOUBLE || type2 == BasicType::DOUBLE) {
