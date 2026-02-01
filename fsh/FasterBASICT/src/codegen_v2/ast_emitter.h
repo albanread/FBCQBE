@@ -134,6 +134,12 @@ public:
     void emitDimStatement(const FasterBASIC::DimStatement* stmt);
     
     /**
+     * Emit LOCAL statement (local variable declaration in SUB/FUNCTION)
+     * @param stmt LOCAL statement
+     */
+    void emitLocalStatement(const FasterBASIC::LocalStatement* stmt);
+    
+    /**
      * Emit CALL statement (SUB call)
      * @param stmt CALL statement
      */

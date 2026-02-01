@@ -1525,7 +1525,7 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
                       stmt.location);
             }
             
-            // Add local variables to function scope
+            // Add local variables to function scope AND symbol table
             for (const auto& var : localStmt.variables) {
                 // Check for duplicate declaration
                 if (m_currentFunctionScope.localVariables.count(var.name) ||
@@ -1536,6 +1536,55 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
                 }
                 
                 m_currentFunctionScope.localVariables.insert(var.name);
+                
+                // Add to symbol table with type information
+                // Use scoped key for local variables to prevent conflicts between functions
+                std::string symbolKey = m_currentFunctionScope.functionName + "::" + var.name;
+                
+                VariableSymbol varSym;
+                varSym.name = var.name;  // Keep original name in the symbol
+                varSym.isDeclared = true;
+                varSym.firstUse = stmt.location;
+                varSym.functionScope = m_currentFunctionScope.functionName;
+                varSym.isGlobal = false;
+                
+                // Determine type from AS clause or suffix
+                if (var.hasAsType && !var.asTypeName.empty()) {
+                    // Has AS TypeName
+                    std::string upperType = var.asTypeName;
+                    std::transform(upperType.begin(), upperType.end(), upperType.begin(), ::toupper);
+                    
+                    if (upperType == "INTEGER" || upperType == "INT") {
+                        varSym.typeDesc = TypeDescriptor(BaseType::INTEGER);
+                    } else if (upperType == "DOUBLE") {
+                        varSym.typeDesc = TypeDescriptor(BaseType::DOUBLE);
+                    } else if (upperType == "SINGLE" || upperType == "FLOAT") {
+                        varSym.typeDesc = TypeDescriptor(BaseType::SINGLE);
+                    } else if (upperType == "STRING") {
+                        varSym.typeDesc = TypeDescriptor(BaseType::STRING);
+                    } else if (upperType == "LONG") {
+                        varSym.typeDesc = TypeDescriptor(BaseType::LONG);
+                    } else if (upperType == "BYTE") {
+                        varSym.typeDesc = TypeDescriptor(BaseType::BYTE);
+                    } else if (upperType == "SHORT") {
+                        varSym.typeDesc = TypeDescriptor(BaseType::SHORT);
+                    } else {
+                        // User-defined type
+                        if (m_symbolTable.types.find(var.asTypeName) == m_symbolTable.types.end()) {
+                            error(SemanticErrorType::TYPE_ERROR,
+                                  "Unknown type '" + var.asTypeName + "' for LOCAL variable " + var.name,
+                                  stmt.location);
+                        }
+                        varSym.typeDesc = TypeDescriptor(BaseType::USER_DEFINED);
+                        varSym.typeDesc.udtName = var.asTypeName;
+                    }
+                } else {
+                    // Infer from suffix
+                    varSym.typeDesc = legacyTypeToDescriptor(inferTypeFromSuffix(var.typeSuffix));
+                }
+                
+                // Store with scoped key
+                m_symbolTable.variables[symbolKey] = varSym;
             }
             break;
         }
@@ -3204,7 +3253,38 @@ VariableSymbol* SemanticAnalyzer::declareVariableD(const std::string& name, cons
     return &m_symbolTable.variables[name];
 }
 
+const VariableSymbol* SemanticAnalyzer::lookupVariableScoped(const std::string& varName, 
+                                                              const std::string& functionScope) const {
+    // If a function scope is provided, first try to find a local variable with scoped key
+    if (!functionScope.empty()) {
+        std::string scopedKey = functionScope + "::" + varName;
+        auto scopedIt = m_symbolTable.variables.find(scopedKey);
+        if (scopedIt != m_symbolTable.variables.end()) {
+            return &scopedIt->second;
+        }
+    }
+    
+    // Fall back to global lookup (unscoped key)
+    auto it = m_symbolTable.variables.find(varName);
+    if (it != m_symbolTable.variables.end()) {
+        return &it->second;
+    }
+    
+    // Not found in either scope
+    return nullptr;
+}
+
 VariableSymbol* SemanticAnalyzer::lookupVariable(const std::string& name) {
+    // If we're in a function, first try to find a local variable with scoped key
+    if (m_currentFunctionScope.inFunction && !m_currentFunctionScope.functionName.empty()) {
+        std::string scopedKey = m_currentFunctionScope.functionName + "::" + name;
+        auto scopedIt = m_symbolTable.variables.find(scopedKey);
+        if (scopedIt != m_symbolTable.variables.end()) {
+            return &scopedIt->second;
+        }
+    }
+    
+    // Fall back to global lookup (unscoped key)
     auto it = m_symbolTable.variables.find(name);
     if (it != m_symbolTable.variables.end()) {
         return &it->second;

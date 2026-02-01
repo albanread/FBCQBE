@@ -858,6 +858,12 @@ public:
     const std::vector<SemanticWarning>& getWarnings() const { return m_warnings; }
     bool hasErrors() const { return !m_errors.empty(); }
     ConstantsManager& getConstantsManager() { return m_constantsManager; }
+    
+    // Scoped variable lookup helper for codegen
+    // Returns nullptr if variable not found
+    // Searches local scope first (if functionScope provided), then global scope
+    const VariableSymbol* lookupVariableScoped(const std::string& varName, 
+                                                const std::string& functionScope = "") const;
 
     // Ensure predefined constants are loaded (safe to call multiple times)
     void ensureConstantsLoaded();

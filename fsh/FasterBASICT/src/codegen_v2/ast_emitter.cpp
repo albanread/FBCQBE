@@ -151,8 +151,8 @@ std::string ASTEmitter::emitBinaryExpression(const BinaryExpression* expr) {
     if (op >= TokenType::EQUAL && op <= TokenType::GREATER_EQUAL) {
         // Comparison operation
         return emitComparisonOp(left, right, op, commonType);
-    } else if (op == TokenType::AND || op == TokenType::OR || op == TokenType::NOT) {
-        // Logical operation
+    } else if (op == TokenType::AND || op == TokenType::OR || op == TokenType::XOR) {
+        // Bitwise/logical operation
         return emitLogicalOp(left, right, op);
     } else {
         // Arithmetic operation
@@ -171,9 +171,18 @@ std::string ASTEmitter::emitUnaryExpression(const UnaryExpression* expr) {
         builder_.emitNeg(result, qbeType, operand);
         return result;
     } else if (expr->op == TokenType::NOT) {
-        // Logical NOT
+        // Bitwise NOT - flip all bits
         std::string result = builder_.newTemp();
-        builder_.emitCompare(result, "w", "eq", operand, "0");
+        
+        // Coerce to 32-bit integer if needed
+        std::string notOperand = operand;
+        if (typeManager_.isFloatingPoint(operandType)) {
+            notOperand = builder_.newTemp();
+            builder_.emitRaw("    " + notOperand + " =w " + qbeType + "tosi " + operand);
+        }
+        
+        // Perform bitwise NOT using XOR with -1
+        builder_.emitBinary(result, "w", "xor", notOperand, "-1");
         return result;
     } else if (expr->op == TokenType::PLUS) {
         // Unary plus - no-op
@@ -270,6 +279,75 @@ std::string ASTEmitter::emitFunctionCall(const FunctionCallExpression* expr) {
     std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
     
     // Check for intrinsic/built-in functions
+    
+    // ABS(x) - Absolute value
+    if (upperName == "ABS") {
+        if (expr->arguments.size() != 1) {
+            builder_.emitComment("ERROR: ABS requires exactly 1 argument");
+            return "0";
+        }
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        BaseType argType = getExpressionType(expr->arguments[0].get());
+        
+        if (typeManager_.isIntegral(argType)) {
+            // For integers: use conditional to get absolute value
+            std::string isNeg = builder_.newTemp();
+            builder_.emitCompare(isNeg, "w", "slt", argTemp, "0");
+            
+            std::string negVal = builder_.newTemp();
+            builder_.emitNeg(negVal, "w", argTemp);
+            
+            // Use phi-like pattern with conditional
+            std::string thenLabel = "abs_neg_" + std::to_string(builder_.getTempCounter());
+            std::string elseLabel = "abs_pos_" + std::to_string(builder_.getTempCounter());
+            std::string endLabel = "abs_end_" + std::to_string(builder_.getTempCounter());
+            std::string result = builder_.newTemp();
+            
+            builder_.emitRaw("    jnz " + isNeg + ", @" + thenLabel + ", @" + elseLabel);
+            builder_.emitLabel(thenLabel);
+            builder_.emitRaw("    " + result + " =w copy " + negVal);
+            builder_.emitRaw("    jmp @" + endLabel);
+            builder_.emitLabel(elseLabel);
+            builder_.emitRaw("    " + result + " =w copy " + argTemp);
+            builder_.emitLabel(endLabel);
+            
+            return result;
+        } else {
+            // For floats/doubles: use runtime function
+            return runtime_.emitAbs(argTemp, argType);
+        }
+    }
+    
+    // SGN(x) - Sign function (-1, 0, or 1)
+    if (upperName == "SGN") {
+        if (expr->arguments.size() != 1) {
+            builder_.emitComment("ERROR: SGN requires exactly 1 argument");
+            return "0";
+        }
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        BaseType argType = getExpressionType(expr->arguments[0].get());
+        
+        if (typeManager_.isIntegral(argType)) {
+            // For integers: branchless using (x > 0) - (x < 0)
+            std::string isNeg = builder_.newTemp();
+            builder_.emitCompare(isNeg, "w", "slt", argTemp, "0");
+            
+            std::string isPos = builder_.newTemp();
+            builder_.emitCompare(isPos, "w", "sgt", argTemp, "0");
+            
+            std::string result = builder_.newTemp();
+            builder_.emitBinary(result, "w", "sub", isPos, isNeg);
+            
+            return result;
+        } else {
+            // For floats/doubles: use runtime function
+            std::string qbeType = typeManager_.getQBEType(argType);
+            std::string result = builder_.newTemp();
+            builder_.emitCall(result, "w", "basic_sgn", qbeType + " " + argTemp);
+            return result;
+        }
+    }
+    
     if (upperName == "LEN") {
         // LEN(string$) - returns length of string
         if (expr->arguments.size() != 1) {
@@ -360,6 +438,55 @@ std::string ASTEmitter::emitFunctionCall(const FunctionCallExpression* expr) {
     if (upperName == "INSTR") {
         builder_.emitComment("TODO: INSTR function not yet implemented");
         return "0";
+    }
+    
+    // Math functions that map to runtime
+    if (upperName == "SIN" || upperName == "COS" || upperName == "TAN" ||
+        upperName == "ATAN" || upperName == "ASIN" || upperName == "ACOS" ||
+        upperName == "LOG" || upperName == "EXP" || upperName == "SQRT" || upperName == "SQR") {
+        if (expr->arguments.size() != 1) {
+            builder_.emitComment("ERROR: " + upperName + " requires exactly 1 argument");
+            return "0";
+        }
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        BaseType argType = getExpressionType(expr->arguments[0].get());
+        
+        // Convert to double if needed
+        if (!typeManager_.isFloatingPoint(argType)) {
+            argTemp = emitTypeConversion(argTemp, argType, BaseType::DOUBLE);
+        }
+        
+        std::string runtimeFunc = "basic_" + upperName;
+        std::transform(runtimeFunc.begin(), runtimeFunc.end(), runtimeFunc.begin(), ::tolower);
+        if (upperName == "SQR") runtimeFunc = "basic_sqrt";
+        
+        std::string result = builder_.newTemp();
+        builder_.emitCall(result, "d", runtimeFunc, "d " + argTemp);
+        return result;
+    }
+    
+    if (upperName == "INT" || upperName == "FIX") {
+        if (expr->arguments.size() != 1) {
+            builder_.emitComment("ERROR: " + upperName + " requires exactly 1 argument");
+            return "0";
+        }
+        std::string argTemp = emitExpression(expr->arguments[0].get());
+        BaseType argType = getExpressionType(expr->arguments[0].get());
+        
+        if (typeManager_.isFloatingPoint(argType)) {
+            std::string qbeType = typeManager_.getQBEType(argType);
+            std::string result = builder_.newTemp();
+            builder_.emitRaw("    " + result + " =w " + qbeType + "tosi " + argTemp);
+            return result;
+        }
+        return argTemp;  // Already integer
+    }
+    
+    if (upperName == "RND") {
+        // RND() - random number 0.0 to 1.0
+        std::string result = builder_.newTemp();
+        builder_.emitCall(result, "d", "basic_rnd", "");
+        return result;
     }
     
     // Check for user-defined functions (DEF FN)
@@ -530,6 +657,11 @@ void ASTEmitter::emitStatement(const Statement* stmt) {
             emitRestoreStatement(static_cast<const RestoreStatement*>(stmt));
             break;
             
+        case ASTNodeType::STMT_LOCAL:
+            // LOCAL is like DIM but for function-local variables
+            emitLocalStatement(static_cast<const LocalStatement*>(stmt));
+            break;
+            
         case ASTNodeType::STMT_SHARED:
             // SHARED is purely declarative - no code emission needed
             // Variables are already registered during function entry
@@ -626,6 +758,48 @@ void ASTEmitter::emitEndStatement(const EndStatement* stmt) {
     // END statement - terminate execution
     builder_.emitComment("END statement - program exit");
     builder_.emitReturn("0");
+}
+
+void ASTEmitter::emitLocalStatement(const LocalStatement* stmt) {
+    // LOCAL statement: allocate stack space for local variables in SUBs/FUNCTIONs
+    // Similar to DIM but specifically for function-local scope
+    
+    for (const auto& varDecl : stmt->variables) {
+        const std::string& varName = varDecl.name;
+        
+        builder_.emitComment("LOCAL variable: " + varName);
+        
+        // Look up variable in symbol table using scoped lookup
+        std::string currentFunc = symbolMapper_.getCurrentFunction();
+        const auto* varSymbol = semantic_.lookupVariableScoped(varName, currentFunc);
+        if (!varSymbol) {
+            builder_.emitComment("ERROR: LOCAL variable not found in symbol table: " + varName);
+            continue;
+        }
+        
+        // Allocate stack space for the local variable
+        std::string mangledName = symbolMapper_.mangleVariableName(varName, false);
+        BaseType varType = varSymbol->typeDesc.baseType;
+        int64_t size = typeManager_.getTypeSize(varType);
+        
+        if (size == 4) {
+            builder_.emitRaw("    " + mangledName + " =l alloc4 4");
+        } else if (size == 8) {
+            builder_.emitRaw("    " + mangledName + " =l alloc8 8");
+        } else {
+            builder_.emitRaw("    " + mangledName + " =l alloc8 " + std::to_string(size));
+        }
+        
+        // Initialize to zero (BASIC variables are implicitly initialized)
+        if (typeManager_.isString(varType)) {
+            // Strings initialized to null pointer
+            builder_.emitRaw("    storel 0, " + mangledName);
+        } else if (size == 4) {
+            builder_.emitRaw("    storew 0, " + mangledName);
+        } else if (size == 8) {
+            builder_.emitRaw("    storel 0, " + mangledName);
+        }
+    }
 }
 
 void ASTEmitter::emitDimStatement(const DimStatement* stmt) {
@@ -855,14 +1029,14 @@ void ASTEmitter::emitCallStatement(const CallStatement* stmt) {
 // === Variable Access ===
 
 std::string ASTEmitter::getVariableAddress(const std::string& varName) {
-    // Check if it's a global variable
-    const auto& symbolTable = semantic_.getSymbolTable();
-    auto it = symbolTable.variables.find(varName);
-    if (it == symbolTable.variables.end()) {
+    // Look up variable with scoped lookup
+    std::string currentFunc = symbolMapper_.getCurrentFunction();
+    const auto* varSymbolPtr = semantic_.lookupVariableScoped(varName, currentFunc);
+    if (!varSymbolPtr) {
         builder_.emitComment("ERROR: variable not found: " + varName);
         return builder_.newTemp();
     }
-    const auto& varSymbol = it->second;
+    const auto& varSymbol = *varSymbolPtr;
     
     // Check if we're in a function and the variable is SHARED
     // SHARED variables in functions should use the global symbol
@@ -889,13 +1063,14 @@ std::string ASTEmitter::loadVariable(const std::string& varName) {
     BaseType varType = getVariableType(varName);
     std::string qbeType = typeManager_.getQBEType(varType);
     
-    const auto& symbolTable = semantic_.getSymbolTable();
-    auto it = symbolTable.variables.find(varName);
-    if (it == symbolTable.variables.end()) {
+    // Look up variable with scoped lookup
+    std::string currentFunc = symbolMapper_.getCurrentFunction();
+    const auto* varSymbolPtr = semantic_.lookupVariableScoped(varName, currentFunc);
+    if (!varSymbolPtr) {
         builder_.emitComment("ERROR: variable not found: " + varName);
         return builder_.newTemp();
     }
-    const auto& varSymbol = it->second;
+    const auto& varSymbol = *varSymbolPtr;
     
     // Check if we're in a function and the variable is SHARED
     bool treatAsGlobal = varSymbol.isGlobal || 
@@ -920,13 +1095,14 @@ void ASTEmitter::storeVariable(const std::string& varName, const std::string& va
     BaseType varType = getVariableType(varName);
     std::string qbeType = typeManager_.getQBEType(varType);
     
-    const auto& symbolTable = semantic_.getSymbolTable();
-    auto it = symbolTable.variables.find(varName);
-    if (it == symbolTable.variables.end()) {
+    // Look up variable with scoped lookup
+    std::string currentFunc = symbolMapper_.getCurrentFunction();
+    const auto* varSymbolPtr = semantic_.lookupVariableScoped(varName, currentFunc);
+    if (!varSymbolPtr) {
         builder_.emitComment("ERROR: variable not found: " + varName);
         return;
     }
-    const auto& varSymbol = it->second;
+    const auto& varSymbol = *varSymbolPtr;
     
     // Check if we're in a function and the variable is SHARED
     bool treatAsGlobal = varSymbol.isGlobal || 
@@ -1278,15 +1454,14 @@ BaseType ASTEmitter::getExpressionType(const Expression* expr) {
 }
 
 BaseType ASTEmitter::getVariableType(const std::string& varName) {
-    // Variable name is already mangled (e.g., "Y_DOUBLE")
-    const auto& symbolTable = semantic_.getSymbolTable();
-    auto it = symbolTable.variables.find(varName);
-    if (it == symbolTable.variables.end()) {
+    // Use scoped lookup for variable type
+    std::string currentFunc = symbolMapper_.getCurrentFunction();
+    const auto* varSymbol = semantic_.lookupVariableScoped(varName, currentFunc);
+    if (!varSymbol) {
         return BaseType::UNKNOWN;
     }
     
-    const auto& varSymbol = it->second;
-    return varSymbol.typeDesc.baseType;
+    return varSymbol->typeDesc.baseType;
 }
 
 

@@ -180,15 +180,157 @@ void CFGEmitter::emitBlockTerminator(const BasicBlock* block, const ControlFlowG
         return;
     }
     
-    // Analyze edge types
-    EdgeType edgeType = outEdges[0].type;
+    // Analyze edge types - check if any edge is CALL or RETURN first
+    bool hasCallEdge = false;
+    bool hasReturnEdge = false;
     
-    if (edgeType == EdgeType::RETURN) {
-        // Return edge
-        builder_.emitComment("Return edge");
-        emitReturn();
+    for (const auto& edge : outEdges) {
+        if (edge.type == EdgeType::CALL) {
+            hasCallEdge = true;
+        } else if (edge.type == EdgeType::RETURN) {
+            hasReturnEdge = true;
+        }
+    }
+    
+    // Handle GOSUB (CALL edge) first, as it requires special handling
+    if (hasCallEdge) {
+        // Subroutine call (GOSUB)
+        // Need to find both the call target and the return point
+        // outEdges should have 2 edges: CALL to subroutine, FALLTHROUGH to return point
+        
+        if (outEdges.size() < 2) {
+            builder_.emitComment("ERROR: GOSUB should have 2 out-edges (call + return point)");
+            return;
+        }
+        
+        // Find the call target and return point
+        int callTarget = -1;
+        int returnPoint = -1;
+        
+        for (const auto& edge : outEdges) {
+            if (edge.type == EdgeType::CALL) {
+                callTarget = edge.targetBlock;
+            } else if (edge.type == EdgeType::FALLTHROUGH || edge.type == EdgeType::JUMP) {
+                returnPoint = edge.targetBlock;
+            }
+        }
+        
+        if (callTarget < 0 || returnPoint < 0) {
+            builder_.emitComment("ERROR: Could not find GOSUB call target or return point");
+            return;
+        }
+        
+        builder_.emitComment("GOSUB: push return point, jump to subroutine");
+        
+        // Push return block ID onto the return stack
+        // 1. Load current stack pointer
+        std::string spTemp = builder_.newTemp();
+        builder_.emitRaw("    " + spTemp + " =w loadw $gosub_return_sp\n");
+        
+        // 2. Convert SP to long for address calculation
+        std::string spLong = builder_.newTemp();
+        builder_.emitRaw("    " + spLong + " =l extsw " + spTemp + "\n");
+        
+        // 3. Calculate byte offset: SP * 4 (word size)
+        std::string byteOffset = builder_.newTemp();
+        builder_.emitRaw("    " + byteOffset + " =l mul " + spLong + ", 4\n");
+        
+        // 4. Calculate stack address: $gosub_return_stack + offset
+        std::string stackAddr = builder_.newTemp();
+        builder_.emitRaw("    " + stackAddr + " =l add $gosub_return_stack, " + byteOffset + "\n");
+        
+        // 5. Store return block ID at that address
+        builder_.emitRaw("    storew " + std::to_string(returnPoint) + ", " + stackAddr + "\n");
+        
+        // 6. Increment stack pointer
+        std::string newSp = builder_.newTemp();
+        builder_.emitRaw("    " + newSp + " =w add " + spTemp + ", 1\n");
+        builder_.emitRaw("    storew " + newSp + ", $gosub_return_sp\n");
+        
+        // 7. Jump to subroutine
+        emitFallthrough(callTarget);
         return;
     }
+    
+    if (hasReturnEdge) {
+        // RETURN from GOSUB - pop return address and dispatch
+        builder_.emitComment("RETURN from GOSUB - sparse dispatch");
+        
+        // 1. Load current stack pointer
+        std::string spTemp = builder_.newTemp();
+        builder_.emitRaw("    " + spTemp + " =w loadw $gosub_return_sp\n");
+        
+        // 2. Decrement stack pointer
+        std::string newSp = builder_.newTemp();
+        builder_.emitRaw("    " + newSp + " =w sub " + spTemp + ", 1\n");
+        builder_.emitRaw("    storew " + newSp + ", $gosub_return_sp\n");
+        
+        // 3. Convert new SP to long for address calculation
+        std::string newSpLong = builder_.newTemp();
+        builder_.emitRaw("    " + newSpLong + " =l extsw " + newSp + "\n");
+        
+        // 4. Calculate byte offset: SP * 4
+        std::string byteOffset = builder_.newTemp();
+        builder_.emitRaw("    " + byteOffset + " =l mul " + newSpLong + ", 4\n");
+        
+        // 5. Calculate stack address
+        std::string stackAddr = builder_.newTemp();
+        builder_.emitRaw("    " + stackAddr + " =l add $gosub_return_stack, " + byteOffset + "\n");
+        
+        // 6. Load return block ID
+        std::string returnBlockIdTemp = builder_.newTemp();
+        builder_.emitRaw("    " + returnBlockIdTemp + " =w loadw " + stackAddr + "\n");
+        
+        // 7. Sparse dispatch - only check blocks that are GOSUB return points
+        if (cfg && !cfg->gosubReturnBlocks.empty()) {
+            builder_.emitComment("Sparse RETURN dispatch - checking " + 
+                               std::to_string(cfg->gosubReturnBlocks.size()) + 
+                               " return points");
+            
+            // Convert set to sorted vector for deterministic output
+            std::vector<int> returnBlocks(cfg->gosubReturnBlocks.begin(), 
+                                         cfg->gosubReturnBlocks.end());
+            std::sort(returnBlocks.begin(), returnBlocks.end());
+            
+            // Generate comparison chain
+            for (size_t i = 0; i < returnBlocks.size(); ++i) {
+                int blockId = returnBlocks[i];
+                std::string isMatch = builder_.newTemp();
+                builder_.emitRaw("    " + isMatch + " =w ceqw " + returnBlockIdTemp + 
+                               ", " + std::to_string(blockId) + "\n");
+                
+                std::string targetLabel = getBlockLabel(blockId);
+                bool isLast = (i + 1 == returnBlocks.size());
+                
+                if (isLast) {
+                    // Last comparison - if it doesn't match, fall through to error
+                    builder_.emitRaw("    jnz " + isMatch + ", @" + targetLabel + ", @return_error_" + 
+                                   std::to_string(block->id) + "\n");
+                } else {
+                    // Not last - jump to target or next comparison
+                    std::string nextCheckLabel = "return_check_" + std::to_string(block->id) + 
+                                               "_" + std::to_string(i + 1);
+                    builder_.emitRaw("    jnz " + isMatch + ", @" + targetLabel + ", @" + 
+                                   nextCheckLabel + "\n");
+                    builder_.emitLabel(nextCheckLabel);
+                }
+            }
+            
+            // Error case: return block ID not found
+            builder_.emitLabel("return_error_" + std::to_string(block->id));
+            builder_.emitComment("RETURN error: invalid return address");
+        } else {
+            builder_.emitComment("WARNING: No GOSUB return blocks found");
+        }
+        
+        // Fall through to program exit on error
+        builder_.emitComment("RETURN stack error - exiting program");
+        builder_.emitReturn("0");
+        return;
+    }
+    
+    // Get the primary edge type for remaining cases
+    EdgeType edgeType = outEdges[0].type;
     
     if (edgeType == EdgeType::FALLTHROUGH || edgeType == EdgeType::JUMP) {
         // Simple fallthrough/jump - unconditional jump
@@ -249,22 +391,6 @@ void CFGEmitter::emitBlockTerminator(const BasicBlock* block, const ControlFlowG
             if (!outEdges.empty()) {
                 emitFallthrough(outEdges[0].targetBlock);
             }
-        }
-        return;
-    }
-    
-    if (edgeType == EdgeType::CALL) {
-        // Subroutine call (GOSUB)
-        builder_.emitComment("GOSUB call edge");
-        
-        if (outEdges.size() >= 1) {
-            // First edge is the call target
-            int callTarget = outEdges[0].targetBlock;
-            
-            // TODO: Emit proper GOSUB calling convention
-            // For now, just jump (we'll need runtime stack management)
-            builder_.emitComment("TODO: Implement GOSUB call stack");
-            emitFallthrough(callTarget);
         }
         return;
     }
@@ -408,32 +534,70 @@ bool CFGEmitter::isLoopHeader(const BasicBlock* block, const ControlFlowGraph* c
 const ForStatement* CFGEmitter::findForStatementInLoop(const BasicBlock* block, const ControlFlowGraph* cfg) {
     if (!block || !cfg) return nullptr;
     
-    // Search backwards through predecessors to find the init block
-    std::set<int> visited;
-    std::queue<int> toVisit;
-    toVisit.push(block->id);
+    // For a For_Increment block, we need to find the corresponding For_Init block
+    // The structure is: For_Init -> For_Header -> For_Body -> For_Increment -> For_Header (back-edge)
+    // Strategy: Follow the successor (back-edge to header), then find the For_Init predecessor
     
-    while (!toVisit.empty()) {
-        int currentId = toVisit.front();
-        toVisit.pop();
+    // First, check if this is a For_Increment block
+    if (block->label.find("For_Increment") == std::string::npos) {
+        // Not an increment block, fall back to general search
+        std::set<int> visited;
+        std::queue<int> toVisit;
+        toVisit.push(block->id);
         
-        if (visited.count(currentId)) continue;
-        visited.insert(currentId);
-        
-        if (currentId >= 0 && currentId < static_cast<int>(cfg->blocks.size())) {
-            const BasicBlock* currentBlock = cfg->blocks[currentId].get();
-            if (currentBlock) {
-                // Check if this block has a ForStatement
-                for (const Statement* stmt : currentBlock->statements) {
-                    if (stmt && stmt->getType() == ASTNodeType::STMT_FOR) {
-                        return static_cast<const ForStatement*>(stmt);
+        while (!toVisit.empty()) {
+            int currentId = toVisit.front();
+            toVisit.pop();
+            
+            if (visited.count(currentId)) continue;
+            visited.insert(currentId);
+            
+            if (currentId >= 0 && currentId < static_cast<int>(cfg->blocks.size())) {
+                const BasicBlock* currentBlock = cfg->blocks[currentId].get();
+                if (currentBlock) {
+                    for (const Statement* stmt : currentBlock->statements) {
+                        if (stmt && stmt->getType() == ASTNodeType::STMT_FOR) {
+                            return static_cast<const ForStatement*>(stmt);
+                        }
+                    }
+                    
+                    for (int predId : currentBlock->predecessors) {
+                        if (!visited.count(predId)) {
+                            toVisit.push(predId);
+                        }
                     }
                 }
-                
-                // Add predecessors to search
-                for (int predId : currentBlock->predecessors) {
-                    if (!visited.count(predId)) {
-                        toVisit.push(predId);
+            }
+        }
+        return nullptr;
+    }
+    
+    // This is a For_Increment block - follow the back-edge to the header
+    // The increment block should have exactly one successor (the header)
+    if (block->successors.size() != 1) {
+        return nullptr;  // Malformed loop
+    }
+    
+    int headerId = block->successors[0];
+    if (headerId < 0 || headerId >= static_cast<int>(cfg->blocks.size())) {
+        return nullptr;
+    }
+    
+    const BasicBlock* headerBlock = cfg->blocks[headerId].get();
+    if (!headerBlock || headerBlock->label.find("For_Header") == std::string::npos) {
+        return nullptr;  // Not a valid header
+    }
+    
+    // Now find the For_Init block among the header's predecessors
+    // The For_Init block is the one with "For_Init" in its label
+    for (int predId : headerBlock->predecessors) {
+        if (predId >= 0 && predId < static_cast<int>(cfg->blocks.size())) {
+            const BasicBlock* predBlock = cfg->blocks[predId].get();
+            if (predBlock && predBlock->label.find("For_Init") != std::string::npos) {
+                // Found the init block - look for ForStatement in it
+                for (const Statement* stmt : predBlock->statements) {
+                    if (stmt && stmt->getType() == ASTNodeType::STMT_FOR) {
+                        return static_cast<const ForStatement*>(stmt);
                     }
                 }
             }
