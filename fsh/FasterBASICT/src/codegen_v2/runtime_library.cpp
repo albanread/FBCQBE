@@ -232,6 +232,8 @@ std::string RuntimeLibrary::emitVal(const std::string& stringPtr) {
 
 void RuntimeLibrary::emitEnd() {
     emitRuntimeCallVoid("exit", "w 0");
+    // QBE requires a terminator after every call, even if the call doesn't return
+    builder_.emitReturn("0");
 }
 
 void RuntimeLibrary::emitRuntimeError(int errorCode, const std::string& errorMsg) {

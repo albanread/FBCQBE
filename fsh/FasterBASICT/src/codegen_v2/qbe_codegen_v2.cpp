@@ -248,7 +248,7 @@ void QBECodeGeneratorV2::generateMainFunction(const ControlFlowGraph* cfg) {
     // Enter global scope
     symbolMapper_->enterFunctionScope("main");
     
-    // Emit CFG
+    // Emit CFG (local variable allocations will be inserted at entry block)
     cfgEmitter_->emitCFG(cfg, "main");
     
     // Exit global scope
@@ -315,9 +315,9 @@ void QBECodeGeneratorV2::emitGlobalArray(const ArraySymbol* arraySymbol) {
     std::string descName = symbolMapper_->getArrayDescriptorName(arraySymbol->name);
     
     // Arrays are allocated and initialized by DIM statements at runtime
-    // Here we just emit the descriptor storage (64 bytes, zero-initialized)
+    // Here we just emit the descriptor storage (64 bytes = 8 longs, zero-initialized)
     builder_->emitComment("Array descriptor: " + arraySymbol->name);
-    builder_->emitGlobalData(descName, "l", "z 64");
+    builder_->emitGlobalData(descName, "l", "0, l 0, l 0, l 0, l 0, l 0, l 0, l 0");
 }
 
 std::vector<VariableSymbol*> QBECodeGeneratorV2::getGlobalVariables() {

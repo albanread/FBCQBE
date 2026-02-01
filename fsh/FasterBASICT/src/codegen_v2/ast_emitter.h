@@ -208,6 +208,12 @@ public:
      */
     FasterBASIC::BaseType getVariableType(const std::string& varName);
     
+    /**
+     * Get the symbol table from semantic analyzer
+     * @return Reference to symbol table
+     */
+    const FasterBASIC::SymbolTable& getSymbolTable() const { return semantic_.getSymbolTable(); }
+    
 private:
     QBEBuilder& builder_;
     TypeManager& typeManager_;

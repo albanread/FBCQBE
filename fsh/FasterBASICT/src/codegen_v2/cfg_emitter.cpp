@@ -71,6 +71,39 @@ void CFGEmitter::emitBlock(const BasicBlock* block, const ControlFlowGraph* cfg)
     builder_.emitComment(blockInfo);
     builder_.emitLabel(label);
     
+    // If this is the entry block (block 0), allocate stack space for all local variables
+    if (blockId == 0 && currentFunction_ == "main") {
+        const auto& symbolTable = astEmitter_.getSymbolTable();
+        for (const auto& pair : symbolTable.variables) {
+            const auto& varSymbol = pair.second;
+            if (!varSymbol.isGlobal) {
+                // This is a local variable - allocate on stack
+                std::string mangledName = symbolMapper_.mangleVariableName(pair.first, false);
+                BaseType varType = varSymbol.typeDesc.baseType;
+                std::string qbeType = typeManager_.getQBEType(varType);
+                int64_t size = typeManager_.getTypeSize(varType);
+                
+                if (size == 4) {
+                    builder_.emitRaw("    " + mangledName + " =l alloc4 4");
+                } else if (size == 8) {
+                    builder_.emitRaw("    " + mangledName + " =l alloc8 8");
+                } else {
+                    builder_.emitRaw("    " + mangledName + " =l alloc8 " + std::to_string(size));
+                }
+                
+                // Initialize to 0 (BASIC variables are implicitly initialized)
+                if (typeManager_.isString(varType)) {
+                    // Strings initialized to null pointer
+                    builder_.emitRaw("    storel 0, " + mangledName);
+                } else if (size == 4) {
+                    builder_.emitRaw("    storew 0, " + mangledName);
+                } else if (size == 8) {
+                    builder_.emitRaw("    storel 0, " + mangledName);
+                }
+            }
+        }
+    }
+    
     // Check if this is a FOR loop header - emit condition check
     if (block->isLoopHeader && block->label.find("For_Header") != std::string::npos) {
         // Find the ForStatement in the predecessor init block
@@ -108,8 +141,20 @@ void CFGEmitter::emitBlock(const BasicBlock* block, const ControlFlowGraph* cfg)
     // Emit statements in this block
     emitBlockStatements(block);
     
-    // Emit terminator (control flow)
-    emitBlockTerminator(block, cfg);
+    // Check if block contains an END statement - if so, skip emitting terminator
+    // since END already terminates execution
+    bool hasEndStatement = false;
+    for (const Statement* stmt : block->statements) {
+        if (stmt && stmt->getType() == ASTNodeType::STMT_END) {
+            hasEndStatement = true;
+            break;
+        }
+    }
+    
+    // Emit terminator (control flow) only if block doesn't have END
+    if (!hasEndStatement) {
+        emitBlockTerminator(block, cfg);
+    }
     
     builder_.emitBlankLine();
     

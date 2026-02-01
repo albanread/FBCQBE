@@ -623,7 +623,10 @@ void ASTEmitter::emitInputStatement(const InputStatement* stmt) {
 }
 
 void ASTEmitter::emitEndStatement(const EndStatement* stmt) {
-    runtime_.emitEnd();
+    // END statement - just a marker
+    // The CFG builder should have created edges to the exit block
+    // Don't emit anything here - let the CFG terminator handle the jump
+    builder_.emitComment("END statement");
 }
 
 void ASTEmitter::emitDimStatement(const DimStatement* stmt) {
@@ -633,10 +636,28 @@ void ASTEmitter::emitDimStatement(const DimStatement* stmt) {
     for (const auto& arrayDecl : stmt->arrays) {
         const std::string& arrayName = arrayDecl.name;
         
-        // Skip scalar variables (those without dimensions)
-        // Scalar variables declared with DIM are just regular variables
+        // Handle scalar variables (those without dimensions)
         if (arrayDecl.dimensions.empty()) {
-            builder_.emitComment("DIM scalar variable: " + arrayName + " (no allocation needed)");
+            builder_.emitComment("DIM scalar variable: " + arrayName);
+            
+            // Check if it's a local variable - if so, allocate stack space
+            const auto& symbolTable = semantic_.getSymbolTable();
+            auto varIt = symbolTable.variables.find(arrayName);
+            if (varIt != symbolTable.variables.end() && !varIt->second.isGlobal) {
+                // Local variable - allocate on stack
+                std::string mangledName = symbolMapper_.mangleVariableName(arrayName, false);
+                BaseType varType = varIt->second.typeDesc.baseType;
+                std::string qbeType = typeManager_.getQBEType(varType);
+                int64_t size = typeManager_.getTypeSize(varType);
+                
+                if (size == 4) {
+                    builder_.emitRaw("    " + mangledName + " =l alloc4 4");
+                } else if (size == 8) {
+                    builder_.emitRaw("    " + mangledName + " =l alloc8 8");
+                } else {
+                    builder_.emitRaw("    " + mangledName + " =l alloc8 " + std::to_string(size));
+                }
+            }
             continue;
         }
         
@@ -835,9 +856,6 @@ void ASTEmitter::emitCallStatement(const CallStatement* stmt) {
 // === Variable Access ===
 
 std::string ASTEmitter::getVariableAddress(const std::string& varName) {
-    // Variable name is already mangled by semantic analyzer (e.g., "Y_DOUBLE")
-    // Don't mangle it again - use it as-is for symbol table lookup
-    
     // Check if it's a global variable
     const auto& symbolTable = semantic_.getSymbolTable();
     auto it = symbolTable.variables.find(varName);
@@ -852,19 +870,19 @@ std::string ASTEmitter::getVariableAddress(const std::string& varName) {
     bool treatAsGlobal = varSymbol.isGlobal || 
                          (symbolMapper_.inFunctionScope() && symbolMapper_.isSharedVariable(varName));
     
+    // Mangle the variable name properly (strips type suffixes, sanitizes, etc.)
+    std::string mangledName = symbolMapper_.mangleVariableName(varName, treatAsGlobal);
+    
     if (treatAsGlobal) {
-        // For global variables, use QBE global prefix ($)
-        std::string globalName = "$var_" + varName;
-        
         // Cache the address
-        if (globalVarAddresses_.find(globalName) == globalVarAddresses_.end()) {
-            globalVarAddresses_[globalName] = globalName;
+        if (globalVarAddresses_.find(mangledName) == globalVarAddresses_.end()) {
+            globalVarAddresses_[mangledName] = mangledName;
         }
         
-        return globalName;
+        return mangledName;
     } else {
-        // Local variable - use QBE local prefix (%)
-        return "%var_" + varName;
+        // Local variable
+        return mangledName;
     }
 }
 
@@ -884,16 +902,19 @@ std::string ASTEmitter::loadVariable(const std::string& varName) {
     bool treatAsGlobal = varSymbol.isGlobal || 
                          (symbolMapper_.inFunctionScope() && symbolMapper_.isSharedVariable(varName));
     
+    // All variables (global and local) are stored in memory and must be loaded
+    std::string addr = getVariableAddress(varName);
+    std::string result = builder_.newTemp();
+    
     if (treatAsGlobal) {
-        // Global variable - load from memory
-        std::string addr = getVariableAddress(varName);
-        std::string result = builder_.newTemp();
+        // Global variable - load from global memory
         builder_.emitLoad(result, qbeType, addr);
-        return result;
     } else {
-        // Local variable - already a temporary
-        return getVariableAddress(varName);
+        // Local variable - load from stack allocation
+        builder_.emitLoad(result, qbeType, addr);
     }
+    
+    return result;
 }
 
 void ASTEmitter::storeVariable(const std::string& varName, const std::string& value) {
@@ -912,14 +933,15 @@ void ASTEmitter::storeVariable(const std::string& varName, const std::string& va
     bool treatAsGlobal = varSymbol.isGlobal || 
                          (symbolMapper_.inFunctionScope() && symbolMapper_.isSharedVariable(varName));
     
+    // All variables (global and local) are stored in memory
+    std::string addr = getVariableAddress(varName);
+    
     if (treatAsGlobal) {
-        // Global variable - store to memory
-        std::string addr = getVariableAddress(varName);
+        // Global variable - store to global memory
         builder_.emitStore(qbeType, value, addr);
     } else {
-        // Local variable - copy to local temp
-        std::string addr = getVariableAddress(varName);
-        builder_.emitTrunc(addr, qbeType, value);
+        // Local variable - store to stack allocation
+        builder_.emitStore(qbeType, value, addr);
     }
 }
 
