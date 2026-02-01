@@ -1,172 +1,303 @@
 //
 // cfg_builder_conditional.cpp
-// FasterBASIC - Control Flow Graph Builder Conditional Handlers
+// FasterBASIC - Control Flow Graph Builder Conditional Handlers (V2)
 //
-// Contains IF/THEN/ELSE and SELECT CASE processing.
+// Contains IF...THEN...ELSE and SELECT CASE statement processing.
 // Part of modular CFG builder split (February 2026).
+//
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
 //
 
 #include "cfg_builder.h"
-#include <algorithm>
-#include <sstream>
 #include <iostream>
-#include <functional>
+#include <stdexcept>
 
 namespace FasterBASIC {
 
 // =============================================================================
 // IF Statement Handler
 // =============================================================================
-
-void CFGBuilder::processIfStatement(const IfStatement& stmt, BasicBlock* currentBlock) {
-    // IF creates conditional branch
-    std::cerr << "[DEBUG] processIfStatement called: isMultiLine=" << stmt.isMultiLine 
-              << ", hasGoto=" << stmt.hasGoto 
-              << ", thenStmts=" << stmt.thenStatements.size()
-              << ", elseStmts=" << stmt.elseStatements.size() << "\n";
-
-    if (stmt.hasGoto) {
-        // IF ... THEN GOTO creates two-way branch
-        BasicBlock* nextBlock = createNewBlock();
-        m_currentBlock = nextBlock;
-    } else if (stmt.isMultiLine) {
-        // Multi-line IF...END IF: Create separate blocks for THEN/ELSE branches
-        // Use proper block ordering: create convergence point AFTER nested statements
-        std::cerr << "[DEBUG] Creating THEN/ELSE blocks for multiline IF\n";
-        
-        // 1. Create the branch targets
-        BasicBlock* thenBlock = createNewBlock("IF THEN");
-        BasicBlock* elseBlock = createNewBlock("IF ELSE");
-        std::cerr << "[DEBUG] Created thenBlock=" << thenBlock->id << ", elseBlock=" << elseBlock->id << "\n";
-        
-        // 2. Link the IF header to both branches immediately
-        addConditionalEdge(currentBlock->id, thenBlock->id, "true");
-        addConditionalEdge(currentBlock->id, elseBlock->id, "false");
-        
-        // 3. Process the THEN branch
-        // This might create many internal blocks if there are nested loops
-        m_currentBlock = thenBlock;
-        std::cerr << "[DEBUG] Processing THEN branch with " << stmt.thenStatements.size() << " statements\n";
-        if (!stmt.thenStatements.empty()) {
-            processNestedStatements(stmt.thenStatements, thenBlock, stmt.location.line);
-        }
-        std::cerr << "[DEBUG] THEN branch processed, m_currentBlock=" << m_currentBlock->id << "\n";
-        // Capture the "exit tip" of the THEN branch
-        BasicBlock* thenExitTip = m_currentBlock;
-        
-        // 4. Process the ELSE branch
-        m_currentBlock = elseBlock;
-        if (!stmt.elseStatements.empty()) {
-            processNestedStatements(stmt.elseStatements, elseBlock, stmt.location.line);
-        }
-        // Capture the "exit tip" of the ELSE branch
-        BasicBlock* elseExitTip = m_currentBlock;
-        
-        // 5. Create the convergence point (After IF)
-        // By creating this AFTER the nested statements, it will naturally
-        // have a higher ID than anything inside the THEN/ELSE blocks
-        BasicBlock* afterIfBlock = createNewBlock("After IF");
-        
-        // 6. Bridge the exit tips to the convergence point
-        // Only bridge if the branch didn't end in a terminator
-        bool thenHasTerminator = !thenExitTip->statements.empty() && 
-                                (thenExitTip->statements.back()->getType() == ASTNodeType::STMT_EXIT ||
-                                 thenExitTip->statements.back()->getType() == ASTNodeType::STMT_RETURN ||
-                                 thenExitTip->statements.back()->getType() == ASTNodeType::STMT_GOTO ||
-                                 thenExitTip->statements.back()->getType() == ASTNodeType::STMT_END);
-        
-        bool elseHasTerminator = !elseExitTip->statements.empty() && 
-                                (elseExitTip->statements.back()->getType() == ASTNodeType::STMT_EXIT ||
-                                 elseExitTip->statements.back()->getType() == ASTNodeType::STMT_RETURN ||
-                                 elseExitTip->statements.back()->getType() == ASTNodeType::STMT_GOTO ||
-                                 elseExitTip->statements.back()->getType() == ASTNodeType::STMT_END);
-        
-        if (!thenHasTerminator) {
-            addFallthroughEdge(thenExitTip->id, afterIfBlock->id);
-        }
-        if (!elseHasTerminator) {
-            addFallthroughEdge(elseExitTip->id, afterIfBlock->id);
-        }
-        
-        // 7. Update the builder's state
-        m_currentBlock = afterIfBlock;
-    } else {
-        // Single-line IF: IF x THEN statement
-        // Do NOT process nested statements here - leave them in the AST
-        // The code generator will emit them with proper conditional branching
-        // This is different from multi-line IF which uses CFG-driven branching
-        
-        // Single-line IF statements should be handled by emitIf() in codegen
-        // which will emit: evaluate condition, jnz to then/else labels, emit statements
+//
+// IF...THEN...ELSE...END IF
+// Creates blocks for condition, then branch, else branch, and merge point
+// Recursively processes nested statements in each branch
+//
+BasicBlock* CFGBuilder::buildIf(
+    const IfStatement& stmt,
+    BasicBlock* incoming,
+    LoopContext* loop,
+    SelectContext* select,
+    TryContext* tryCtx,
+    SubroutineContext* sub
+) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building IF statement" << std::endl;
     }
+    
+    // Check if this is a single-line IF with GOTO
+    if (stmt.hasGoto && stmt.thenStatements.empty() && stmt.elseStatements.empty()) {
+        // Single-line IF...THEN GOTO line_number
+        // This is just a conditional branch, handle inline
+        if (m_debugMode) {
+            std::cout << "[CFG] Single-line IF GOTO to line " << stmt.gotoLine << std::endl;
+        }
+        
+        addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+        
+        // Create merge block for fallthrough (when condition is false)
+        BasicBlock* mergeBlock = createBlock("If_Merge");
+        
+        // Add conditional edge to GOTO target (when true)
+        int targetBlock = resolveLineNumberToBlock(stmt.gotoLine);
+        if (targetBlock >= 0) {
+            addConditionalEdge(incoming->id, targetBlock, "true");
+        } else {
+            // Forward reference - defer
+            DeferredEdge edge;
+            edge.sourceBlockId = incoming->id;
+            edge.targetLineNumber = stmt.gotoLine;
+            edge.label = "true";
+            m_deferredEdges.push_back(edge);
+        }
+        
+        // Add fallthrough edge (when false)
+        addConditionalEdge(incoming->id, mergeBlock->id, "false");
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] IF GOTO complete, merge block: " << mergeBlock->id << std::endl;
+        }
+        
+        return mergeBlock;
+    }
+    
+    // Check if this is a single-line IF with inline statements
+    if (stmt.isSingleLine && !stmt.thenStatements.empty()) {
+        // Single-line IF...THEN statement [ELSE statement]
+        // e.g., IF x > 5 THEN PRINT "yes" ELSE PRINT "no"
+        if (m_debugMode) {
+            std::cout << "[CFG] Single-line IF with inline statements" << std::endl;
+        }
+        
+        addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+        
+        // Create blocks for then/else/merge
+        BasicBlock* thenBlock = createBlock("If_Then");
+        BasicBlock* elseBlock = stmt.elseStatements.empty() ? nullptr : createBlock("If_Else");
+        BasicBlock* mergeBlock = createBlock("If_Merge");
+        
+        // Wire condition to branches
+        addConditionalEdge(incoming->id, thenBlock->id, "true");
+        
+        if (elseBlock) {
+            addConditionalEdge(incoming->id, elseBlock->id, "false");
+        } else {
+            addConditionalEdge(incoming->id, mergeBlock->id, "false");
+        }
+        
+        // Build THEN branch
+        BasicBlock* thenExit = buildStatementRange(
+            stmt.thenStatements,
+            thenBlock,
+            loop,
+            select,
+            tryCtx,
+            sub
+        );
+        
+        // Wire THEN to merge
+        if (!isTerminated(thenExit)) {
+            addUnconditionalEdge(thenExit->id, mergeBlock->id);
+        }
+        
+        // Build ELSE branch if present
+        if (elseBlock) {
+            BasicBlock* elseExit = buildStatementRange(
+                stmt.elseStatements,
+                elseBlock,
+                loop,
+                select,
+                tryCtx,
+                sub
+            );
+            
+            if (!isTerminated(elseExit)) {
+                addUnconditionalEdge(elseExit->id, mergeBlock->id);
+            }
+        }
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] Single-line IF complete, merge block: " << mergeBlock->id << std::endl;
+        }
+        
+        return mergeBlock;
+    }
+    
+    // Multi-line IF...THEN...ELSE...END IF
+    if (m_debugMode) {
+        std::cout << "[CFG] Multi-line IF statement" << std::endl;
+    }
+    
+    // 1. Setup blocks
+    BasicBlock* conditionBlock = incoming;
+    BasicBlock* thenEntry = createBlock("If_Then");
+    BasicBlock* elseEntry = stmt.elseStatements.empty() ? nullptr : createBlock("If_Else");
+    BasicBlock* mergeBlock = createBlock("If_Merge");
+    
+    // 2. Add condition check to incoming block
+    addStatementToBlock(conditionBlock, &stmt, getLineNumber(&stmt));
+    
+    // 3. Wire condition to branches
+    addConditionalEdge(conditionBlock->id, thenEntry->id, "true");
+    
+    if (elseEntry) {
+        addConditionalEdge(conditionBlock->id, elseEntry->id, "false");
+    } else {
+        // No ELSE branch: false goes directly to merge
+        addConditionalEdge(conditionBlock->id, mergeBlock->id, "false");
+    }
+    
+    // 4. Recursively build THEN branch
+    // KEY FIX: This handles nested loops/IFs automatically!
+    BasicBlock* thenExit = buildStatementRange(
+        stmt.thenStatements,
+        thenEntry,
+        loop,
+        select,
+        tryCtx,
+        sub
+    );
+    
+    // 5. Wire THEN exit to merge (if not terminated by GOTO/RETURN)
+    if (!isTerminated(thenExit)) {
+        addUnconditionalEdge(thenExit->id, mergeBlock->id);
+    }
+    
+    // 6. Recursively build ELSE branch (if exists)
+    if (elseEntry) {
+        BasicBlock* elseExit = buildStatementRange(
+            stmt.elseStatements,
+            elseEntry,
+            loop,
+            select,
+            tryCtx,
+            sub
+        );
+        
+        // Wire ELSE exit to merge (if not terminated)
+        if (!isTerminated(elseExit)) {
+            addUnconditionalEdge(elseExit->id, mergeBlock->id);
+        }
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Multi-line IF complete, merge block: " << mergeBlock->id << std::endl;
+    }
+    
+    // 7. Return merge point
+    // The next statement in the outer scope connects here
+    return mergeBlock;
 }
 
 // =============================================================================
 // SELECT CASE Statement Handler
 // =============================================================================
-
-void CFGBuilder::processCaseStatement(const CaseStatement& stmt, BasicBlock* currentBlock) {
-    // SELECT CASE creates a multi-way branch structure
-    // Structure:
-    //   - SELECT block (current): Evaluates the SELECT CASE expression
-    //   - Test blocks: One per CASE clause, contains comparison logic
-    //   - Body blocks: One per CASE clause, executes CASE statements
-    //   - ELSE block: Optional, for ELSE clause
-    //   - Exit block: Continue after END SELECT
+//
+// SELECT CASE expression
+//   CASE value1, value2, ...
+//     statements
+//   CASE ELSE
+//     statements
+// END SELECT
+//
+// Creates blocks for each case, evaluates expression once, branches to matching case
+//
+BasicBlock* CFGBuilder::buildSelectCase(
+    const CaseStatement& stmt,
+    BasicBlock* incoming,
+    LoopContext* loop,
+    SelectContext* outerSelect,
+    TryContext* tryCtx,
+    SubroutineContext* sub
+) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building SELECT CASE statement with " 
+                  << stmt.cases.size() << " cases" << std::endl;
+    }
     
-    // The SELECT statement stays in current block for expression evaluation
+    // 1. Add SELECT CASE to incoming block (evaluates expression)
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
     
-    // Create exit block
-    BasicBlock* exitBlock = createNewBlock("After SELECT CASE");
+    // 2. Create exit block for the entire SELECT
+    BasicBlock* exitBlock = createBlock("Select_Exit");
     
-    // For each CASE clause, create test block and body block
-    std::vector<int> testBlockIds;
-    std::vector<int> bodyBlockIds;
+    // 3. Create SELECT context for EXIT SELECT statements
+    SelectContext selectCtx;
+    selectCtx.exitBlockId = exitBlock->id;
+    selectCtx.outerSelect = outerSelect;
     
-    for (size_t i = 0; i < stmt.whenClauses.size(); i++) {
-        // Test block will contain the comparison logic
-        BasicBlock* testBlock = createNewBlock("CASE " + std::to_string(i) + " Test");
-        testBlockIds.push_back(testBlock->id);
+    // 4. Process each CASE clause
+    BasicBlock* previousCaseCheck = incoming;
+    
+    for (size_t i = 0; i < stmt.cases.size(); i++) {
+        const auto& caseClause = stmt.cases[i];
         
-        // Body block will contain the CASE statements
-        BasicBlock* bodyBlock = createNewBlock("CASE " + std::to_string(i) + " Body");
-        bodyBlockIds.push_back(bodyBlock->id);
+        if (m_debugMode) {
+            std::cout << "[CFG] Processing CASE " << i << std::endl;
+        }
         
-        // Process statements in the body block
-        m_currentBlock = bodyBlock;
-        for (const auto& caseStmt : stmt.whenClauses[i].statements) {
-            if (caseStmt) {
-                processStatement(*caseStmt, bodyBlock, 0);
-            }
+        // Create block for this case's statements
+        BasicBlock* caseBlock = createBlock("Case_" + std::to_string(i));
+        
+        // Create block for next case check (or default for last case)
+        BasicBlock* nextCheck = (i < stmt.cases.size() - 1) 
+            ? createBlock("Case_Check_" + std::to_string(i + 1))
+            : createBlock("Case_Default");
+        
+        // Wire from previous check to this case (if match) and to next check (if not)
+        if (caseClause.isElse) {
+            // CASE ELSE - always matches
+            addUnconditionalEdge(previousCaseCheck->id, caseBlock->id);
+        } else {
+            // Regular CASE - conditional edge
+            std::string caseLabel = "case_" + std::to_string(i);
+            addConditionalEdge(previousCaseCheck->id, caseBlock->id, caseLabel);
+            addConditionalEdge(previousCaseCheck->id, nextCheck->id, "no_match");
+        }
+        
+        // Recursively build case statements
+        BasicBlock* caseExit = buildStatementRange(
+            caseClause.statements,
+            caseBlock,
+            loop,
+            &selectCtx,  // Pass select context for EXIT SELECT
+            tryCtx,
+            sub
+        );
+        
+        // Wire case exit to SELECT exit (if not terminated)
+        // Note: Cases don't fall through in most BASIC dialects
+        if (!isTerminated(caseExit)) {
+            addUnconditionalEdge(caseExit->id, exitBlock->id);
+        }
+        
+        // Move to next case check
+        if (!caseClause.isElse) {
+            previousCaseCheck = nextCheck;
         }
     }
     
-    // Create ELSE block if there are OTHERWISE statements
-    int elseBlockId = -1;
-    if (!stmt.otherwiseStatements.empty()) {
-        BasicBlock* elseBlock = createNewBlock("CASE ELSE");
-        elseBlockId = elseBlock->id;
-        
-        m_currentBlock = elseBlock;
-        for (const auto& elseStmt : stmt.otherwiseStatements) {
-            if (elseStmt) {
-                processStatement(*elseStmt, elseBlock, 0);
-            }
-        }
+    // 5. If no CASE ELSE, wire the final check to exit
+    // (no case matched)
+    if (!stmt.cases.empty() && !stmt.cases.back().isElse) {
+        addUnconditionalEdge(previousCaseCheck->id, exitBlock->id);
     }
     
-    // Store SELECT CASE info for buildEdges phase
-    SelectCaseContext ctx;
-    ctx.selectBlock = currentBlock->id;
-    ctx.testBlocks = testBlockIds;
-    ctx.bodyBlocks = bodyBlockIds;
-    ctx.elseBlock = elseBlockId;
-    ctx.exitBlock = exitBlock->id;
-    ctx.caseStatement = &stmt;
-    m_selectCaseStack.push_back(ctx);
+    if (m_debugMode) {
+        std::cout << "[CFG] SELECT CASE complete, exit block: " << exitBlock->id << std::endl;
+    }
     
-    // Continue with exit block
-    m_currentBlock = exitBlock;
+    // 6. Return exit block
+    return exitBlock;
 }
 
 } // namespace FasterBASIC
