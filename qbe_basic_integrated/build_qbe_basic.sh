@@ -23,12 +23,22 @@ echo "Compiling FasterBASIC compiler sources..."
 mkdir -p obj
 
 # Compile each FasterBASIC C++ source
-# NOTE: Codegen disabled - needs to be adapted to new CFG structure
+# NOTE: Using modular CFG structure (February 2026 refactor)
 clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -c \
     "$FASTERBASIC_SRC/fasterbasic_lexer.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_parser.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_semantic.cpp" \
-    "$FASTERBASIC_SRC/fasterbasic_cfg.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_builder_core.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_builder_blocks.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_builder_utils.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_builder_jumptargets.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_builder_statements.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_builder_jumps.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_builder_conditional.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_builder_loops.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_builder_exception.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_builder_functions.cpp" \
+    "$FASTERBASIC_SRC/cfg/cfg_builder_edges.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_data_preprocessor.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_ast_dump.cpp" \
     "$FASTERBASIC_SRC/modular_commands.cpp" \
