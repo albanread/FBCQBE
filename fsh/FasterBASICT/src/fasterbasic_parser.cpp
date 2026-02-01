@@ -2390,6 +2390,56 @@ StatementPtr Parser::parseForStatement() {
             stmt->step = parseExpression();
         }
 
+        // Skip to next line
+        if (current().type == TokenType::END_OF_LINE) {
+            advance();
+        }
+
+        // Parse loop body until NEXT
+        while (!isAtEnd()) {
+            skipBlankLines();
+
+            if (isAtEnd()) break;
+
+            // Skip optional line number at start of line
+            skipOptionalLineNumber();
+
+            // Check for NEXT
+            if (current().type == TokenType::NEXT) {
+                advance(); // consume NEXT
+                
+                // Optional variable name after NEXT
+                if (current().type == TokenType::IDENTIFIER) {
+                    advance(); // consume variable name (validate if needed)
+                }
+                break;
+            }
+
+            // Parse statements on this line (may be separated by colons)
+            while (!isAtEnd() &&
+                   current().type != TokenType::END_OF_LINE &&
+                   current().type != TokenType::NEXT) {
+
+                auto bodyStmt = parseStatement();
+                if (bodyStmt) {
+                    stmt->addBodyStatement(std::move(bodyStmt));
+                }
+
+                // If there's a colon, continue parsing more statements on this line
+                if (current().type == TokenType::COLON) {
+                    advance(); // consume colon
+                } else {
+                    // No more statements on this line
+                    break;
+                }
+            }
+
+            // Skip EOL after statement(s)
+            if (current().type == TokenType::END_OF_LINE) {
+                advance();
+            }
+        }
+
         return stmt;
     }
 }
@@ -2424,6 +2474,71 @@ StatementPtr Parser::parseWhileStatement() {
 
     // Push WHILE onto loop stack to track nesting
     m_loopStack.push_back({LoopType::WHILE_WEND, whileLocation});
+
+    // Skip to next line
+    if (current().type == TokenType::END_OF_LINE) {
+        advance();
+    }
+
+    // Parse loop body until WEND or END WHILE (with infinite loop protection)
+    int iterationCount = 0;
+    const int MAX_ITERATIONS = 10000;
+    
+    while (!isAtEnd()) {
+        if (++iterationCount > MAX_ITERATIONS) {
+            error("Parser infinite loop detected in WHILE statement - possible missing WEND", whileLocation);
+            m_loopStack.pop_back();
+            return stmt;
+        }
+        skipBlankLines();
+
+        if (isAtEnd()) break;
+
+        // Skip optional line number at start of line
+        skipOptionalLineNumber();
+
+        // Check for WEND or END WHILE
+        if (current().type == TokenType::WEND) {
+            advance(); // consume WEND
+            m_loopStack.pop_back();
+            break;
+        }
+        if (current().type == TokenType::END && peek().type == TokenType::WHILE) {
+            advance(); // consume END
+            advance(); // consume WHILE
+            m_loopStack.pop_back();
+            break;
+        }
+
+        // Parse statements on this line (may be separated by colons)
+        while (!isAtEnd() &&
+               current().type != TokenType::END_OF_LINE &&
+               current().type != TokenType::WEND) {
+
+            // Check for END WHILE (two tokens)
+            if (current().type == TokenType::END && peek().type == TokenType::WHILE) {
+                break;
+            }
+
+            auto bodyStmt = parseStatement();
+            if (bodyStmt) {
+                stmt->addBodyStatement(std::move(bodyStmt));
+            }
+
+            // If there's a colon, continue parsing more statements on this line
+            if (current().type == TokenType::COLON) {
+                advance(); // consume colon
+            } else {
+                // No more statements on this line
+                break;
+            }
+        }
+
+        // Skip EOL after statement(s)
+        if (current().type == TokenType::END_OF_LINE) {
+            advance();
+        }
+    }
 
     return stmt;
 }
@@ -2465,9 +2580,8 @@ StatementPtr Parser::parseWendStatement() {
         return nullptr;
     }
 
-    // Pop the WHILE from stack
-    // Pop WHILE from loop stack
-    m_loopStack.pop_back();
+    // Note: Loop stack already popped in parseWhileStatement
+    // This function now only handles standalone WEND (legacy/error case)
 
     if (isEndWhile) {
         advance(); // consume END
@@ -2475,44 +2589,87 @@ StatementPtr Parser::parseWendStatement() {
     } else {
         advance(); // consume WEND
     }
-    return std::make_unique<WendStatement>();
+
+    auto stmt = std::make_unique<WendStatement>();
+    return stmt;
 }
 
 StatementPtr Parser::parseRepeatStatement() {
+    auto stmt = std::make_unique<RepeatStatement>();
     SourceLocation repeatLocation = current().location;
     advance(); // consume REPEAT
 
     // Push REPEAT onto loop stack to track nesting
     m_loopStack.push_back({LoopType::REPEAT_UNTIL, repeatLocation});
 
-    return std::make_unique<RepeatStatement>();
+    // Skip to next line
+    if (current().type == TokenType::END_OF_LINE) {
+        advance();
+    }
+
+    // Parse loop body until UNTIL (with infinite loop protection)
+    int iterationCount = 0;
+    const int MAX_ITERATIONS = 10000;
+    
+    while (!isAtEnd()) {
+        if (++iterationCount > MAX_ITERATIONS) {
+            error("Parser infinite loop detected in REPEAT statement - possible missing UNTIL", repeatLocation);
+            m_loopStack.pop_back();
+            return stmt;
+        }
+        skipBlankLines();
+
+        if (isAtEnd()) break;
+
+        // Skip optional line number at start of line
+        skipOptionalLineNumber();
+
+        // Check for UNTIL
+        if (current().type == TokenType::UNTIL) {
+            advance(); // consume UNTIL
+            stmt->condition = parseExpression();
+            m_loopStack.pop_back();
+            break;
+        }
+
+        // Parse statements on this line (may be separated by colons)
+        while (!isAtEnd() &&
+               current().type != TokenType::END_OF_LINE &&
+               current().type != TokenType::UNTIL) {
+
+            auto bodyStmt = parseStatement();
+            if (bodyStmt) {
+                stmt->addBodyStatement(std::move(bodyStmt));
+            }
+
+            // If there's a colon, continue parsing more statements on this line
+            if (current().type == TokenType::COLON) {
+                advance(); // consume colon
+            } else {
+                // No more statements on this line
+                break;
+            }
+        }
+
+        // Skip EOL after statement(s)
+        if (current().type == TokenType::END_OF_LINE) {
+            advance();
+        }
+    }
+
+    return stmt;
 }
 
 StatementPtr Parser::parseUntilStatement() {
     auto stmt = std::make_unique<UntilStatement>();
     SourceLocation untilLocation = current().location;
 
-    // Check if we have a matching REPEAT
-    if (m_loopStack.empty()) {
-        error("UNTIL without matching REPEAT", untilLocation);
-        return nullptr;
-    }
+    // Note: Loop stack already popped in parseRepeatStatement
+    // This function now only handles standalone UNTIL (legacy/error case)
 
-    // Check if the top of stack is REPEAT_UNTIL
-    if (m_loopStack.back().first != LoopType::REPEAT_UNTIL) {
-        std::string loopTypeName;
-        switch (m_loopStack.back().first) {
-            case LoopType::WHILE_WEND:
-                loopTypeName = "WHILE (expected WEND)";
-                break;
-            case LoopType::DO_LOOP:
-                loopTypeName = "DO (expected LOOP)";
-                break;
-            default:
-                loopTypeName = "unknown loop";
-        }
-        error("UNTIL found but current loop is " + loopTypeName +
-              " started at line " + std::to_string(m_loopStack.back().second.line), untilLocation);
+    // Check if we have a matching REPEAT
+    if (m_loopStack.empty() || m_loopStack.back().first != LoopType::REPEAT_UNTIL) {
+        error("UNTIL without matching REPEAT", untilLocation);
         return nullptr;
     }
 
@@ -2530,22 +2687,85 @@ StatementPtr Parser::parseDoStatement() {
     SourceLocation doLocation = current().location;
     advance(); // consume DO
 
-    // Check for WHILE or UNTIL condition
+    // Check for WHILE or UNTIL pre-condition
     if (current().type == TokenType::WHILE) {
         advance(); // consume WHILE
-        stmt->conditionType = DoStatement::ConditionType::WHILE;
-        stmt->condition = parseExpression();
+        stmt->preConditionType = DoStatement::ConditionType::WHILE;
+        stmt->preCondition = parseExpression();
     } else if (current().type == TokenType::UNTIL) {
         advance(); // consume UNTIL
-        stmt->conditionType = DoStatement::ConditionType::UNTIL;
-        stmt->condition = parseExpression();
-    } else {
-        // Plain DO (infinite loop)
-        stmt->conditionType = DoStatement::ConditionType::NONE;
+        stmt->preConditionType = DoStatement::ConditionType::UNTIL;
+        stmt->preCondition = parseExpression();
     }
 
     // Push DO onto loop stack to track nesting
     m_loopStack.push_back({LoopType::DO_LOOP, doLocation});
+
+    // Skip to next line
+    if (current().type == TokenType::END_OF_LINE) {
+        advance();
+    }
+
+    // Parse loop body until LOOP (with infinite loop protection)
+    int iterationCount = 0;
+    const int MAX_ITERATIONS = 10000;
+    
+    while (!isAtEnd()) {
+        if (++iterationCount > MAX_ITERATIONS) {
+            error("Parser infinite loop detected in DO statement - possible missing LOOP", doLocation);
+            m_loopStack.pop_back();
+            return stmt;
+        }
+        skipBlankLines();
+
+        if (isAtEnd()) break;
+
+        // Skip optional line number at start of line
+        skipOptionalLineNumber();
+
+        // Check for LOOP
+        if (current().type == TokenType::LOOP) {
+            advance(); // consume LOOP
+
+            // Check for WHILE or UNTIL post-condition
+            if (current().type == TokenType::WHILE) {
+                advance(); // consume WHILE
+                stmt->postConditionType = DoStatement::ConditionType::WHILE;
+                stmt->postCondition = parseExpression();
+            } else if (current().type == TokenType::UNTIL) {
+                advance(); // consume UNTIL
+                stmt->postConditionType = DoStatement::ConditionType::UNTIL;
+                stmt->postCondition = parseExpression();
+            }
+
+            m_loopStack.pop_back();
+            break;
+        }
+
+        // Parse statements on this line (may be separated by colons)
+        while (!isAtEnd() &&
+               current().type != TokenType::END_OF_LINE &&
+               current().type != TokenType::LOOP) {
+
+            auto bodyStmt = parseStatement();
+            if (bodyStmt) {
+                stmt->addBodyStatement(std::move(bodyStmt));
+            }
+
+            // If there's a colon, continue parsing more statements on this line
+            if (current().type == TokenType::COLON) {
+                advance(); // consume colon
+            } else {
+                // No more statements on this line
+                break;
+            }
+        }
+
+        // Skip EOL after statement(s)
+        if (current().type == TokenType::END_OF_LINE) {
+            advance();
+        }
+    }
 
     return stmt;
 }
@@ -2554,27 +2774,12 @@ StatementPtr Parser::parseLoopStatement() {
     auto stmt = std::make_unique<LoopStatement>();
     SourceLocation loopLocation = current().location;
 
-    // Check if we have a matching DO
-    if (m_loopStack.empty()) {
-        error("LOOP without matching DO", loopLocation);
-        return nullptr;
-    }
+    // Note: Loop stack already popped in parseDoStatement
+    // This function now only handles standalone LOOP (legacy/error case)
 
-    // Check if the top of stack is DO_LOOP
-    if (m_loopStack.back().first != LoopType::DO_LOOP) {
-        std::string loopTypeName;
-        switch (m_loopStack.back().first) {
-            case LoopType::WHILE_WEND:
-                loopTypeName = "WHILE (expected WEND)";
-                break;
-            case LoopType::REPEAT_UNTIL:
-                loopTypeName = "REPEAT (expected UNTIL)";
-                break;
-            default:
-                loopTypeName = "unknown loop";
-        }
-        error("LOOP found but current loop is " + loopTypeName +
-              " started at line " + std::to_string(m_loopStack.back().second.line), loopLocation);
+    // Check if we have a matching DO
+    if (m_loopStack.empty() || m_loopStack.back().first != LoopType::DO_LOOP) {
+        error("LOOP without matching DO", loopLocation);
         return nullptr;
     }
 

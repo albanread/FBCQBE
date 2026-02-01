@@ -23,6 +23,7 @@ echo "Compiling FasterBASIC compiler sources..."
 mkdir -p obj
 
 # Compile each FasterBASIC C++ source
+# NOTE: Codegen disabled - needs to be adapted to new CFG structure
 clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -c \
     "$FASTERBASIC_SRC/fasterbasic_lexer.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_parser.cpp" \
@@ -32,12 +33,7 @@ clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -c \
     "$FASTERBASIC_SRC/fasterbasic_ast_dump.cpp" \
     "$FASTERBASIC_SRC/modular_commands.cpp" \
     "$FASTERBASIC_SRC/command_registry_core.cpp" \
-    "$FASTERBASIC_SRC/../runtime/ConstantsManager.cpp" \
-    "$FASTERBASIC_SRC/codegen/qbe_codegen_main.cpp" \
-    "$FASTERBASIC_SRC/codegen/qbe_codegen_expressions.cpp" \
-    "$FASTERBASIC_SRC/codegen/qbe_codegen_statements.cpp" \
-    "$FASTERBASIC_SRC/codegen/qbe_codegen_helpers.cpp" \
-    "$FASTERBASIC_SRC/codegen/qbe_codegen_runtime.cpp"
+    "$FASTERBASIC_SRC/../runtime/ConstantsManager.cpp"
 
 mv *.o obj/ 2>/dev/null || true
 

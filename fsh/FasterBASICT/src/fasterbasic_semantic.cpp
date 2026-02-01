@@ -1987,6 +1987,11 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
               stmt.location);
     }
     
+    // Validate body statements
+    for (const auto& bodyStmt : stmt.body) {
+        validateStatement(*bodyStmt);
+    }
+    
     // Push to control flow stack
     ForContext ctx;
     ctx.variable = plainVarName;
@@ -2033,6 +2038,12 @@ void SemanticAnalyzer::validateNextStatement(const NextStatement& stmt) {
 
 void SemanticAnalyzer::validateWhileStatement(const WhileStatement& stmt) {
     validateExpression(*stmt.condition);
+    
+    // Validate body statements
+    for (const auto& bodyStmt : stmt.body) {
+        validateStatement(*bodyStmt);
+    }
+    
     m_whileStack.push(stmt.location);
 }
 
@@ -2047,10 +2058,25 @@ void SemanticAnalyzer::validateWendStatement(const WendStatement& stmt) {
 }
 
 void SemanticAnalyzer::validateRepeatStatement(const RepeatStatement& stmt) {
-    m_repeatStack.push(stmt.location);
+    // Validate body statements
+    for (const auto& bodyStmt : stmt.body) {
+        validateStatement(*bodyStmt);
+    }
+    
+    // Validate UNTIL condition
+    if (stmt.condition) {
+        validateExpression(*stmt.condition);
+    }
+    
+    // NOTE: With new AST structure, REPEAT contains its body and UNTIL condition
+    // No need to push/pop stack - the parser already handles loop structure
+    // m_repeatStack.push(stmt.location);
 }
 
 void SemanticAnalyzer::validateUntilStatement(const UntilStatement& stmt) {
+    // NOTE: With new AST structure, UNTIL should not appear as a separate statement
+    // The parser collects REPEAT bodies and includes UNTIL condition in RepeatStatement
+    // This case should only occur with old-style marker UNTIL statements (if any remain)
     if (m_repeatStack.empty()) {
         error(SemanticErrorType::UNTIL_WITHOUT_REPEAT,
               "UNTIL without matching REPEAT",
@@ -2063,9 +2089,19 @@ void SemanticAnalyzer::validateUntilStatement(const UntilStatement& stmt) {
 }
 
 void SemanticAnalyzer::validateDoStatement(const DoStatement& stmt) {
-    // Validate condition if present (DO WHILE or DO UNTIL)
-    if (stmt.condition) {
-        validateExpression(*stmt.condition);
+    // Validate pre-condition if present (DO WHILE or DO UNTIL)
+    if (stmt.preCondition) {
+        validateExpression(*stmt.preCondition);
+    }
+    
+    // Validate post-condition if present (LOOP WHILE or LOOP UNTIL)
+    if (stmt.postCondition) {
+        validateExpression(*stmt.postCondition);
+    }
+    
+    // Validate body statements
+    for (const auto& bodyStmt : stmt.body) {
+        validateStatement(*bodyStmt);
     }
     m_doStack.push(stmt.location);
 }

@@ -1595,8 +1595,13 @@ public:
     ExpressionPtr start;
     ExpressionPtr end;
     ExpressionPtr step;            // nullptr if no STEP clause
+    std::vector<StatementPtr> body;  // Loop body statements
 
     ForStatement(const std::string& var) : variable(var) {}
+
+    void addBodyStatement(StatementPtr stmt) {
+        body.push_back(std::move(stmt));
+    }
 
     ASTNodeType getType() const override { return ASTNodeType::STMT_FOR; }
 
@@ -1610,6 +1615,12 @@ public:
         if (step) {
             oss << makeIndent(indent + 1) << "Step:\n";
             oss << step->toString(indent + 2);
+        }
+        if (!body.empty()) {
+            oss << makeIndent(indent + 1) << "Body:\n";
+            for (const auto& stmt : body) {
+                oss << stmt->toString(indent + 2);
+            }
         }
         return oss.str();
     }
@@ -1667,8 +1678,13 @@ public:
 class WhileStatement : public Statement {
 public:
     ExpressionPtr condition;
+    std::vector<StatementPtr> body;  // Loop body statements
 
     WhileStatement() = default;
+
+    void addBodyStatement(StatementPtr stmt) {
+        body.push_back(std::move(stmt));
+    }
 
     ASTNodeType getType() const override { return ASTNodeType::STMT_WHILE; }
 
@@ -1676,6 +1692,12 @@ public:
         std::ostringstream oss;
         oss << makeIndent(indent) << "WHILE\n";
         oss << condition->toString(indent + 1);
+        if (!body.empty()) {
+            oss << makeIndent(indent + 1) << "Body:\n";
+            for (const auto& stmt : body) {
+                oss << stmt->toString(indent + 2);
+            }
+        }
         return oss.str();
     }
 };
@@ -1695,12 +1717,30 @@ public:
 // REPEAT statement
 class RepeatStatement : public Statement {
 public:
+    std::vector<StatementPtr> body;  // Loop body statements
+    ExpressionPtr condition;         // UNTIL condition (moved from UntilStatement)
+
     RepeatStatement() = default;
+
+    void addBodyStatement(StatementPtr stmt) {
+        body.push_back(std::move(stmt));
+    }
 
     ASTNodeType getType() const override { return ASTNodeType::STMT_REPEAT; }
 
     std::string toString(int indent = 0) const override {
-        return makeIndent(indent) + "REPEAT\n";
+        std::ostringstream oss;
+        oss << makeIndent(indent) << "REPEAT\n";
+        if (!body.empty()) {
+            for (const auto& stmt : body) {
+                oss << stmt->toString(indent + 1);
+            }
+        }
+        if (condition) {
+            oss << makeIndent(indent) << "UNTIL\n";
+            oss << condition->toString(indent + 1);
+        }
+        return oss.str();
     }
 };
 
@@ -1730,10 +1770,18 @@ public:
         UNTIL     // DO UNTIL condition
     };
 
-    ConditionType conditionType;
-    ExpressionPtr condition;  // nullptr if NONE
+    ConditionType preConditionType;   // Condition at DO (pre-test)
+    ExpressionPtr preCondition;       // Pre-test condition
+    ConditionType postConditionType;  // Condition at LOOP (post-test)
+    ExpressionPtr postCondition;      // Post-test condition
+    std::vector<StatementPtr> body;   // Loop body statements
 
-    DoStatement() : conditionType(ConditionType::NONE) {}
+    DoStatement() : preConditionType(ConditionType::NONE), 
+                    postConditionType(ConditionType::NONE) {}
+
+    void addBodyStatement(StatementPtr stmt) {
+        body.push_back(std::move(stmt));
+    }
 
     ASTNodeType getType() const override { return ASTNodeType::STMT_DO; }
 
@@ -1741,15 +1789,36 @@ public:
         std::ostringstream oss;
         oss << makeIndent(indent) << "DO";
 
-        if (conditionType == ConditionType::WHILE) {
+        if (preConditionType == ConditionType::WHILE) {
             oss << " WHILE\n";
-            if (condition) {
-                oss << condition->toString(indent + 1);
+            if (preCondition) {
+                oss << preCondition->toString(indent + 1);
             }
-        } else if (conditionType == ConditionType::UNTIL) {
+        } else if (preConditionType == ConditionType::UNTIL) {
             oss << " UNTIL\n";
-            if (condition) {
-                oss << condition->toString(indent + 1);
+            if (preCondition) {
+                oss << preCondition->toString(indent + 1);
+            }
+        } else {
+            oss << "\n";
+        }
+
+        if (!body.empty()) {
+            for (const auto& stmt : body) {
+                oss << stmt->toString(indent + 1);
+            }
+        }
+
+        oss << makeIndent(indent) << "LOOP";
+        if (postConditionType == ConditionType::WHILE) {
+            oss << " WHILE\n";
+            if (postCondition) {
+                oss << postCondition->toString(indent + 1);
+            }
+        } else if (postConditionType == ConditionType::UNTIL) {
+            oss << " UNTIL\n";
+            if (postCondition) {
+                oss << postCondition->toString(indent + 1);
             }
         } else {
             oss << "\n";

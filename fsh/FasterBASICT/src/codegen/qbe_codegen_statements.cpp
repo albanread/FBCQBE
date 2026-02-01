@@ -2215,17 +2215,17 @@ void QBECodeGenerator::emitDo(const DoStatement* stmt) {
     if (!stmt) return;
     
     // DO can have condition at top (DO WHILE/UNTIL) or none (plain DO)
-    if (stmt->conditionType == DoStatement::ConditionType::WHILE ||
-        stmt->conditionType == DoStatement::ConditionType::UNTIL) {
+    if (stmt->preConditionType == DoStatement::ConditionType::WHILE ||
+        stmt->preConditionType == DoStatement::ConditionType::UNTIL) {
         // Pre-test loop: evaluate condition before entering loop body
-        if (stmt->condition) {
-            std::string condTemp = emitExpression(stmt->condition.get());
+        if (stmt->preCondition) {
+            std::string condTemp = emitExpression(stmt->preCondition.get());
             std::string boolTemp = allocTemp("w");
             emit("    " + boolTemp + " =w cnew " + condTemp + ", 0\n");
             m_stats.instructionsGenerated++;
             
             // For DO UNTIL, we want to enter loop if condition is FALSE (negate)
-            if (stmt->conditionType == DoStatement::ConditionType::UNTIL) {
+            if (stmt->preConditionType == DoStatement::ConditionType::UNTIL) {
                 std::string negTemp = allocTemp("w");
                 emit("    " + negTemp + " =w ceqw " + boolTemp + ", 0\n");
                 m_stats.instructionsGenerated++;

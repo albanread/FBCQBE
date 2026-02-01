@@ -1,6 +1,6 @@
 //
-// fasterbasic_cfg.h
-// FasterBASIC - Control Flow Graph Builder
+// cfg_builder_v2.h
+// FasterBASIC - Control Flow Graph Builder V2
 //
 // ARCHITECTURAL REDESIGN (February 2025)
 // 
@@ -36,152 +36,27 @@
 //   }
 //
 
-#ifndef FASTERBASIC_CFG_H
-#define FASTERBASIC_CFG_H
+#ifndef FASTERBASIC_CFG_BUILDER_V2_H
+#define FASTERBASIC_CFG_BUILDER_V2_H
 
-#include "fasterbasic_ast.h"
-#include "fasterbasic_semantic.h"
+#include "../fasterbasic_ast.h"
+#include "../fasterbasic_cfg.h"
 #include <string>
 #include <vector>
 #include <map>
 #include <memory>
-#include <set>
-#include <unordered_map>
 
 namespace FasterBASIC {
 
 // Forward declarations
-class Statement;
-class Program;
-class CaseStatement;
-class TryCatchStatement;
+class BasicBlock;
+class ControlFlowGraph;
 
 // =============================================================================
-// Edge Types
+// CFGBuilderV2 - Single-Pass Recursive CFG Construction
 // =============================================================================
 
-enum class EdgeType {
-    FALLTHROUGH,         // Natural flow to next block
-    CONDITIONAL_TRUE,    // Condition evaluated to true
-    CONDITIONAL_FALSE,   // Condition evaluated to false
-    JUMP,               // Unconditional jump (GOTO)
-    CALL,               // Subroutine call (GOSUB)
-    RETURN,             // Return from subroutine
-    EXCEPTION           // Exception/error handling
-};
-
-// =============================================================================
-// CFG Edge
-// =============================================================================
-
-struct CFGEdge {
-    int sourceBlock;
-    int targetBlock;
-    EdgeType type;
-    std::string label;  // Optional label for debugging/visualization
-    
-    CFGEdge() : sourceBlock(-1), targetBlock(-1), type(EdgeType::FALLTHROUGH) {}
-};
-
-// =============================================================================
-// Basic Block
-// =============================================================================
-
-class BasicBlock {
-public:
-    int id;
-    std::string label;
-    std::vector<const Statement*> statements;
-    std::vector<int> successors;
-    std::vector<int> predecessors;
-    
-    // Block flags
-    bool isLoopHeader;
-    bool isLoopExit;
-    bool isTerminator;  // Ends with GOTO/RETURN/etc
-    
-    // Line number tracking
-    std::set<int> lineNumbers;  // All line numbers in this block
-    std::map<const Statement*, int> statementLineNumbers;  // Statement -> line number
-    
-    BasicBlock(int blockId, const std::string& blockLabel = "")
-        : id(blockId), label(blockLabel), isLoopHeader(false), 
-          isLoopExit(false), isTerminator(false) {}
-    
-    void addStatement(const Statement* stmt, int lineNumber = -1) {
-        statements.push_back(stmt);
-        if (lineNumber >= 0) {
-            lineNumbers.insert(lineNumber);
-            statementLineNumbers[stmt] = lineNumber;
-        }
-    }
-};
-
-// =============================================================================
-// Control Flow Graph
-// =============================================================================
-
-class ControlFlowGraph {
-public:
-    std::string functionName;  // Function/SUB name, or "main" for main program
-    std::vector<std::string> parameters;  // Function parameters
-    std::vector<VariableType> parameterTypes;  // Parameter types
-    VariableType returnType;   // Return type (UNKNOWN for SUBs)
-    const DefStatement* defStatement;  // For DEF FN functions
-    
-    std::vector<std::unique_ptr<BasicBlock>> blocks;
-    std::vector<CFGEdge> edges;
-    int entryBlock;     // Entry point (usually block 0)
-    int exitBlock;      // Exit point
-    
-    // DO loop tracking (for old codegen compatibility)
-    struct DoLoopBlocks {
-        int headerBlock;
-        int bodyBlock;
-        int exitBlock;
-    };
-    std::map<int, DoLoopBlocks> doLoopStructure;
-    
-    ControlFlowGraph() 
-        : returnType(VariableType::UNKNOWN), defStatement(nullptr),
-          entryBlock(-1), exitBlock(-1) {}
-          
-    explicit ControlFlowGraph(const std::string& name)
-        : functionName(name), returnType(VariableType::UNKNOWN), 
-          defStatement(nullptr), entryBlock(-1), exitBlock(-1) {}
-};
-
-// =============================================================================
-// Program CFG (main + functions)
-// =============================================================================
-
-class ProgramCFG {
-public:
-    std::unique_ptr<ControlFlowGraph> mainCFG;  // Main program CFG
-    std::unordered_map<std::string, std::unique_ptr<ControlFlowGraph>> functionCFGs;  // Function CFGs by name
-    
-    ProgramCFG() : mainCFG(std::make_unique<ControlFlowGraph>("main")) {}
-    
-    // Get or create a function CFG
-    ControlFlowGraph* getFunctionCFG(const std::string& name) {
-        auto it = functionCFGs.find(name);
-        if (it != functionCFGs.end()) {
-            return it->second.get();
-        }
-        
-        // Create new function CFG
-        auto cfg = std::make_unique<ControlFlowGraph>(name);
-        ControlFlowGraph* ptr = cfg.get();
-        functionCFGs[name] = std::move(cfg);
-        return ptr;
-    }
-};
-
-// =============================================================================
-// CFGBuilder - Single-Pass Recursive CFG Construction
-// =============================================================================
-
-class CFGBuilder {
+class CFGBuilderV2 {
 public:
     // Context structures for nested control flow
     // These replace the global stacks from the old implementation
@@ -226,8 +101,8 @@ public:
     };
 
 public:
-    CFGBuilder();
-    ~CFGBuilder();
+    CFGBuilderV2();
+    ~CFGBuilderV2();
     
     // Main entry point: Build CFG from validated AST
     // Returns: Complete CFG with all blocks and edges wired
@@ -240,12 +115,6 @@ public:
     
     // Get the constructed CFG (transfers ownership)
     ControlFlowGraph* takeCFG();
-    
-    // Dump the CFG structure (can be called after build)
-    void dumpCFG(const std::string& phase = "") const;
-    
-    // Public access to CFG for verification
-    const ControlFlowGraph* getCFG() const { return m_cfg; }
 
 private:
     // =============================================================================
@@ -333,9 +202,9 @@ private:
         SubroutineContext* sub
     );
     
-    // CASE...END CASE (SELECT CASE style)
+    // SELECT CASE...END SELECT
     BasicBlock* buildSelectCase(
-        const CaseStatement& stmt,
+        const SelectCaseStatement& stmt,
         BasicBlock* incoming,
         LoopContext* loop,
         SelectContext* outerSelect,
@@ -345,7 +214,7 @@ private:
     
     // TRY...CATCH...FINALLY...END TRY
     BasicBlock* buildTryCatch(
-        const TryCatchStatement& stmt,
+        const TryStatement& stmt,
         BasicBlock* incoming,
         LoopContext* loop,
         SelectContext* select,
@@ -397,14 +266,6 @@ private:
         SelectContext* select,
         TryContext* tryCtx,
         SubroutineContext* outerSub
-    );
-    
-    // Unified EXIT handler (dispatches based on ExitStatement type)
-    BasicBlock* handleExit(
-        const ExitStatement& stmt,
-        BasicBlock* incoming,
-        LoopContext* loop,
-        SelectContext* select
     );
     
     // EXIT FOR (exit current FOR loop)
@@ -510,6 +371,9 @@ private:
     // Get the current line number for a statement
     int getLineNumber(const Statement* stmt);
     
+    // Debug: Dump the current CFG structure
+    void dumpCFG(const std::string& phase = "") const;
+    
     // =============================================================================
     // Jump Target Collection (Phase 0)
     // =============================================================================
@@ -525,10 +389,7 @@ private:
     
     // Check if a line number is a jump target
     bool isJumpTarget(int lineNumber) const;
-    
-    // Resolve deferred edges (Phase 2) - forward GOTOs
-    void resolveDeferredEdges();
-    
+
 private:
     // =============================================================================
     // Internal State
@@ -567,4 +428,4 @@ private:
 
 } // namespace FasterBASIC
 
-#endif // FASTERBASIC_CFG_H
+#endif // FASTERBASIC_CFG_BUILDER_V2_H
