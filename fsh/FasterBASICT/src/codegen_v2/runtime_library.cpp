@@ -10,8 +10,20 @@ RuntimeLibrary::RuntimeLibrary(QBEBuilder& builder, TypeManager& typeManager)
 
 // === Print/Output ===
 
-void RuntimeLibrary::emitPrintInt(const std::string& value) {
-    emitRuntimeCallVoid("basic_print_int", "w " + value);
+void RuntimeLibrary::emitPrintInt(const std::string& value, BasicType valueType) {
+    // basic_print_int expects int64_t (l type)
+    // Check actual QBE type - only sign-extend if it's w (32-bit)
+    std::string qbeType = typeManager_.getQBEType(valueType);
+    
+    if (qbeType == "w") {
+        // Sign-extend 32-bit word to 64-bit long
+        std::string longValue = builder_.newTemp();
+        builder_.emitConvert(longValue, "l", "extsw", value);
+        emitRuntimeCallVoid("basic_print_int", "l " + longValue);
+    } else {
+        // Already long (l), pass directly
+        emitRuntimeCallVoid("basic_print_int", "l " + value);
+    }
 }
 
 void RuntimeLibrary::emitPrintFloat(const std::string& value) {

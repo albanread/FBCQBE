@@ -875,7 +875,7 @@ void ASTEmitter::emitPrintStatement(const PrintStatement* stmt) {
                     runtime_.emitPrintDouble(value);
                 }
             } else {
-                runtime_.emitPrintInt(value);
+                runtime_.emitPrintInt(value, exprType);
             }
         }
         

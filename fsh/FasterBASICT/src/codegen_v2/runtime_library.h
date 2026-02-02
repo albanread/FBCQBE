@@ -30,8 +30,9 @@ public:
     /**
      * Emit a PRINT call for an integer
      * @param value Value to print (temporary or constant)
+     * @param valueType Type of the value (to determine if sign-extension needed)
      */
-    void emitPrintInt(const std::string& value);
+    void emitPrintInt(const std::string& value, BasicType valueType);
     
     /**
      * Emit a PRINT call for a float (SINGLE)
