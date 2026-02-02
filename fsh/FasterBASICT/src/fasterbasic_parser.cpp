@@ -557,7 +557,16 @@ std::unique_ptr<ProgramLine> Parser::parseProgramLine(size_t physicalLine) {
     while (!isAtEnd() && current().type != TokenType::END_OF_LINE) {
         auto stmt = parseStatement();
         if (stmt) {
+            // Check if this was a label statement before moving it
+            bool wasLabel = (stmt->getType() == ASTNodeType::STMT_LABEL);
             line->addStatement(std::move(stmt));
+            
+            // Labels consume their colon as part of their syntax
+            // so we don't need to look for a separator after them
+            if (wasLabel) {
+                // Label already consumed its colon, continue parsing next statement
+                continue;
+            }
         }
 
         // Multiple statements on one line separated by colon
