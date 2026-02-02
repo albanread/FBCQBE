@@ -1,0 +1,4401 @@
+================================================================================
+CFG Builder Files Review
+================================================================================
+Generated: $(date)
+Purpose: Review for SELECT CASE fix
+
+
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_builder.h
+================================================================================
+
+//
+// cfg_builder.h
+// FasterBASIC - Control Flow Graph Builder (Modular Architecture)
+//
+// MODULAR REDESIGN (February 2026)
+// 
+// This header defines the CFGBuilder class interface.
+// Implementation is split across multiple source files for maintainability:
+//
+// - cfg_builder_core.cpp       : Constructor, main build() entry point
+// - cfg_builder_blocks.cpp     : Block creation and edge management
+// - cfg_builder_utils.cpp      : Utility functions (reports, type inference)
+// - cfg_builder_jumptargets.cpp: Jump target pre-scan (Phase 0)
+// - cfg_builder_statements.cpp : Statement dispatcher and block building
+// - cfg_builder_jumps.cpp      : GOTO, GOSUB, ON GOTO/GOSUB, labels
+// - cfg_builder_conditional.cpp: IF/THEN/ELSE, SELECT CASE
+// - cfg_builder_loops.cpp      : FOR, WHILE, REPEAT, DO loops
+// - cfg_builder_exception.cpp  : TRY/CATCH/FINALLY
+// - cfg_builder_functions.cpp  : FUNCTION, DEF FN, SUB definitions
+// - cfg_builder_edges.cpp      : Edge building (Phase 2), loop analysis
+//
+//
+// EXAMPLE OF THE FIX:
+// Old approach (BROKEN):
+//   Phase 1: Create all blocks linearly [1][2][3][4][5]
+//   Phase 2: Scan forward to find loop ends, add back-edges
+//   Problem: By Phase 2, context is lost, scanning fails
+//
+// New approach (FIXED):
+//   buildWhile(incoming) {
+//     header = create(); body = create(); exit = create();
+//     wire(incoming -> header);
+//     wire(header -> body [true]); wire(header -> exit [false]);
+//     bodyExit = buildStatements(body);
+//     wire(bodyExit -> header);  // Back-edge created immediately!
+//     return exit;  // Next statement connects here
+//   }
+//
+
+#ifndef FASTERBASIC_CFG_BUILDER_H
+#define FASTERBASIC_CFG_BUILDER_H
+
+#include "../fasterbasic_ast.h"
+#include "../fasterbasic_semantic.h"
+#include <string>
+#include <vector>
+#include <map>
+#include <memory>
+#include <set>
+#include <unordered_map>
+
+namespace FasterBASIC {
+
+// Forward declarations
+class Statement;
+class Program;
+class CaseStatement;
+class TryCatchStatement;
+
+// =============================================================================
+// Edge Types
+// =============================================================================
+
+enum class EdgeType {
+    FALLTHROUGH,         // Natural flow to next block
+    CONDITIONAL_TRUE,    // Condition evaluated to true
+    CONDITIONAL_FALSE,   // Condition evaluated to false
+    JUMP,               // Unconditional jump (GOTO)
+    CALL,               // Subroutine call (GOSUB)
+    RETURN,             // Return from subroutine
+    EXCEPTION           // Exception/error handling
+};
+
+// =============================================================================
+// CFG Edge
+// =============================================================================
+
+struct CFGEdge {
+    int sourceBlock;
+    int targetBlock;
+    EdgeType type;
+    std::string label;  // Optional label for debugging/visualization
+    
+    CFGEdge() : sourceBlock(-1), targetBlock(-1), type(EdgeType::FALLTHROUGH) {}
+};
+
+// =============================================================================
+// Basic Block
+// =============================================================================
+
+class BasicBlock {
+public:
+    int id;
+    std::string label;
+    std::vector<const Statement*> statements;
+    std::vector<int> successors;
+    std::vector<int> predecessors;
+    
+    // Block flags
+    bool isLoopHeader;
+    bool isLoopExit;
+    bool isTerminator;  // Ends with GOTO/RETURN/etc
+    
+    // Line number tracking
+    std::set<int> lineNumbers;  // All line numbers in this block
+    std::map<const Statement*, int> statementLineNumbers;  // Statement -> line number
+    
+    BasicBlock(int blockId, const std::string& blockLabel = "")
+        : id(blockId), label(blockLabel), isLoopHeader(false), 
+          isLoopExit(false), isTerminator(false) {}
+    
+    void addStatement(const Statement* stmt, int lineNumber = -1) {
+        statements.push_back(stmt);
+        if (lineNumber >= 0) {
+            lineNumbers.insert(lineNumber);
+            statementLineNumbers[stmt] = lineNumber;
+        }
+    }
+};
+
+// =============================================================================
+// Control Flow Graph
+// =============================================================================
+
+class ControlFlowGraph {
+public:
+    std::string functionName;  // Function/SUB name, or "main" for main program
+    std::vector<std::string> parameters;  // Function parameters
+    std::vector<VariableType> parameterTypes;  // Parameter types
+    VariableType returnType;   // Return type (UNKNOWN for SUBs)
+    const DefStatement* defStatement;  // For DEF FN functions
+    
+    std::vector<std::unique_ptr<BasicBlock>> blocks;
+    std::vector<CFGEdge> edges;
+    int entryBlock;     // Entry point (usually block 0)
+    int exitBlock;      // Exit point
+    
+    // GOSUB/RETURN tracking for sparse dispatch optimization
+    std::set<int> gosubReturnBlocks;  // Block IDs that are GOSUB return points
+    
+    // DO loop tracking (for old codegen compatibility)
+    struct DoLoopBlocks {
+        int headerBlock;
+        int bodyBlock;
+        int exitBlock;
+    };
+    std::map<int, DoLoopBlocks> doLoopStructure;
+    
+    ControlFlowGraph() 
+        : returnType(VariableType::UNKNOWN), defStatement(nullptr),
+          entryBlock(-1), exitBlock(-1) {}
+          
+    explicit ControlFlowGraph(const std::string& name)
+        : functionName(name), returnType(VariableType::UNKNOWN), 
+          defStatement(nullptr), entryBlock(-1), exitBlock(-1) {}
+};
+
+// =============================================================================
+// Program CFG (main + functions)
+// =============================================================================
+
+class ProgramCFG {
+public:
+    std::unique_ptr<ControlFlowGraph> mainCFG;  // Main program CFG
+    std::unordered_map<std::string, std::unique_ptr<ControlFlowGraph>> functionCFGs;  // Function CFGs by name
+    
+    ProgramCFG() : mainCFG(std::make_unique<ControlFlowGraph>("main")) {}
+    
+    // Get or create a function CFG
+    ControlFlowGraph* getFunctionCFG(const std::string& name) {
+        auto it = functionCFGs.find(name);
+        if (it != functionCFGs.end()) {
+            return it->second.get();
+        }
+        
+        // Create new function CFG
+        auto cfg = std::make_unique<ControlFlowGraph>(name);
+        ControlFlowGraph* ptr = cfg.get();
+        functionCFGs[name] = std::move(cfg);
+        return ptr;
+    }
+};
+
+// =============================================================================
+// CFGBuilder - Single-Pass Recursive CFG Construction
+// =============================================================================
+
+class CFGBuilder {
+public:
+    // Context structures for nested control flow
+    // These replace the global stacks from the old implementation
+    
+    // Loop context: Tracks loop header/exit for CONTINUE/EXIT statements
+    struct LoopContext {
+        int headerBlockId;           // Loop header (for CONTINUE)
+        int exitBlockId;             // Loop exit (for EXIT FOR/WHILE/DO)
+        std::string loopType;        // "FOR", "WHILE", "DO", "REPEAT"
+        LoopContext* outerLoop;      // Link to enclosing loop (nullptr if outermost)
+        
+        LoopContext()
+            : headerBlockId(-1), exitBlockId(-1), outerLoop(nullptr) {}
+    };
+    
+    // SELECT CASE context: Tracks exit point for EXIT SELECT
+    struct SelectContext {
+        int exitBlockId;             // Block to jump to on EXIT SELECT
+        SelectContext* outerSelect;  // Link to enclosing SELECT (nullptr if outermost)
+        
+        SelectContext()
+            : exitBlockId(-1), outerSelect(nullptr) {}
+    };
+    
+    // TRY/CATCH context: Tracks catch/finally blocks for exception handling
+    struct TryContext {
+        int catchBlockId;            // Catch block (for THROW)
+        int finallyBlockId;          // Finally block (always executed)
+        TryContext* outerTry;        // Link to enclosing TRY (nullptr if outermost)
+        
+        TryContext()
+            : catchBlockId(-1), finallyBlockId(-1), outerTry(nullptr) {}
+    };
+    
+    // Subroutine context: Tracks GOSUB call sites for RETURN
+    struct SubroutineContext {
+        int returnBlockId;           // Block to return to
+        SubroutineContext* outerSub; // Link to enclosing GOSUB (nullptr if outermost)
+        
+        SubroutineContext()
+            : returnBlockId(-1), outerSub(nullptr) {}
+    };
+
+public:
+    CFGBuilder();
+    ~CFGBuilder();
+    
+    // Main entry point: Build CFG from validated AST
+    // Returns: Complete CFG with all blocks and edges wired
+    ControlFlowGraph* build(const std::vector<StatementPtr>& statements);
+    
+    // Adapter: Build CFG from Program structure (flattens ProgramLines)
+    // This allows CFG v2 to work with the existing Program AST structure
+    // Note: The Program should already have loop bodies populated by the parser
+    ControlFlowGraph* buildFromProgram(const Program& program);
+    
+    // Build complete ProgramCFG with main program and all SUB/FUNCTION CFGs
+    // This is the top-level entry point for building CFGs for entire programs
+    ProgramCFG* buildProgramCFG(const Program& program);
+    
+    // Get the constructed CFG (transfers ownership)
+    ControlFlowGraph* takeCFG();
+    
+    // Dump the CFG structure (can be called after build)
+    void dumpCFG(const std::string& phase = "") const;
+    
+    // Set CFG for dumping purposes (does not take ownership)
+    void setCFGForDump(ControlFlowGraph* cfg) { m_cfg = cfg; }
+    
+    // Public access to CFG for verification
+    const ControlFlowGraph* getCFG() const { return m_cfg; }
+
+private:
+    // =============================================================================
+    // Core Recursive Builder
+    // =============================================================================
+    
+    // Build a range of statements starting from 'incoming' block
+    // Returns: The "exit" block where control flows after executing all statements
+    // 
+    // This is the heart of the new architecture. It processes statements one by one,
+    // and when it encounters a control structure, it calls the appropriate builder
+    // function which recursively handles the nested structure.
+    //
+    // Context parameters are optional - pass nullptr if not in that context
+    BasicBlock* buildStatementRange(
+        const std::vector<StatementPtr>& statements,
+        BasicBlock* incoming,
+        LoopContext* currentLoop = nullptr,
+        SelectContext* currentSelect = nullptr,
+        TryContext* currentTry = nullptr,
+        SubroutineContext* currentSub = nullptr
+    );
+    
+    // =============================================================================
+    // Control Structure Builders
+    // =============================================================================
+    // Each builder follows this contract:
+    // - Accepts an incoming block (where control enters)
+    // - Creates all necessary internal blocks
+    // - Wires all edges (including back-edges for loops)
+    // - Recursively processes nested statements
+    // - Returns the exit block (where control leaves)
+    //
+    // If a structure never exits (e.g., infinite loop, GOTO), it returns an
+    // unreachable block so subsequent statements can still be added (even if dead).
+    // =============================================================================
+    
+    // IF...THEN...ELSE...END IF
+    BasicBlock* buildIf(
+        const IfStatement& stmt,
+        BasicBlock* incoming,
+        LoopContext* loop,
+        SelectContext* select,
+        TryContext* tryCtx,
+        SubroutineContext* sub
+    );
+    
+    // WHILE...WEND (pre-test loop)
+    BasicBlock* buildWhile(
+        const WhileStatement& stmt,
+        BasicBlock* incoming,
+        LoopContext* outerLoop,
+        SelectContext* select,
+        TryContext* tryCtx,
+        SubroutineContext* sub
+    );
+    
+    // FOR...NEXT (counted loop with optional STEP)
+    BasicBlock* buildFor(
+        const ForStatement& stmt,
+        BasicBlock* incoming,
+        LoopContext* outerLoop,
+        SelectContext* select,
+        TryContext* tryCtx,
+        SubroutineContext* sub
+    );
+    
+    // REPEAT...UNTIL (post-test loop)
+    BasicBlock* buildRepeat(
+        const RepeatStatement& stmt,
+        BasicBlock* incoming,
+        LoopContext* outerLoop,
+        SelectContext* select,
+        TryContext* tryCtx,
+        SubroutineContext* sub
+    );
+    
+    // DO...LOOP variants (WHILE/UNTIL, pre-test/post-test)
+    BasicBlock* buildDo(
+        const DoStatement& stmt,
+        BasicBlock* incoming,
+        LoopContext* outerLoop,
+        SelectContext* select,
+        TryContext* tryCtx,
+        SubroutineContext* sub
+    );
+    
+    // CASE...END CASE (SELECT CASE style)
+    BasicBlock* buildSelectCase(
+        const CaseStatement& stmt,
+        BasicBlock* incoming,
+        LoopContext* loop,
+        SelectContext* outerSelect,
+        TryContext* tryCtx,
+        SubroutineContext* sub
+    );
+    
+    // TRY...CATCH...FINALLY...END TRY
+    BasicBlock* buildTryCatch(
+        const TryCatchStatement& stmt,
+        BasicBlock* incoming,
+        LoopContext* loop,
+        SelectContext* select,
+        TryContext* outerTry,
+        SubroutineContext* sub
+    );
+    
+    // =============================================================================
+    // Function/Subroutine Builders
+    // =============================================================================
+    
+    // Build CFG for a FUNCTION definition
+    // Returns a complete ControlFlowGraph for the function
+    ControlFlowGraph* buildFunction(const FunctionStatement& stmt);
+    
+    // Build CFG for a SUB definition
+    // Returns a complete ControlFlowGraph for the subroutine
+    ControlFlowGraph* buildSub(const SubStatement& stmt);
+    
+    // Build CFG for a DEF FN definition (single-expression function)
+    // Returns a complete ControlFlowGraph for the inline function
+    ControlFlowGraph* buildDefFn(const DefStatement& stmt);
+    
+    // =============================================================================
+    // Terminator Handlers
+    // =============================================================================
+    // These handle statements that change control flow and don't return
+    // (GOTO, RETURN, EXIT, etc.)
+    // =============================================================================
+    
+    // GOTO line_number
+    BasicBlock* handleGoto(
+        const GotoStatement& stmt,
+        BasicBlock* incoming
+    );
+    
+    // GOSUB line_number (call subroutine)
+    BasicBlock* handleGosub(
+        const GosubStatement& stmt,
+        BasicBlock* incoming,
+        LoopContext* loop,
+        SelectContext* select,
+        TryContext* tryCtx,
+        SubroutineContext* outerSub
+    );
+    
+    // RETURN (from GOSUB)
+    BasicBlock* handleReturn(
+        const ReturnStatement& stmt,
+        BasicBlock* incoming,
+        SubroutineContext* sub
+    );
+    
+    // ON...GOTO (computed goto with fallthrough)
+    BasicBlock* handleOnGoto(
+        const OnGotoStatement& stmt,
+        BasicBlock* incoming
+    );
+    
+    // ON...GOSUB (computed gosub with fallthrough)
+    BasicBlock* handleOnGosub(
+        const OnGosubStatement& stmt,
+        BasicBlock* incoming,
+        LoopContext* loop,
+        SelectContext* select,
+        TryContext* tryCtx,
+        SubroutineContext* outerSub
+    );
+    
+    // Unified EXIT handler (dispatches based on ExitStatement type)
+    BasicBlock* handleExit(
+        const ExitStatement& stmt,
+        BasicBlock* incoming,
+        LoopContext* loop,
+        SelectContext* select
+    );
+    
+    // EXIT FOR (exit current FOR loop)
+    BasicBlock* handleExitFor(
+        BasicBlock* incoming,
+        LoopContext* loop
+    );
+    
+    // EXIT WHILE (exit current WHILE loop)
+    BasicBlock* handleExitWhile(
+        BasicBlock* incoming,
+        LoopContext* loop
+    );
+    
+    // EXIT DO (exit current DO loop)
+    BasicBlock* handleExitDo(
+        BasicBlock* incoming,
+        LoopContext* loop
+    );
+    
+    // EXIT SELECT (exit current SELECT CASE)
+    BasicBlock* handleExitSelect(
+        BasicBlock* incoming,
+        SelectContext* select
+    );
+    
+    // CONTINUE (jump to loop header - if supported)
+    BasicBlock* handleContinue(
+        BasicBlock* incoming,
+        LoopContext* loop
+    );
+    
+    // END (program termination)
+    BasicBlock* handleEnd(
+        const EndStatement& stmt,
+        BasicBlock* incoming
+    );
+    
+    // THROW error_code (exception handling)
+    BasicBlock* handleThrow(
+        const ThrowStatement& stmt,
+        BasicBlock* incoming,
+        TryContext* tryCtx
+    );
+    
+    // =============================================================================
+    // Block and Edge Management
+    // =============================================================================
+    
+    // Create a new basic block
+    BasicBlock* createBlock(const std::string& label = "");
+    
+    // Create an unreachable block (for dead code after terminators)
+    // This allows subsequent statements to be added even if they're unreachable
+    BasicBlock* createUnreachableBlock();
+    
+    // Add an edge between two blocks
+    void addEdge(int fromBlockId, int toBlockId, const std::string& label = "");
+    
+    // Add a conditional edge (for IF, WHILE conditions)
+    void addConditionalEdge(int fromBlockId, int toBlockId, const std::string& condition);
+    
+    // Add an unconditional edge (for GOTO, loop back-edges)
+    void addUnconditionalEdge(int fromBlockId, int toBlockId);
+    
+    // Mark a block as terminated (no fallthrough)
+    void markTerminated(BasicBlock* block);
+    
+    // Check if a block is terminated
+    bool isTerminated(const BasicBlock* block) const;
+    
+    // =============================================================================
+    // Label and Line Number Resolution
+    // =============================================================================
+    
+    // Resolve a BASIC line number to a block ID
+    // (Used for GOTO, GOSUB, ON GOTO, etc.)
+    int resolveLineNumberToBlock(int lineNumber);
+    
+    // Register a block as the target for a specific line number
+    void registerLineNumberBlock(int lineNumber, int blockId);
+    
+    // Register a label as the target for a specific block
+    void registerLabel(const std::string& label, int blockId);
+    
+    // Resolve a label to a block ID
+    int resolveLabelToBlock(const std::string& label);
+    
+    // =============================================================================
+    // Helper Functions
+    // =============================================================================
+    
+    // Add a statement to a block with line number tracking
+    void addStatementToBlock(BasicBlock* block, const Statement* stmt, int lineNumber = -1);
+    
+    // Find the innermost loop context of a specific type
+    LoopContext* findLoopContext(LoopContext* ctx, const std::string& loopType);
+    
+    // Split a block if it already contains statements
+    // Returns: The new block to continue building in
+    BasicBlock* splitBlockIfNeeded(BasicBlock* block);
+    
+    // Get the current line number for a statement
+    int getLineNumber(const Statement* stmt);
+    
+    // =============================================================================
+    // Jump Target Collection (Phase 0)
+    // =============================================================================
+    
+    // Collect all GOTO/GOSUB targets from statement list
+    void collectJumpTargets(const std::vector<StatementPtr>& statements);
+    
+    // Collect all GOTO/GOSUB targets from Program structure
+    void collectJumpTargetsFromProgram(const Program& program);
+    
+    // Recursively collect jump targets from a single statement
+    void collectJumpTargetsFromStatement(const Statement* stmt);
+    
+    // Check if a line number is a jump target
+    bool isJumpTarget(int lineNumber) const;
+    
+    // Resolve deferred edges (Phase 2) - forward GOTOs
+    void resolveDeferredEdges();
+    
+private:
+    // =============================================================================
+    // Internal State
+    // =============================================================================
+    
+    ControlFlowGraph* m_cfg;                          // The CFG being constructed
+    int m_nextBlockId;                                // Next available block ID
+    
+    // Line number and label mappings
+    std::map<int, int> m_lineNumberToBlock;           // Maps BASIC line numbers to blocks
+    std::map<std::string, int> m_labelToBlock;        // Maps labels to blocks
+    
+    // Deferred edge resolution (for forward references)
+    struct DeferredEdge {
+        int sourceBlockId;
+        int targetLineNumber;
+        std::string label;
+    };
+    std::vector<DeferredEdge> m_deferredEdges;        // Edges to resolve later
+    
+    // Statistics and debugging
+    int m_totalBlocksCreated;
+    int m_totalEdgesCreated;
+    bool m_debugMode;                                 // Enable verbose logging
+    
+    // Program structure tracking
+    BasicBlock* m_entryBlock;                         // Program entry point
+    BasicBlock* m_exitBlock;                          // Program exit point
+    
+    // Unreachable code tracking
+    std::vector<BasicBlock*> m_unreachableBlocks;     // Dead code blocks
+    
+    // Jump target tracking (Phase 0)
+    std::set<int> m_jumpTargets;                      // Line numbers that are GOTO/GOSUB targets
+};
+
+} // namespace FasterBASIC
+
+#endif // FASTERBASIC_CFG_BUILDER_H
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_builder_blocks.cpp
+================================================================================
+
+//
+// cfg_builder_blocks.cpp
+// FasterBASIC - Control Flow Graph Builder Block and Edge Management (V2)
+//
+// Contains block creation and edge wiring functions.
+// Part of modular CFG builder split (February 2026).
+//
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
+//
+
+#include "cfg_builder.h"
+#include <iostream>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// Block Creation
+// =============================================================================
+
+BasicBlock* CFGBuilder::createBlock(const std::string& label) {
+    // Create new block with unique_ptr ownership
+    auto block = std::make_unique<BasicBlock>(m_nextBlockId++, label);
+    BasicBlock* blockPtr = block.get();
+    
+    // Add to CFG
+    m_cfg->blocks.push_back(std::move(block));
+    m_totalBlocksCreated++;
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Created block " << blockPtr->id << " (" << label << ")" << std::endl;
+    }
+    
+    return blockPtr;
+}
+
+BasicBlock* CFGBuilder::createUnreachableBlock() {
+    BasicBlock* block = createBlock("Unreachable");
+    m_unreachableBlocks.push_back(block);
+    return block;
+}
+
+// =============================================================================
+// Edge Management
+// =============================================================================
+
+void CFGBuilder::addEdge(int fromBlockId, int toBlockId, const std::string& label) {
+    // Create edge structure
+    CFGEdge edge;
+    edge.sourceBlock = fromBlockId;
+    edge.targetBlock = toBlockId;
+    
+    // Set edge type based on label
+    if (label == "call") {
+        edge.type = EdgeType::CALL;
+    } else {
+        edge.type = EdgeType::FALLTHROUGH;
+    }
+    edge.label = label;
+    
+    m_cfg->edges.push_back(edge);
+    
+    // Update block successor/predecessor lists
+    if (fromBlockId >= 0 && fromBlockId < static_cast<int>(m_cfg->blocks.size())) {
+        m_cfg->blocks[fromBlockId]->successors.push_back(toBlockId);
+    }
+    if (toBlockId >= 0 && toBlockId < static_cast<int>(m_cfg->blocks.size())) {
+        m_cfg->blocks[toBlockId]->predecessors.push_back(fromBlockId);
+    }
+    
+    m_totalEdgesCreated++;
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Added edge: Block " << fromBlockId 
+                  << " -> Block " << toBlockId;
+        if (!label.empty()) {
+            std::cout << " [" << label << "]";
+        }
+        std::cout << std::endl;
+    }
+}
+
+void CFGBuilder::addConditionalEdge(int fromBlockId, int toBlockId, const std::string& condition) {
+    // Create conditional edge
+    CFGEdge edge;
+    edge.sourceBlock = fromBlockId;
+    edge.targetBlock = toBlockId;
+    // Set edge type based on condition label
+    if (condition == "false" || condition == "else") {
+        edge.type = EdgeType::CONDITIONAL_FALSE;
+    } else {
+        edge.type = EdgeType::CONDITIONAL_TRUE;
+    }
+    edge.label = condition;
+    
+    m_cfg->edges.push_back(edge);
+    
+    // Update block successor/predecessor lists
+    if (fromBlockId >= 0 && fromBlockId < static_cast<int>(m_cfg->blocks.size())) {
+        m_cfg->blocks[fromBlockId]->successors.push_back(toBlockId);
+    }
+    if (toBlockId >= 0 && toBlockId < static_cast<int>(m_cfg->blocks.size())) {
+        m_cfg->blocks[toBlockId]->predecessors.push_back(fromBlockId);
+    }
+    
+    m_totalEdgesCreated++;
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Added conditional edge: Block " << fromBlockId 
+                  << " -> Block " << toBlockId << " [" << condition << "]" << std::endl;
+    }
+}
+
+void CFGBuilder::addUnconditionalEdge(int fromBlockId, int toBlockId) {
+    // Create unconditional edge (JUMP type for GOTOs, FALLTHROUGH for normal flow)
+    CFGEdge edge;
+    edge.sourceBlock = fromBlockId;
+    edge.targetBlock = toBlockId;
+    edge.type = EdgeType::JUMP;
+    edge.label = "";
+    
+    m_cfg->edges.push_back(edge);
+    
+    // Update block successor/predecessor lists
+    if (fromBlockId >= 0 && fromBlockId < static_cast<int>(m_cfg->blocks.size())) {
+        m_cfg->blocks[fromBlockId]->successors.push_back(toBlockId);
+    }
+    if (toBlockId >= 0 && toBlockId < static_cast<int>(m_cfg->blocks.size())) {
+        m_cfg->blocks[toBlockId]->predecessors.push_back(fromBlockId);
+    }
+    
+    m_totalEdgesCreated++;
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Added unconditional edge: Block " << fromBlockId 
+                  << " -> Block " << toBlockId << std::endl;
+    }
+}
+
+// =============================================================================
+// Block State Management
+// =============================================================================
+
+void CFGBuilder::markTerminated(BasicBlock* block) {
+    if (block) {
+        block->isTerminator = true;
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] Marked block " << block->id << " as terminated" << std::endl;
+        }
+    }
+}
+
+bool CFGBuilder::isTerminated(const BasicBlock* block) const {
+    return block && block->isTerminator;
+}
+
+// =============================================================================
+// Statement Management
+// =============================================================================
+
+void CFGBuilder::addStatementToBlock(BasicBlock* block, const Statement* stmt, int lineNumber) {
+    if (!block || !stmt) return;
+    
+    block->addStatement(stmt, lineNumber);
+    
+    if (m_debugMode && lineNumber >= 0) {
+        std::cout << "[CFG] Added statement from line " << lineNumber 
+                  << " to block " << block->id << std::endl;
+    }
+}
+
+int CFGBuilder::getLineNumber(const Statement* stmt) {
+    // Extract line number from statement metadata
+    if (!stmt) return -1;
+    
+    // Statement doesn't store line number directly in v2
+    // Line numbers are tracked at the block level when statements are added
+    // Return -1 to indicate unknown (caller should provide line number)
+    return -1;
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+BasicBlock* CFGBuilder::splitBlockIfNeeded(BasicBlock* block) {
+    if (!block->statements.empty()) {
+        // Block already has statements, create a new one
+        BasicBlock* newBlock = createBlock(block->label + "_Split");
+        addUnconditionalEdge(block->id, newBlock->id);
+        return newBlock;
+    }
+    return block;
+}
+
+CFGBuilder::LoopContext* CFGBuilder::findLoopContext(LoopContext* ctx, const std::string& loopType) {
+    while (ctx) {
+        if (ctx->loopType == loopType) {
+            return ctx;
+        }
+        ctx = ctx->outerLoop;
+    }
+    return nullptr;
+}
+
+} // namespace FasterBASIC
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_builder_conditional.cpp
+================================================================================
+
+//
+// cfg_builder_conditional.cpp
+// FasterBASIC - Control Flow Graph Builder Conditional Handlers (V2)
+//
+// Contains IF...THEN...ELSE and SELECT CASE statement processing.
+// Part of modular CFG builder split (February 2026).
+//
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
+//
+
+#include "cfg_builder.h"
+#include <iostream>
+#include <stdexcept>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// IF Statement Handler
+// =============================================================================
+//
+// IF...THEN...ELSE...END IF
+// Creates blocks for condition, then branch, else branch, and merge point
+// Recursively processes nested statements in each branch
+//
+BasicBlock* CFGBuilder::buildIf(
+    const IfStatement& stmt,
+    BasicBlock* incoming,
+    LoopContext* loop,
+    SelectContext* select,
+    TryContext* tryCtx,
+    SubroutineContext* sub
+) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building IF statement" << std::endl;
+    }
+    
+    // Check if this is a single-line IF with GOTO
+    if (stmt.hasGoto && stmt.thenStatements.empty() && stmt.elseStatements.empty()) {
+        // Single-line IF...THEN GOTO line_number
+        // This is just a conditional branch, handle inline
+        if (m_debugMode) {
+            std::cout << "[CFG] Single-line IF GOTO to line " << stmt.gotoLine << std::endl;
+        }
+        
+        addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+        
+        // Create merge block for fallthrough (when condition is false)
+        BasicBlock* mergeBlock = createBlock("If_Merge");
+        
+        // Add conditional edge to GOTO target (when true)
+        int targetBlock = resolveLineNumberToBlock(stmt.gotoLine);
+        if (targetBlock >= 0) {
+            addConditionalEdge(incoming->id, targetBlock, "true");
+        } else {
+            // Forward reference - defer
+            DeferredEdge edge;
+            edge.sourceBlockId = incoming->id;
+            edge.targetLineNumber = stmt.gotoLine;
+            edge.label = "true";
+            m_deferredEdges.push_back(edge);
+        }
+        
+        // Add fallthrough edge (when false)
+        addConditionalEdge(incoming->id, mergeBlock->id, "false");
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] IF GOTO complete, merge block: " << mergeBlock->id << std::endl;
+        }
+        
+        return mergeBlock;
+    }
+    
+    // Check if this is a single-line IF with inline statements
+    if (!stmt.isMultiLine && !stmt.thenStatements.empty()) {
+        // Single-line IF...THEN statement [ELSE statement]
+        // e.g., IF x > 5 THEN PRINT "yes" ELSE PRINT "no"
+        if (m_debugMode) {
+            std::cout << "[CFG] Single-line IF with inline statements" << std::endl;
+        }
+        
+        addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+        
+        // Create blocks for then/else/merge
+        BasicBlock* thenBlock = createBlock("If_Then");
+        BasicBlock* elseBlock = stmt.elseStatements.empty() ? nullptr : createBlock("If_Else");
+        BasicBlock* mergeBlock = createBlock("If_Merge");
+        
+        // Wire condition to branches
+        addConditionalEdge(incoming->id, thenBlock->id, "true");
+        
+        if (elseBlock) {
+            addConditionalEdge(incoming->id, elseBlock->id, "false");
+        } else {
+            addConditionalEdge(incoming->id, mergeBlock->id, "false");
+        }
+        
+        // Build THEN branch
+        BasicBlock* thenExit = buildStatementRange(
+            stmt.thenStatements,
+            thenBlock,
+            loop,
+            select,
+            tryCtx,
+            sub
+        );
+        
+        bool thenTerminated = isTerminated(thenExit);
+        
+        // Wire THEN to merge
+        if (!thenTerminated) {
+            addUnconditionalEdge(thenExit->id, mergeBlock->id);
+        }
+        
+        // Build ELSE branch if present
+        bool elseTerminated = false;
+        if (elseBlock) {
+            BasicBlock* elseExit = buildStatementRange(
+                stmt.elseStatements,
+                elseBlock,
+                loop,
+                select,
+                tryCtx,
+                sub
+            );
+            
+            elseTerminated = isTerminated(elseExit);
+            
+            if (!elseTerminated) {
+                addUnconditionalEdge(elseExit->id, mergeBlock->id);
+            }
+        }
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] Single-line IF complete, merge block: " << mergeBlock->id << std::endl;
+        }
+        
+        // If both branches are terminated (or only THEN exists and is terminated),
+        // the merge block is unreachable. Return an unreachable block for subsequent statements.
+        // Cases:
+        // - THEN terminated AND ELSE terminated → merge unreachable
+        // - THEN terminated AND no ELSE → false path reaches merge → merge reachable
+        // - THEN not terminated → merge reachable
+        if (thenTerminated && elseBlock && elseTerminated) {
+            if (m_debugMode) {
+                std::cout << "[CFG] Both IF branches terminated, returning unreachable block" << std::endl;
+            }
+            return createUnreachableBlock();
+        }
+        
+        return mergeBlock;
+    }
+    
+    // Multi-line IF...THEN...ELSE...END IF
+    if (m_debugMode) {
+        std::cout << "[CFG] Multi-line IF statement" << std::endl;
+    }
+    
+    // 1. Setup blocks
+    BasicBlock* conditionBlock = incoming;
+    BasicBlock* thenEntry = createBlock("If_Then");
+    BasicBlock* elseEntry = stmt.elseStatements.empty() ? nullptr : createBlock("If_Else");
+    BasicBlock* mergeBlock = createBlock("If_Merge");
+    
+    // 2. Add condition check to incoming block
+    addStatementToBlock(conditionBlock, &stmt, getLineNumber(&stmt));
+    
+    // 3. Wire condition to branches
+    addConditionalEdge(conditionBlock->id, thenEntry->id, "true");
+    
+    if (elseEntry) {
+        addConditionalEdge(conditionBlock->id, elseEntry->id, "false");
+    } else {
+        // No ELSE branch: false goes directly to merge
+        addConditionalEdge(conditionBlock->id, mergeBlock->id, "false");
+    }
+    
+    // 4. Recursively build THEN branch
+    // KEY FIX: This handles nested loops/IFs automatically!
+    BasicBlock* thenExit = buildStatementRange(
+        stmt.thenStatements,
+        thenEntry,
+        loop,
+        select,
+        tryCtx,
+        sub
+    );
+    
+    // 5. Wire THEN exit to merge (if not terminated by GOTO/RETURN)
+    if (!isTerminated(thenExit)) {
+        addUnconditionalEdge(thenExit->id, mergeBlock->id);
+    }
+    
+    // 6. Recursively build ELSE branch (if exists)
+    if (elseEntry) {
+        BasicBlock* elseExit = buildStatementRange(
+            stmt.elseStatements,
+            elseEntry,
+            loop,
+            select,
+            tryCtx,
+            sub
+        );
+        
+        // Wire ELSE exit to merge (if not terminated)
+        if (!isTerminated(elseExit)) {
+            addUnconditionalEdge(elseExit->id, mergeBlock->id);
+        }
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Multi-line IF complete, merge block: " << mergeBlock->id << std::endl;
+    }
+    
+    // 7. Return merge point
+    // The next statement in the outer scope connects here
+    return mergeBlock;
+}
+
+// =============================================================================
+// SELECT CASE Statement Handler
+// =============================================================================
+//
+// SELECT CASE expression
+//   CASE value1, value2, ...
+//     statements
+//   CASE ELSE
+//     statements
+// END SELECT
+//
+// Creates blocks for each case, evaluates expression once, branches to matching case
+//
+BasicBlock* CFGBuilder::buildSelectCase(
+    const CaseStatement& stmt,
+    BasicBlock* incoming,
+    LoopContext* loop,
+    SelectContext* outerSelect,
+    TryContext* tryCtx,
+    SubroutineContext* sub
+) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building SELECT CASE statement with " 
+                  << stmt.whenClauses.size() << " when clauses" << std::endl;
+    }
+    
+    // 1. Add SELECT CASE to incoming block (evaluates expression)
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // 2. Create exit block for the entire SELECT
+    BasicBlock* exitBlock = createBlock("Select_Exit");
+    
+    // 3. Create SELECT context (though EXIT SELECT doesn't exist in this dialect)
+    SelectContext selectCtx;
+    selectCtx.exitBlockId = exitBlock->id;
+    selectCtx.outerSelect = outerSelect;
+    
+    // 4. Process each WHEN clause
+    BasicBlock* previousCaseCheck = incoming;
+    
+    for (size_t i = 0; i < stmt.whenClauses.size(); i++) {
+        const auto& whenClause = stmt.whenClauses[i];
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] Processing WHEN clause " << i << std::endl;
+        }
+        
+        // Create block for this when's statements
+        BasicBlock* whenBlock = createBlock("When_" + std::to_string(i));
+        
+        // Create block for next when check (or otherwise for last when)
+        BasicBlock* nextCheck = (i < stmt.whenClauses.size() - 1) 
+            ? createBlock("When_Check_" + std::to_string(i + 1))
+            : createBlock("When_Otherwise");
+        
+        // Wire from previous check to this when (if match) and to next check (if not)
+        std::string whenLabel = "when_" + std::to_string(i);
+        addConditionalEdge(previousCaseCheck->id, whenBlock->id, whenLabel);
+        addConditionalEdge(previousCaseCheck->id, nextCheck->id, "no_match");
+        
+        // Recursively build when statements
+        BasicBlock* whenExit = buildStatementRange(
+            whenClause.statements,
+            whenBlock,
+            loop,
+            &selectCtx,
+            tryCtx,
+            sub
+        );
+        
+        // Wire when exit to SELECT exit (if not terminated)
+        // Note: Cases don't fall through in most BASIC dialects
+        if (!isTerminated(whenExit)) {
+            addUnconditionalEdge(whenExit->id, exitBlock->id);
+        }
+        
+        // Move to next when check
+        previousCaseCheck = nextCheck;
+    }
+    
+    // 5. Process OTHERWISE clause if present
+    if (!stmt.otherwiseStatements.empty()) {
+        BasicBlock* otherwiseBlock = createBlock("Otherwise");
+        addUnconditionalEdge(previousCaseCheck->id, otherwiseBlock->id);
+        
+        BasicBlock* otherwiseExit = buildStatementRange(
+            stmt.otherwiseStatements,
+            otherwiseBlock,
+            loop,
+            &selectCtx,
+            tryCtx,
+            sub
+        );
+        
+        if (!isTerminated(otherwiseExit)) {
+            addUnconditionalEdge(otherwiseExit->id, exitBlock->id);
+        }
+    } else {
+        // No OTHERWISE - wire the final check to exit (no case matched)
+        addUnconditionalEdge(previousCaseCheck->id, exitBlock->id);
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] SELECT CASE complete, exit block: " << exitBlock->id << std::endl;
+    }
+    
+    // 6. Return exit block
+    return exitBlock;
+}
+
+} // namespace FasterBASIC
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_builder_core.cpp
+================================================================================
+
+//
+// cfg_builder_core.cpp
+// FasterBASIC - Control Flow Graph Builder Core (V2)
+//
+// Contains constructor, main build() entry point, and CFG lifecycle management.
+// Part of modular CFG builder split (February 2026).
+//
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
+//
+
+#include "cfg_builder.h"
+#include <iostream>
+#include <stdexcept>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// Constructor / Destructor
+// =============================================================================
+
+CFGBuilder::CFGBuilder()
+    : m_cfg(nullptr)
+    , m_nextBlockId(0)
+    , m_totalBlocksCreated(0)
+    , m_totalEdgesCreated(0)
+    , m_debugMode(false)
+    , m_entryBlock(nullptr)
+    , m_exitBlock(nullptr)
+{
+}
+
+CFGBuilder::~CFGBuilder() {
+    // Note: m_cfg ownership is transferred via takeCFG()
+    // If not transferred, we should clean it up
+    if (m_cfg) {
+        delete m_cfg;
+        m_cfg = nullptr;
+    }
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+ControlFlowGraph* CFGBuilder::build(const std::vector<StatementPtr>& statements) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Starting CFG construction..." << std::endl;
+        std::cout << "[CFG] Total statements to process: " << statements.size() << std::endl;
+    }
+    
+    // Create the CFG
+    m_cfg = new ControlFlowGraph();
+    m_nextBlockId = 0;
+    m_totalBlocksCreated = 0;
+    m_totalEdgesCreated = 0;
+    m_lineNumberToBlock.clear();
+    m_labelToBlock.clear();
+    m_deferredEdges.clear();
+    m_jumpTargets.clear();
+    m_unreachableBlocks.clear();
+    
+    // PHASE 0: Pre-scan to collect all GOTO/GOSUB targets
+    // This identifies "landing zones" that require block boundaries
+    collectJumpTargets(statements);
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Pre-scan found " << m_jumpTargets.size() 
+                  << " jump targets" << std::endl;
+    }
+    
+    // Create entry block
+    m_entryBlock = createBlock("Entry");
+    m_cfg->entryBlock = m_entryBlock->id;
+    
+    // Build the main program body
+    // No context parameters (not in any loop/select/try)
+    BasicBlock* finalBlock = buildStatementRange(
+        statements,
+        m_entryBlock,
+        nullptr,  // No loop context
+        nullptr,  // No select context
+        nullptr,  // No try context
+        nullptr   // No subroutine context
+    );
+    
+    // Create exit block
+    m_exitBlock = createBlock("Exit");
+    m_cfg->exitBlock = m_exitBlock->id;
+    
+    // Wire final block to exit (if not already terminated)
+    if (finalBlock && !isTerminated(finalBlock)) {
+        addUnconditionalEdge(finalBlock->id, m_exitBlock->id);
+    }
+    
+    // PHASE 2: Resolve any deferred edges (forward GOTOs)
+    resolveDeferredEdges();
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] CFG construction complete" << std::endl;
+        std::cout << "[CFG] Total blocks created: " << m_totalBlocksCreated << std::endl;
+        std::cout << "[CFG] Total edges created: " << m_totalEdgesCreated << std::endl;
+        dumpCFG("Final");
+    }
+    
+    return m_cfg;
+}
+
+// =============================================================================
+// Adapter: Build CFG from Program Structure
+// =============================================================================
+
+ControlFlowGraph* CFGBuilder::buildFromProgram(const Program& program) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building CFG from Program with " 
+                  << program.lines.size() << " lines" << std::endl;
+    }
+    
+    // Create the CFG
+    m_cfg = new ControlFlowGraph("main");
+    m_nextBlockId = 0;
+    m_totalBlocksCreated = 0;
+    m_totalEdgesCreated = 0;
+    m_lineNumberToBlock.clear();
+    m_labelToBlock.clear();
+    m_deferredEdges.clear();
+    m_jumpTargets.clear();
+    m_unreachableBlocks.clear();
+    
+    // PHASE 0: Pre-scan to collect all GOTO/GOSUB targets from the Program
+    collectJumpTargetsFromProgram(program);
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Pre-scan found " << m_jumpTargets.size() 
+                  << " jump targets" << std::endl;
+    }
+    
+    // Create entry block
+    m_entryBlock = createBlock("Entry");
+    m_cfg->entryBlock = m_entryBlock->id;
+    
+    // Create exit block BEFORE processing statements so END can jump to it
+    m_exitBlock = createBlock("Exit");
+    m_cfg->exitBlock = m_exitBlock->id;
+    
+    // Build statement list from Program structure
+    // The Program contains ProgramLines, each with statements
+    BasicBlock* currentBlock = m_entryBlock;
+    
+    for (const auto& line : program.lines) {
+        // Register this line number's block
+        if (line->lineNumber > 0) {
+            // If this line is a jump target, start a new block
+            if (isJumpTarget(line->lineNumber)) {
+                if (!currentBlock->statements.empty() || currentBlock == m_entryBlock) {
+                    // Need to split - create new block for this line
+                    BasicBlock* targetBlock = createBlock("Line_" + std::to_string(line->lineNumber));
+                    
+                    // Wire previous block to this one (if not terminated)
+                    if (!isTerminated(currentBlock)) {
+                        addUnconditionalEdge(currentBlock->id, targetBlock->id);
+                    }
+                    
+                    currentBlock = targetBlock;
+                }
+                
+                // Register this line number's block
+                registerLineNumberBlock(line->lineNumber, currentBlock->id);
+                
+                if (m_debugMode) {
+                    std::cout << "[CFG] Line " << line->lineNumber 
+                              << " mapped to block " << currentBlock->id << std::endl;
+                }
+            }
+        }
+        
+        // Process each statement in the line
+        for (const auto& stmt : line->statements) {
+            // Check if we need to handle a control structure
+            if (auto* ifStmt = dynamic_cast<const IfStatement*>(stmt.get())) {
+                currentBlock = buildIf(*ifStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* whileStmt = dynamic_cast<const WhileStatement*>(stmt.get())) {
+                currentBlock = buildWhile(*whileStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* forStmt = dynamic_cast<const ForStatement*>(stmt.get())) {
+                currentBlock = buildFor(*forStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* repeatStmt = dynamic_cast<const RepeatStatement*>(stmt.get())) {
+                currentBlock = buildRepeat(*repeatStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* doStmt = dynamic_cast<const DoStatement*>(stmt.get())) {
+                currentBlock = buildDo(*doStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* selectStmt = dynamic_cast<const CaseStatement*>(stmt.get())) {
+                currentBlock = buildSelectCase(*selectStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* gotoStmt = dynamic_cast<const GotoStatement*>(stmt.get())) {
+                currentBlock = handleGoto(*gotoStmt, currentBlock);
+                continue;
+            }
+            
+            if (auto* gosubStmt = dynamic_cast<const GosubStatement*>(stmt.get())) {
+                currentBlock = handleGosub(*gosubStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* returnStmt = dynamic_cast<const ReturnStatement*>(stmt.get())) {
+                currentBlock = handleReturn(*returnStmt, currentBlock, nullptr);
+                continue;
+            }
+            
+            if (auto* endStmt = dynamic_cast<const EndStatement*>(stmt.get())) {
+                currentBlock = handleEnd(*endStmt, currentBlock);
+                continue;
+            }
+            
+            // For other statements, add to current block
+            if (isTerminated(currentBlock)) {
+                // Previous statement was a terminator (GOTO/RETURN)
+                // Create unreachable block for following code
+                currentBlock = createUnreachableBlock();
+                
+                if (m_debugMode) {
+                    std::cout << "[CFG] Created unreachable block " << currentBlock->id 
+                              << " after terminator" << std::endl;
+                }
+            }
+            
+            // Add statement to current block
+            addStatementToBlock(currentBlock, stmt.get(), line->lineNumber);
+        }
+    }
+    
+    // Wire final block to exit (if not already terminated)
+    if (currentBlock && !isTerminated(currentBlock)) {
+        addUnconditionalEdge(currentBlock->id, m_exitBlock->id);
+    }
+    
+    // PHASE 2: Resolve any deferred edges (forward GOTOs)
+    resolveDeferredEdges();
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] CFG construction complete" << std::endl;
+        std::cout << "[CFG] Total blocks created: " << m_totalBlocksCreated << std::endl;
+        std::cout << "[CFG] Total edges created: " << m_totalEdgesCreated << std::endl;
+        dumpCFG("Final");
+    }
+    
+    return m_cfg;
+}
+
+// =============================================================================
+// CFG Ownership Transfer
+// =============================================================================
+
+ControlFlowGraph* CFGBuilder::takeCFG() {
+    ControlFlowGraph* result = m_cfg;
+    m_cfg = nullptr;
+    return result;
+}
+
+} // namespace FasterBASIC
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_builder_edges.cpp
+================================================================================
+
+//
+// cfg_builder_edges.cpp
+// FasterBASIC - Control Flow Graph Builder Edge Management (V2)
+//
+// This file is STUBBED OUT in v2 implementation.
+// The v2 architecture builds edges immediately during construction,
+// so there is no separate "Phase 2" edge building phase.
+//
+// All edge creation happens in the recursive builders:
+// - cfg_builder_loops.cpp (loop back-edges)
+// - cfg_builder_conditional.cpp (branch edges)
+// - cfg_builder_jumps.cpp (goto/gosub edges)
+// - cfg_builder_exception.cpp (exception edges)
+//
+// Part of modular CFG builder split (February 2026).
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
+//
+
+#include "cfg_builder.h"
+
+namespace FasterBASIC {
+
+// This file intentionally left empty - v2 does not use deferred edge building.
+// All edges are created immediately by the recursive statement builders.
+
+} // namespace FasterBASIC
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_builder_exception.cpp
+================================================================================
+
+//
+// cfg_builder_exception.cpp
+// FasterBASIC - Control Flow Graph Builder Exception Handler (V2)
+//
+// Contains TRY...CATCH...FINALLY statement processing.
+// Part of modular CFG builder split (February 2026).
+//
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
+//
+
+#include "cfg_builder.h"
+#include <iostream>
+#include <stdexcept>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// TRY...CATCH...FINALLY Handler
+// =============================================================================
+//
+// TRY...CATCH...FINALLY...END TRY
+// Creates blocks for try body, catch clauses, finally block, and exit
+// Exception edges connect throw points to catch handlers
+//
+BasicBlock* CFGBuilder::buildTryCatch(
+    const TryCatchStatement& stmt,
+    BasicBlock* incoming,
+    LoopContext* loop,
+    SelectContext* select,
+    TryContext* outerTry,
+    SubroutineContext* sub
+) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building TRY...CATCH...FINALLY statement" << std::endl;
+    }
+    
+    // TRY...CATCH...FINALLY structure:
+    // 1. TRY block - normal execution path
+    // 2. CATCH blocks - exception handlers (one per catch clause)
+    // 3. FINALLY block - always executes (cleanup code)
+    // 4. EXIT block - where control flows after try/catch/finally
+    
+    // Add TRY statement to incoming block
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // 1. Create blocks
+    BasicBlock* tryBlock = createBlock("Try_Block");
+    BasicBlock* finallyBlock = stmt.finallyBlock.empty() ? nullptr : createBlock("Finally_Block");
+    BasicBlock* exitBlock = createBlock("Try_Exit");
+    
+    // 2. Wire incoming to try block
+    if (!isTerminated(incoming)) {
+        addUnconditionalEdge(incoming->id, tryBlock->id);
+    }
+    
+    // 3. Create catch blocks (one per catch clause)
+    std::vector<BasicBlock*> catchBlocks;
+    for (size_t i = 0; i < stmt.catchClauses.size(); i++) {
+        BasicBlock* catchBlock = createBlock("Catch_" + std::to_string(i));
+        catchBlocks.push_back(catchBlock);
+    }
+    
+    // If no catch blocks, create a default one
+    BasicBlock* defaultCatchBlock = nullptr;
+    if (catchBlocks.empty()) {
+        defaultCatchBlock = createBlock("Catch_Default");
+        catchBlocks.push_back(defaultCatchBlock);
+    }
+    
+    // 4. Create TRY context for nested THROW statements
+    TryContext tryCtx;
+    tryCtx.catchBlockId = catchBlocks[0]->id;  // Default to first catch block
+    tryCtx.finallyBlockId = finallyBlock ? finallyBlock->id : -1;
+    tryCtx.outerTry = outerTry;
+    
+    // 5. Recursively build TRY block with exception context
+    BasicBlock* tryExit = buildStatementRange(
+        stmt.tryBlock,
+        tryBlock,
+        loop,
+        select,
+        &tryCtx,  // Pass try context to nested statements
+        sub
+    );
+    
+    // 6. If TRY completes normally (no exception), go to FINALLY or EXIT
+    if (!isTerminated(tryExit)) {
+        if (finallyBlock) {
+            addUnconditionalEdge(tryExit->id, finallyBlock->id);
+        } else {
+            addUnconditionalEdge(tryExit->id, exitBlock->id);
+        }
+    }
+    
+    // 7. Process each CATCH clause
+    for (size_t i = 0; i < stmt.catchClauses.size(); i++) {
+        const auto& catchClause = stmt.catchClauses[i];
+        BasicBlock* catchBlock = catchBlocks[i];
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] Processing CATCH clause " << i;
+            if (!catchClause.errorCodes.empty()) {
+                std::cout << " (error codes: ";
+                for (size_t j = 0; j < catchClause.errorCodes.size(); j++) {
+                    if (j > 0) std::cout << ", ";
+                    std::cout << catchClause.errorCodes[j];
+                }
+                std::cout << ")";
+            }
+            std::cout << std::endl;
+        }
+        
+        // Recursively build catch block
+        BasicBlock* catchExit = buildStatementRange(
+            catchClause.block,
+            catchBlock,
+            loop,
+            select,
+            &tryCtx,  // Nested try/catch is possible
+            sub
+        );
+        
+        // After catch, go to FINALLY or EXIT
+        if (!isTerminated(catchExit)) {
+            if (finallyBlock) {
+                addUnconditionalEdge(catchExit->id, finallyBlock->id);
+            } else {
+                addUnconditionalEdge(catchExit->id, exitBlock->id);
+            }
+        }
+    }
+    
+    // 8. Process FINALLY block (if present)
+    if (finallyBlock) {
+        if (m_debugMode) {
+            std::cout << "[CFG] Processing FINALLY block" << std::endl;
+        }
+        
+        // FINALLY always executes, regardless of exception
+        BasicBlock* finallyExit = buildStatementRange(
+            stmt.finallyBlock,
+            finallyBlock,
+            loop,
+            select,
+            &tryCtx,
+            sub
+        );
+        
+        // After finally, go to exit
+        if (!isTerminated(finallyExit)) {
+            addUnconditionalEdge(finallyExit->id, exitBlock->id);
+        }
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] TRY...CATCH...FINALLY complete, exit block: " 
+                  << exitBlock->id << std::endl;
+    }
+    
+    // 9. Return exit block
+    return exitBlock;
+}
+
+} // namespace FasterBASIC
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_builder_functions.cpp
+================================================================================
+
+//
+// cfg_builder_functions.cpp
+// FasterBASIC - Control Flow Graph Builder Function Handlers (V2)
+//
+// Implements CFG construction for SUB, FUNCTION, and DEF FN definitions.
+// Each function/subroutine gets its own separate ControlFlowGraph.
+//
+// Part of modular CFG builder split (February 2026).
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
+//
+
+#include "cfg_builder.h"
+#include <iostream>
+#include <stdexcept>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// FUNCTION Builder
+// =============================================================================
+//
+// Build a complete CFG for a FUNCTION definition.
+// FUNCTION has a return value and uses FUNCTION name = value syntax or RETURN value
+//
+ControlFlowGraph* CFGBuilder::buildFunction(const FunctionStatement& stmt) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building FUNCTION " << stmt.functionName 
+                  << " with " << stmt.parameters.size() << " parameters" << std::endl;
+    }
+    
+    // Create a new CFG for this function
+    ControlFlowGraph* funcCFG = new ControlFlowGraph(stmt.functionName);
+    
+    // Store function metadata
+    funcCFG->functionName = stmt.functionName;
+    funcCFG->parameters = stmt.parameters;
+    
+    // Convert parameter types from TokenType to VariableType
+    funcCFG->parameterTypes.clear();
+    for (size_t i = 0; i < stmt.parameterTypes.size(); ++i) {
+        TokenType tokenType = stmt.parameterTypes[i];
+        VariableType varType = VariableType::INT;  // Default
+        
+        switch (tokenType) {
+            case TokenType::PERCENT:
+            case TokenType::TYPE_INT:
+                varType = VariableType::INT;
+                break;
+            case TokenType::AMPERSAND:
+                varType = VariableType::INT;  // Long maps to INT
+                break;
+            case TokenType::EXCLAMATION:
+                varType = VariableType::FLOAT;
+                break;
+            case TokenType::HASH:
+            case TokenType::TYPE_DOUBLE:
+                varType = VariableType::DOUBLE;
+                break;
+            case TokenType::TYPE_STRING:
+                varType = VariableType::STRING;
+                break;
+            default:
+                varType = VariableType::INT;
+                break;
+        }
+        
+        funcCFG->parameterTypes.push_back(varType);
+    }
+    
+    // Determine return type from suffix
+    VariableType returnType = VariableType::INT;  // Default
+    switch (stmt.returnTypeSuffix) {
+        case TokenType::PERCENT:
+            returnType = VariableType::INT;
+            break;
+        case TokenType::AMPERSAND:
+            returnType = VariableType::INT;  // Long maps to INT
+            break;
+        case TokenType::EXCLAMATION:
+            returnType = VariableType::FLOAT;
+            break;
+        case TokenType::HASH:
+            returnType = VariableType::DOUBLE;
+            break;
+        case TokenType::TYPE_STRING:
+            returnType = VariableType::STRING;
+            break;
+        default:
+            returnType = VariableType::INT;
+            break;
+    }
+    funcCFG->returnType = returnType;
+    
+    // Save current CFG state and switch to function CFG
+    ControlFlowGraph* savedCFG = m_cfg;
+    int savedNextBlockId = m_nextBlockId;
+    auto savedLineNumberToBlock = m_lineNumberToBlock;
+    auto savedLabelToBlock = m_labelToBlock;
+    auto savedDeferredEdges = m_deferredEdges;
+    auto savedJumpTargets = m_jumpTargets;
+    BasicBlock* savedEntryBlock = m_entryBlock;
+    BasicBlock* savedExitBlock = m_exitBlock;
+    
+    // Switch to building the function CFG
+    m_cfg = funcCFG;
+    m_nextBlockId = 0;
+    m_lineNumberToBlock.clear();
+    m_labelToBlock.clear();
+    m_deferredEdges.clear();
+    m_jumpTargets.clear();
+    
+    // Pre-scan function body for jump targets
+    collectJumpTargets(stmt.body);
+    
+    // Create function entry block
+    m_entryBlock = createBlock("Entry");
+    funcCFG->entryBlock = m_entryBlock->id;
+    
+    // Create function exit block
+    m_exitBlock = createBlock("Exit");
+    funcCFG->exitBlock = m_exitBlock->id;
+    
+    // Create subroutine context for RETURN handling
+    SubroutineContext subCtx;
+    subCtx.returnBlockId = m_exitBlock->id;
+    subCtx.outerSub = nullptr;
+    
+    // Build the function body
+    BasicBlock* bodyExit = buildStatementRange(
+        stmt.body,
+        m_entryBlock,
+        nullptr,    // No loop context
+        nullptr,    // No select context
+        nullptr,    // No try context
+        &subCtx     // Subroutine context for RETURN
+    );
+    
+    // Wire body exit to function exit (if not already terminated)
+    if (bodyExit && !isTerminated(bodyExit)) {
+        addUnconditionalEdge(bodyExit->id, m_exitBlock->id);
+    }
+    
+    // Resolve deferred edges
+    resolveDeferredEdges();
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] FUNCTION " << stmt.functionName << " built successfully" << std::endl;
+        std::cout << "[CFG]   Blocks: " << funcCFG->blocks.size() << std::endl;
+        std::cout << "[CFG]   Edges: " << funcCFG->edges.size() << std::endl;
+    }
+    
+    // Restore previous CFG state
+    m_cfg = savedCFG;
+    m_nextBlockId = savedNextBlockId;
+    m_lineNumberToBlock = savedLineNumberToBlock;
+    m_labelToBlock = savedLabelToBlock;
+    m_deferredEdges = savedDeferredEdges;
+    m_jumpTargets = savedJumpTargets;
+    m_entryBlock = savedEntryBlock;
+    m_exitBlock = savedExitBlock;
+    
+    return funcCFG;
+}
+
+// =============================================================================
+// SUB Builder
+// =============================================================================
+//
+// Build a complete CFG for a SUB definition.
+// SUB is like FUNCTION but has no return value
+//
+ControlFlowGraph* CFGBuilder::buildSub(const SubStatement& stmt) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building SUB " << stmt.subName 
+                  << " with " << stmt.parameters.size() << " parameters" << std::endl;
+    }
+    
+    // Create a new CFG for this subroutine
+    ControlFlowGraph* subCFG = new ControlFlowGraph(stmt.subName);
+    
+    // Store subroutine metadata
+    subCFG->functionName = stmt.subName;
+    subCFG->parameters = stmt.parameters;
+    
+    // Convert parameter types from TokenType to VariableType
+    subCFG->parameterTypes.clear();
+    for (size_t i = 0; i < stmt.parameterTypes.size(); ++i) {
+        TokenType tokenType = stmt.parameterTypes[i];
+        VariableType varType = VariableType::INT;  // Default
+        
+        switch (tokenType) {
+            case TokenType::PERCENT:
+            case TokenType::TYPE_INT:
+                varType = VariableType::INT;
+                break;
+            case TokenType::AMPERSAND:
+                varType = VariableType::INT;  // Long maps to INT
+                break;
+            case TokenType::EXCLAMATION:
+                varType = VariableType::FLOAT;
+                break;
+            case TokenType::HASH:
+            case TokenType::TYPE_DOUBLE:
+                varType = VariableType::DOUBLE;
+                break;
+            case TokenType::TYPE_STRING:
+                varType = VariableType::STRING;
+                break;
+            default:
+                varType = VariableType::INT;
+                break;
+        }
+        
+        subCFG->parameterTypes.push_back(varType);
+    }
+    
+    // SUBs have no return type
+    subCFG->returnType = VariableType::VOID;
+    
+    // Save current CFG state and switch to subroutine CFG
+    ControlFlowGraph* savedCFG = m_cfg;
+    int savedNextBlockId = m_nextBlockId;
+    auto savedLineNumberToBlock = m_lineNumberToBlock;
+    auto savedLabelToBlock = m_labelToBlock;
+    auto savedDeferredEdges = m_deferredEdges;
+    auto savedJumpTargets = m_jumpTargets;
+    BasicBlock* savedEntryBlock = m_entryBlock;
+    BasicBlock* savedExitBlock = m_exitBlock;
+    
+    // Switch to building the subroutine CFG
+    m_cfg = subCFG;
+    m_nextBlockId = 0;
+    m_lineNumberToBlock.clear();
+    m_labelToBlock.clear();
+    m_deferredEdges.clear();
+    m_jumpTargets.clear();
+    
+    // Pre-scan subroutine body for jump targets
+    collectJumpTargets(stmt.body);
+    
+    // Create subroutine entry block
+    m_entryBlock = createBlock("Entry");
+    subCFG->entryBlock = m_entryBlock->id;
+    
+    // Create subroutine exit block
+    m_exitBlock = createBlock("Exit");
+    subCFG->exitBlock = m_exitBlock->id;
+    
+    // Create subroutine context for RETURN handling
+    SubroutineContext subCtx;
+    subCtx.returnBlockId = m_exitBlock->id;
+    subCtx.outerSub = nullptr;
+    
+    // Build the subroutine body
+    BasicBlock* bodyExit = buildStatementRange(
+        stmt.body,
+        m_entryBlock,
+        nullptr,    // No loop context
+        nullptr,    // No select context
+        nullptr,    // No try context
+        &subCtx     // Subroutine context for RETURN
+    );
+    
+    // Wire body exit to subroutine exit (if not already terminated)
+    if (bodyExit && !isTerminated(bodyExit)) {
+        addUnconditionalEdge(bodyExit->id, m_exitBlock->id);
+    }
+    
+    // Resolve deferred edges
+    resolveDeferredEdges();
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] SUB " << stmt.subName << " built successfully" << std::endl;
+        std::cout << "[CFG]   Blocks: " << subCFG->blocks.size() << std::endl;
+        std::cout << "[CFG]   Edges: " << subCFG->edges.size() << std::endl;
+    }
+    
+    // Restore previous CFG state
+    m_cfg = savedCFG;
+    m_nextBlockId = savedNextBlockId;
+    m_lineNumberToBlock = savedLineNumberToBlock;
+    m_labelToBlock = savedLabelToBlock;
+    m_deferredEdges = savedDeferredEdges;
+    m_jumpTargets = savedJumpTargets;
+    m_entryBlock = savedEntryBlock;
+    m_exitBlock = savedExitBlock;
+    
+    return subCFG;
+}
+
+// =============================================================================
+// DEF FN Builder
+// =============================================================================
+//
+// Build a complete CFG for a DEF FN definition.
+// DEF FN is a single-expression inline function (classic BASIC style)
+//
+ControlFlowGraph* CFGBuilder::buildDefFn(const DefStatement& stmt) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building DEF FN" << stmt.functionName 
+                  << " with " << stmt.parameters.size() << " parameters" << std::endl;
+    }
+    
+    // Create a new CFG for this inline function
+    ControlFlowGraph* defCFG = new ControlFlowGraph("FN" + stmt.functionName);
+    
+    // Store function metadata
+    defCFG->functionName = "FN" + stmt.functionName;
+    defCFG->parameters = stmt.parameters;
+    defCFG->defStatement = &stmt;
+    
+    // Convert parameter types from TokenType to VariableType
+    defCFG->parameterTypes.clear();
+    for (size_t i = 0; i < stmt.parameterSuffixes.size(); ++i) {
+        TokenType tokenType = stmt.parameterSuffixes[i];
+        VariableType varType = VariableType::INT;  // Default
+        
+        switch (tokenType) {
+            case TokenType::PERCENT:
+                varType = VariableType::INT;
+                break;
+            case TokenType::AMPERSAND:
+                varType = VariableType::INT;  // Long maps to INT
+                break;
+            case TokenType::EXCLAMATION:
+                varType = VariableType::FLOAT;
+                break;
+            case TokenType::HASH:
+                varType = VariableType::DOUBLE;
+                break;
+        case TokenType::TYPE_STRING:
+                varType = VariableType::STRING;
+                break;
+            default:
+                varType = VariableType::INT;
+                break;
+        }
+        
+        defCFG->parameterTypes.push_back(varType);
+    }
+    
+    // Return type is inferred from function name suffix
+    // For now, default to DOUBLE (classic BASIC DEF FN behavior)
+    defCFG->returnType = VariableType::DOUBLE;
+    
+    // Save current CFG state
+    ControlFlowGraph* savedCFG = m_cfg;
+    int savedNextBlockId = m_nextBlockId;
+    BasicBlock* savedEntryBlock = m_entryBlock;
+    BasicBlock* savedExitBlock = m_exitBlock;
+    
+    // Switch to building the DEF FN CFG
+    m_cfg = defCFG;
+    m_nextBlockId = 0;
+    
+    // Create entry and exit blocks
+    m_entryBlock = createBlock("Entry");
+    defCFG->entryBlock = m_entryBlock->id;
+    
+    m_exitBlock = createBlock("Exit");
+    defCFG->exitBlock = m_exitBlock->id;
+    
+    // DEF FN has a single expression body, not statements
+    // We create a synthetic evaluation block that computes the expression
+    // and returns the result
+    BasicBlock* evalBlock = createBlock("EvalExpression");
+    addUnconditionalEdge(m_entryBlock->id, evalBlock->id);
+    
+    // Add the DEF statement itself to the eval block
+    // (The codegen will extract the expression from it)
+    addStatementToBlock(evalBlock, &stmt, 0);
+    
+    // Wire eval block to exit
+    addUnconditionalEdge(evalBlock->id, m_exitBlock->id);
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] DEF FN" << stmt.functionName << " built successfully" << std::endl;
+        std::cout << "[CFG]   Blocks: " << defCFG->blocks.size() << std::endl;
+    }
+    
+    // Restore previous CFG state
+    m_cfg = savedCFG;
+    m_nextBlockId = savedNextBlockId;
+    m_entryBlock = savedEntryBlock;
+    m_exitBlock = savedExitBlock;
+    
+    return defCFG;
+}
+
+// =============================================================================
+// Build Complete ProgramCFG
+// =============================================================================
+//
+// Build a complete ProgramCFG with main program and all SUB/FUNCTION/DEF FN CFGs.
+// This is the top-level entry point for building CFGs for entire programs.
+//
+ProgramCFG* CFGBuilder::buildProgramCFG(const Program& program) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building complete ProgramCFG..." << std::endl;
+        std::cout << "[CFG] Program has " << program.lines.size() << " lines" << std::endl;
+    }
+    
+    ProgramCFG* programCFG = new ProgramCFG();
+    
+    // First pass: Extract all SUB/FUNCTION/DEF FN definitions and build their CFGs
+    std::set<const Statement*> functionDefinitions;
+    
+    for (const auto& line : program.lines) {
+        for (const auto& stmt : line->statements) {
+            // Check for FUNCTION definition
+            if (auto* funcStmt = dynamic_cast<const FunctionStatement*>(stmt.get())) {
+                if (m_debugMode) {
+                    std::cout << "[CFG] Found FUNCTION " << funcStmt->functionName << std::endl;
+                }
+                
+                ControlFlowGraph* funcCFG = buildFunction(*funcStmt);
+                programCFG->functionCFGs[funcStmt->functionName] = std::unique_ptr<ControlFlowGraph>(funcCFG);
+                functionDefinitions.insert(stmt.get());
+                continue;
+            }
+            
+            // Check for SUB definition
+            if (auto* subStmt = dynamic_cast<const SubStatement*>(stmt.get())) {
+                if (m_debugMode) {
+                    std::cout << "[CFG] Found SUB " << subStmt->subName << std::endl;
+                }
+                
+                ControlFlowGraph* subCFG = buildSub(*subStmt);
+                programCFG->functionCFGs[subStmt->subName] = std::unique_ptr<ControlFlowGraph>(subCFG);
+                functionDefinitions.insert(stmt.get());
+                continue;
+            }
+            
+            // Check for DEF FN definition
+            if (auto* defStmt = dynamic_cast<const DefStatement*>(stmt.get())) {
+                if (m_debugMode) {
+                    std::cout << "[CFG] Found DEF FN" << defStmt->functionName << std::endl;
+                }
+                
+                ControlFlowGraph* defCFG = buildDefFn(*defStmt);
+                programCFG->functionCFGs["FN" + defStmt->functionName] = std::unique_ptr<ControlFlowGraph>(defCFG);
+                functionDefinitions.insert(stmt.get());
+                continue;
+            }
+        }
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Found " << functionDefinitions.size() << " function definitions" << std::endl;
+        std::cout << "[CFG] Building main program CFG..." << std::endl;
+    }
+    
+    // Second pass: Build main program CFG (skip function definitions)
+    // We need to filter out SUB/FUNCTION/DEF FN definitions from the main program flow
+    
+    // Reset builder state
+    m_cfg = programCFG->mainCFG.get();
+    m_nextBlockId = 0;
+    m_totalBlocksCreated = 0;
+    m_totalEdgesCreated = 0;
+    m_lineNumberToBlock.clear();
+    m_labelToBlock.clear();
+    m_deferredEdges.clear();
+    m_jumpTargets.clear();
+    m_unreachableBlocks.clear();
+    
+    // Pre-scan main program for jump targets (excluding function bodies)
+    for (const auto& line : program.lines) {
+        for (const auto& stmt : line->statements) {
+            // Skip function definitions during jump target collection
+            if (functionDefinitions.count(stmt.get()) > 0) {
+                continue;
+            }
+            
+            collectJumpTargetsFromStatement(stmt.get());
+        }
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Pre-scan found " << m_jumpTargets.size() 
+                  << " jump targets in main program" << std::endl;
+    }
+    
+    // Create entry block for main program
+    m_entryBlock = createBlock("Entry");
+    m_cfg->entryBlock = m_entryBlock->id;
+    
+    // Create exit block BEFORE processing statements so END can jump to it
+    m_exitBlock = createBlock("Exit");
+    m_cfg->exitBlock = m_exitBlock->id;
+    
+    BasicBlock* currentBlock = m_entryBlock;
+    
+    // Process each line, skipping function definitions
+    for (const auto& line : program.lines) {
+        // Register line number if present and is a jump target
+        if (line->lineNumber > 0) {
+            if (isJumpTarget(line->lineNumber)) {
+                if (!currentBlock->statements.empty() || currentBlock == m_entryBlock) {
+                    // Need to split - create new block for this line
+                    BasicBlock* targetBlock = createBlock("Line_" + std::to_string(line->lineNumber));
+                    
+                    // Wire previous block to this one (if not terminated)
+                    if (!isTerminated(currentBlock)) {
+                        addUnconditionalEdge(currentBlock->id, targetBlock->id);
+                    }
+                    
+                    currentBlock = targetBlock;
+                }
+                
+                // Register this line number's block
+                registerLineNumberBlock(line->lineNumber, currentBlock->id);
+                
+                if (m_debugMode) {
+                    std::cout << "[CFG] Line " << line->lineNumber 
+                              << " mapped to block " << currentBlock->id << std::endl;
+                }
+            }
+        }
+        
+        // Process statements, skipping function definitions
+        for (const auto& stmt : line->statements) {
+            // Skip function definitions - they're not part of main program flow
+            if (functionDefinitions.count(stmt.get()) > 0) {
+                if (m_debugMode) {
+                    std::cout << "[CFG] Skipping function definition in main program flow" << std::endl;
+                }
+                continue;
+            }
+            
+            // Check if we need to handle a control structure
+            if (auto* ifStmt = dynamic_cast<const IfStatement*>(stmt.get())) {
+                currentBlock = buildIf(*ifStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* whileStmt = dynamic_cast<const WhileStatement*>(stmt.get())) {
+                currentBlock = buildWhile(*whileStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* forStmt = dynamic_cast<const ForStatement*>(stmt.get())) {
+                currentBlock = buildFor(*forStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* repeatStmt = dynamic_cast<const RepeatStatement*>(stmt.get())) {
+                currentBlock = buildRepeat(*repeatStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* doStmt = dynamic_cast<const DoStatement*>(stmt.get())) {
+                currentBlock = buildDo(*doStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* selectStmt = dynamic_cast<const CaseStatement*>(stmt.get())) {
+                currentBlock = buildSelectCase(*selectStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* gotoStmt = dynamic_cast<const GotoStatement*>(stmt.get())) {
+                currentBlock = handleGoto(*gotoStmt, currentBlock);
+                continue;
+            }
+            
+            if (auto* gosubStmt = dynamic_cast<const GosubStatement*>(stmt.get())) {
+                currentBlock = handleGosub(*gosubStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* returnStmt = dynamic_cast<const ReturnStatement*>(stmt.get())) {
+                currentBlock = handleReturn(*returnStmt, currentBlock, nullptr);
+                continue;
+            }
+            
+            if (auto* endStmt = dynamic_cast<const EndStatement*>(stmt.get())) {
+                currentBlock = handleEnd(*endStmt, currentBlock);
+                continue;
+            }
+            
+            // For other statements, add to current block
+            if (isTerminated(currentBlock)) {
+                // Previous statement was a terminator
+                currentBlock = createUnreachableBlock();
+                
+                if (m_debugMode) {
+                    std::cout << "[CFG] Created unreachable block " << currentBlock->id 
+                              << " after terminator" << std::endl;
+                }
+            }
+            
+            // Add statement to current block
+            addStatementToBlock(currentBlock, stmt.get(), line->lineNumber);
+        }
+    }
+    
+    // Wire final block to exit (if not already terminated)
+    if (currentBlock && !isTerminated(currentBlock)) {
+        addUnconditionalEdge(currentBlock->id, m_exitBlock->id);
+    }
+    
+    // Resolve deferred edges
+    resolveDeferredEdges();
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Main program CFG built successfully" << std::endl;
+        std::cout << "[CFG]   Blocks: " << m_cfg->blocks.size() << std::endl;
+        std::cout << "[CFG]   Edges: " << m_cfg->edges.size() << std::endl;
+        std::cout << "[CFG] ProgramCFG complete with " << programCFG->functionCFGs.size() 
+                  << " functions/subs" << std::endl;
+    }
+    
+    // Clear m_cfg pointer - ownership is in programCFG->mainCFG unique_ptr
+    // Without this, CFGBuilder destructor will try to delete it (double-delete bug)
+    m_cfg = nullptr;
+    
+    return programCFG;
+}
+
+} // namespace FasterBASIC
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_builder_jumps.cpp
+================================================================================
+
+//
+// cfg_builder_jumps.cpp
+// FasterBASIC - Control Flow Graph Builder Jump Handlers (V2)
+//
+// Contains GOTO, GOSUB, RETURN, ON GOTO, ON GOSUB, and related jump statements.
+// Part of modular CFG builder split (February 2026).
+//
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
+//
+
+#include "cfg_builder.h"
+#include <iostream>
+#include <stdexcept>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// GOTO Handler
+// =============================================================================
+//
+// GOTO is a terminator - unconditional jump to a line number
+// Creates edge to target, marks block as terminated, returns unreachable block
+//
+BasicBlock* CFGBuilder::handleGoto(const GotoStatement& stmt, BasicBlock* incoming) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling GOTO to line " << stmt.lineNumber << std::endl;
+    }
+    
+    // Add GOTO statement to current block
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // Resolve target line to block ID
+    int targetBlockId = resolveLineNumberToBlock(stmt.lineNumber);
+    
+    if (targetBlockId >= 0) {
+        // Target already exists, wire directly
+        addUnconditionalEdge(incoming->id, targetBlockId);
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] GOTO from block " << incoming->id 
+                      << " to block " << targetBlockId << std::endl;
+        }
+    } else {
+        // Forward reference - defer until Phase 2
+        DeferredEdge edge;
+        edge.sourceBlockId = incoming->id;
+        edge.targetLineNumber = stmt.lineNumber;
+        edge.label = "goto";
+        m_deferredEdges.push_back(edge);
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] Deferred GOTO edge to line " << stmt.lineNumber << std::endl;
+        }
+    }
+    
+    // GOTO is a terminator - no fallthrough
+    markTerminated(incoming);
+    
+    // Return the terminated block - caller will create unreachable block if needed
+    return incoming;
+}
+
+// =============================================================================
+// GOSUB Handler
+// =============================================================================
+//
+// GOSUB is a subroutine call - jumps to line number and expects RETURN
+// Creates two edges: call edge to target, fallthrough to return point
+//
+BasicBlock* CFGBuilder::handleGosub(const GosubStatement& stmt, BasicBlock* incoming,
+                                    LoopContext* loop, SelectContext* select,
+                                    TryContext* tryCtx, SubroutineContext* outerSub) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling GOSUB to line " << stmt.lineNumber << std::endl;
+    }
+    
+    // Add GOSUB statement to current block
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // Create the return point block (where execution continues after RETURN)
+    BasicBlock* returnBlock = createBlock("Return_Point");
+    
+    // Track this block as a GOSUB return point for sparse dispatch optimization
+    m_cfg->gosubReturnBlocks.insert(returnBlock->id);
+    
+    // Edge A: Call edge to subroutine target
+    int targetBlockId = resolveLineNumberToBlock(stmt.lineNumber);
+    
+    if (targetBlockId >= 0) {
+        // Target already exists, wire directly
+        addEdge(incoming->id, targetBlockId, "call");
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] GOSUB call edge from block " << incoming->id 
+                      << " to block " << targetBlockId << std::endl;
+        }
+    } else {
+        // Forward reference - defer until Phase 2
+        DeferredEdge edge;
+        edge.sourceBlockId = incoming->id;
+        edge.targetLineNumber = stmt.lineNumber;
+        edge.label = "call";
+        m_deferredEdges.push_back(edge);
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] Deferred GOSUB call edge to line " << stmt.lineNumber << std::endl;
+        }
+    }
+    
+    // Edge B: Fallthrough edge to return point
+    // (Execution continues here after the subroutine RETURNs)
+    addUnconditionalEdge(incoming->id, returnBlock->id);
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] GOSUB from block " << incoming->id 
+                  << " with return point " << returnBlock->id << std::endl;
+    }
+    
+    // Continue building from return point
+    return returnBlock;
+}
+
+// =============================================================================
+// RETURN Handler
+// =============================================================================
+//
+// RETURN pops the subroutine call stack and returns to caller
+// If we have subroutine context, wire back to return point
+//
+BasicBlock* CFGBuilder::handleReturn(const ReturnStatement& stmt, BasicBlock* incoming,
+                                     SubroutineContext* sub) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling RETURN statement" << std::endl;
+    }
+    
+    // Add RETURN statement to current block
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // RETURN is a terminator - it pops the call stack and returns to caller
+    if (sub && sub->returnBlockId >= 0) {
+        // We're inside a GOSUB context - return to the caller's return point
+        addUnconditionalEdge(incoming->id, sub->returnBlockId);
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] RETURN jumps to return point block " << sub->returnBlockId << std::endl;
+        }
+    } else {
+        // RETURN from GOSUB - create a RETURN edge (no static target)
+        // The code generator will emit runtime dispatch based on return stack
+        CFGEdge edge;
+        edge.sourceBlock = incoming->id;
+        edge.targetBlock = -1;  // No static target - determined at runtime
+        edge.type = EdgeType::RETURN;
+        edge.label = "return";
+        m_cfg->edges.push_back(edge);
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] RETURN creates dynamic return edge (GOSUB dispatch)" << std::endl;
+        }
+    }
+    
+    // Mark as terminator
+    // RETURN is a terminator - no fallthrough
+    markTerminated(incoming);
+    
+    // Return the terminated block - caller will create unreachable block if needed
+    return incoming;
+}
+
+// =============================================================================
+// ON...GOTO Handler (Computed GOTO)
+// =============================================================================
+//
+// ON expression GOTO line1, line2, line3, ...
+// Jumps to one of N targets based on expression value (1-indexed)
+// If out of range, falls through to next statement
+//
+BasicBlock* CFGBuilder::handleOnGoto(const OnGotoStatement& stmt, BasicBlock* incoming) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling ON...GOTO with " << stmt.lineNumbers.size() 
+                  << " targets" << std::endl;
+    }
+    
+    // Add ON GOTO statement to current block
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // ON GOTO is NOT a terminator! If the selector is out of range, 
+    // execution falls through to the next statement
+    
+    // Create fallthrough block for out-of-range case
+    BasicBlock* fallthroughBlock = createBlock("OnGoto_Fallthrough");
+    
+    // Add conditional edges to all targets
+    for (size_t i = 0; i < stmt.lineNumbers.size(); i++) {
+        int targetLine = stmt.lineNumbers[i];
+        int targetBlockId = resolveLineNumberToBlock(targetLine);
+        
+        if (targetBlockId >= 0) {
+            // Target already exists
+            addConditionalEdge(incoming->id, targetBlockId, 
+                             "case_" + std::to_string(i + 1));
+            
+            if (m_debugMode) {
+                std::cout << "[CFG] ON GOTO case " << (i + 1) 
+                          << " -> block " << targetBlockId << std::endl;
+            }
+        } else {
+            // Forward reference - defer
+            DeferredEdge edge;
+            edge.sourceBlockId = incoming->id;
+            edge.targetLineNumber = targetLine;
+            edge.label = "case_" + std::to_string(i + 1);
+            m_deferredEdges.push_back(edge);
+            
+            if (m_debugMode) {
+                std::cout << "[CFG] Deferred ON GOTO case " << (i + 1) 
+                          << " to line " << targetLine << std::endl;
+            }
+        }
+    }
+    
+    // Add fallthrough edge for out-of-range selector
+    addConditionalEdge(incoming->id, fallthroughBlock->id, "default");
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] ON...GOTO from block " << incoming->id 
+                  << " with fallthrough to " << fallthroughBlock->id << std::endl;
+    }
+    
+    return fallthroughBlock;
+}
+
+// =============================================================================
+// ON...GOSUB Handler (Computed GOSUB)
+// =============================================================================
+//
+// ON expression GOSUB line1, line2, line3, ...
+// Calls one of N subroutines based on expression value (1-indexed)
+// Always continues to next statement (after RETURN or if out of range)
+//
+BasicBlock* CFGBuilder::handleOnGosub(const OnGosubStatement& stmt, BasicBlock* incoming,
+                                     LoopContext* loop, SelectContext* select,
+                                     TryContext* tryCtx, SubroutineContext* outerSub) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling ON...GOSUB with " << stmt.lineNumbers.size() 
+                  << " targets" << std::endl;
+    }
+    
+    // Add ON GOSUB statement to current block
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // ON GOSUB is like multiple GOSUB calls with a selector
+    // It always continues to the next statement (either after RETURN or if out of range)
+    
+    // Create return point block
+    BasicBlock* returnBlock = createBlock("OnGosub_Return_Point");
+    
+    // Track this block as a GOSUB return point for sparse dispatch optimization
+    m_cfg->gosubReturnBlocks.insert(returnBlock->id);
+    
+    // Add call edges to all targets
+    for (size_t i = 0; i < stmt.lineNumbers.size(); i++) {
+        int targetLine = stmt.lineNumbers[i];
+        int targetBlockId = resolveLineNumberToBlock(targetLine);
+        
+        if (targetBlockId >= 0) {
+            // Target already exists
+            addConditionalEdge(incoming->id, targetBlockId, 
+                             "call_" + std::to_string(i + 1));
+            
+            if (m_debugMode) {
+                std::cout << "[CFG] ON GOSUB case " << (i + 1) 
+                          << " -> block " << targetBlockId << std::endl;
+            }
+        } else {
+            // Forward reference - defer
+            DeferredEdge edge;
+            edge.sourceBlockId = incoming->id;
+            edge.targetLineNumber = targetLine;
+            edge.label = "call_" + std::to_string(i + 1);
+            m_deferredEdges.push_back(edge);
+            
+            if (m_debugMode) {
+                std::cout << "[CFG] Deferred ON GOSUB case " << (i + 1) 
+                          << " to line " << targetLine << std::endl;
+            }
+        }
+    }
+    
+    // All paths (call + return, or out-of-range) lead to return block
+    addUnconditionalEdge(incoming->id, returnBlock->id);
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] ON...GOSUB from block " << incoming->id 
+                  << " with return point " << returnBlock->id << std::endl;
+    }
+    
+    return returnBlock;
+}
+
+// =============================================================================
+// EXIT Statement Handler (Unified Dispatcher)
+// =============================================================================
+//
+// Dispatches to specific EXIT handler based on exit type
+//
+BasicBlock* CFGBuilder::handleExit(const ExitStatement& stmt, BasicBlock* incoming,
+                                   LoopContext* loop, SelectContext* select) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling EXIT statement" << std::endl;
+    }
+    
+    // Add EXIT statement to current block
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // Dispatch based on exit type
+    switch (stmt.exitType) {
+        case ExitStatement::ExitType::FOR_LOOP:
+            return handleExitFor(incoming, loop);
+            
+        case ExitStatement::ExitType::WHILE_LOOP:
+            return handleExitWhile(incoming, loop);
+            
+        case ExitStatement::ExitType::DO_LOOP:
+            return handleExitDo(incoming, loop);
+            
+        case ExitStatement::ExitType::REPEAT_LOOP:
+            // REPEAT loops use same exit mechanism as DO loops
+            return handleExitDo(incoming, loop);
+            
+        case ExitStatement::ExitType::FUNCTION:
+        case ExitStatement::ExitType::SUB:
+            // Function/Sub exit - just mark as terminator
+            markTerminated(incoming);
+            return incoming;
+            
+        default:
+            if (m_debugMode) {
+                std::cout << "[CFG] Warning: Unknown EXIT type" << std::endl;
+            }
+            markTerminated(incoming);
+            return incoming;
+    }
+}
+
+// =============================================================================
+// EXIT FOR Handler
+// =============================================================================
+//
+// Exits the current FOR loop - jumps to loop exit block
+//
+BasicBlock* CFGBuilder::handleExitFor(BasicBlock* incoming, LoopContext* loop) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling EXIT FOR" << std::endl;
+    }
+    
+    // Find the innermost FOR loop
+    LoopContext* forLoop = findLoopContext(loop, "FOR");
+    
+    if (!forLoop || forLoop->exitBlockId < 0) {
+        if (m_debugMode) {
+            std::cout << "[CFG] Warning: EXIT FOR outside of FOR loop" << std::endl;
+        }
+        markTerminated(incoming);
+        return incoming;
+    }
+    
+    // Jump to loop exit
+    addUnconditionalEdge(incoming->id, forLoop->exitBlockId);
+    markTerminated(incoming);
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] EXIT FOR from block " << incoming->id 
+                  << " to exit block " << forLoop->exitBlockId << std::endl;
+    }
+    
+    return incoming;
+}
+
+// =============================================================================
+// EXIT WHILE Handler
+// =============================================================================
+//
+// Exits the current WHILE loop - jumps to loop exit block
+//
+BasicBlock* CFGBuilder::handleExitWhile(BasicBlock* incoming, LoopContext* loop) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling EXIT WHILE" << std::endl;
+    }
+    
+    // Find the innermost WHILE loop
+    LoopContext* whileLoop = findLoopContext(loop, "WHILE");
+    
+    if (!whileLoop || whileLoop->exitBlockId < 0) {
+        if (m_debugMode) {
+            std::cout << "[CFG] Warning: EXIT WHILE outside of WHILE loop" << std::endl;
+        }
+        markTerminated(incoming);
+        return incoming;
+    }
+    
+    // Jump to loop exit
+    addUnconditionalEdge(incoming->id, whileLoop->exitBlockId);
+    markTerminated(incoming);
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] EXIT WHILE from block " << incoming->id 
+                  << " to exit block " << whileLoop->exitBlockId << std::endl;
+    }
+    
+    return incoming;
+}
+
+// =============================================================================
+// EXIT DO Handler
+// =============================================================================
+//
+// Exits the current DO loop - jumps to loop exit block
+//
+BasicBlock* CFGBuilder::handleExitDo(BasicBlock* incoming, LoopContext* loop) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling EXIT DO" << std::endl;
+    }
+    
+    // Find the innermost DO loop
+    LoopContext* doLoop = findLoopContext(loop, "DO");
+    
+    if (!doLoop || doLoop->exitBlockId < 0) {
+        if (m_debugMode) {
+            std::cout << "[CFG] Warning: EXIT DO outside of DO loop" << std::endl;
+        }
+        markTerminated(incoming);
+        return incoming;
+    }
+    
+    // Jump to loop exit
+    addUnconditionalEdge(incoming->id, doLoop->exitBlockId);
+    markTerminated(incoming);
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] EXIT DO from block " << incoming->id 
+                  << " to exit block " << doLoop->exitBlockId << std::endl;
+    }
+    
+    return incoming;
+}
+
+// =============================================================================
+// EXIT SELECT Handler
+// =============================================================================
+//
+// Exits the current SELECT CASE - jumps to select exit block
+//
+BasicBlock* CFGBuilder::handleExitSelect(BasicBlock* incoming, SelectContext* select) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling EXIT SELECT" << std::endl;
+    }
+    
+    if (!select || select->exitBlockId < 0) {
+        if (m_debugMode) {
+            std::cout << "[CFG] Warning: EXIT SELECT outside of SELECT CASE" << std::endl;
+        }
+        markTerminated(incoming);
+        return incoming;
+    }
+    
+    // Jump to select exit
+    addUnconditionalEdge(incoming->id, select->exitBlockId);
+    markTerminated(incoming);
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] EXIT SELECT from block " << incoming->id 
+                  << " to exit block " << select->exitBlockId << std::endl;
+    }
+    
+    return incoming;
+}
+
+// =============================================================================
+// CONTINUE Handler
+// =============================================================================
+//
+// Jumps back to loop header (for languages that support CONTINUE)
+//
+BasicBlock* CFGBuilder::handleContinue(BasicBlock* incoming, LoopContext* loop) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling CONTINUE" << std::endl;
+    }
+    
+    if (!loop || loop->headerBlockId < 0) {
+        if (m_debugMode) {
+            std::cout << "[CFG] Warning: CONTINUE outside of loop" << std::endl;
+        }
+        markTerminated(incoming);
+        return incoming;
+    }
+    
+    // Jump to loop header
+    addUnconditionalEdge(incoming->id, loop->headerBlockId);
+    markTerminated(incoming);
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] CONTINUE from block " << incoming->id 
+                  << " to header block " << loop->headerBlockId << std::endl;
+    }
+    
+    return incoming;
+}
+
+// =============================================================================
+// END Handler
+// =============================================================================
+//
+// END statement terminates program execution
+//
+BasicBlock* CFGBuilder::handleEnd(const EndStatement& stmt, BasicBlock* incoming) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling END statement - jumping to exit" << std::endl;
+    }
+    
+    // Add END statement to current block
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // END jumps to the program exit block (if it exists)
+    if (m_exitBlock) {
+        addUnconditionalEdge(incoming->id, m_exitBlock->id);
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] END in block " << incoming->id << " jumps to exit block " << m_exitBlock->id << std::endl;
+        }
+    }
+    
+    // Mark as terminated so no fall-through
+    markTerminated(incoming);
+    
+    // Return the terminated block - caller will create unreachable block if needed
+    return incoming;
+}
+
+// =============================================================================
+// THROW Handler
+// =============================================================================
+//
+// THROW statement raises an exception
+// If we're in a TRY context, jumps to catch block
+// Otherwise, terminates (unhandled exception)
+//
+BasicBlock* CFGBuilder::handleThrow(const ThrowStatement& stmt, BasicBlock* incoming,
+                                    TryContext* tryCtx) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling THROW statement" << std::endl;
+    }
+    
+    // Add THROW statement to current block
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // THROW is a terminator - control goes to exception handler
+    if (tryCtx && tryCtx->catchBlockId >= 0) {
+        // We're inside a TRY context - jump to catch block
+        addUnconditionalEdge(incoming->id, tryCtx->catchBlockId);
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] THROW jumps to catch block " << tryCtx->catchBlockId << std::endl;
+        }
+    } else {
+        // No TRY context - unhandled exception (program terminates)
+        if (m_debugMode) {
+            std::cout << "[CFG] Warning: THROW outside of TRY context (unhandled exception)" << std::endl;
+        }
+    }
+    
+    // Mark as terminator
+    // THROW is a terminator - no fallthrough
+    markTerminated(incoming);
+    
+    // Return the terminated block - caller will create unreachable block if needed
+    return incoming;
+}
+
+} // namespace FasterBASIC
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_builder_jumptargets.cpp
+================================================================================
+
+//
+// cfg_builder_jumptargets.cpp
+// FasterBASIC - Control Flow Graph Builder Jump Target Collection (V2)
+//
+// Contains Phase 0 jump target pre-scan to identify GOTO/GOSUB landing zones.
+// Part of modular CFG builder split (February 2026).
+//
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
+//
+
+#include "cfg_builder.h"
+#include <iostream>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// Jump Target Collection (Phase 0)
+// =============================================================================
+//
+// Before building the CFG, we need to know which line numbers are jump targets
+// (GOTO/GOSUB destinations). This allows us to start new blocks at those lines.
+//
+
+void CFGBuilder::collectJumpTargets(const std::vector<StatementPtr>& statements) {
+    for (const auto& stmt : statements) {
+        if (stmt) {
+            collectJumpTargetsFromStatement(stmt.get());
+        }
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Collected " << m_jumpTargets.size() << " jump targets" << std::endl;
+    }
+}
+
+void CFGBuilder::collectJumpTargetsFromProgram(const Program& program) {
+    for (const auto& line : program.lines) {
+        for (const auto& stmt : line->statements) {
+            if (stmt) {
+                collectJumpTargetsFromStatement(stmt.get());
+            }
+        }
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Collected " << m_jumpTargets.size() << " jump targets from program" << std::endl;
+    }
+}
+
+void CFGBuilder::collectJumpTargetsFromStatement(const Statement* stmt) {
+    if (!stmt) return;
+    
+    // Check for GOTO statement
+    if (auto* gotoStmt = dynamic_cast<const GotoStatement*>(stmt)) {
+        m_jumpTargets.insert(gotoStmt->lineNumber);
+        if (m_debugMode) {
+            std::cout << "[CFG] Found GOTO target: line " << gotoStmt->lineNumber << std::endl;
+        }
+        return;
+    }
+    
+    // Check for GOSUB statement
+    if (auto* gosubStmt = dynamic_cast<const GosubStatement*>(stmt)) {
+        m_jumpTargets.insert(gosubStmt->lineNumber);
+        if (m_debugMode) {
+            std::cout << "[CFG] Found GOSUB target: line " << gosubStmt->lineNumber << std::endl;
+        }
+        return;
+    }
+    
+    // Check for ON GOTO statement
+    if (auto* onGotoStmt = dynamic_cast<const OnGotoStatement*>(stmt)) {
+        for (int target : onGotoStmt->lineNumbers) {
+            m_jumpTargets.insert(target);
+            if (m_debugMode) {
+                std::cout << "[CFG] Found ON GOTO target: line " << target << std::endl;
+            }
+        }
+        return;
+    }
+    
+    // Check for ON GOSUB statement
+    if (auto* onGosubStmt = dynamic_cast<const OnGosubStatement*>(stmt)) {
+        for (int target : onGosubStmt->lineNumbers) {
+            m_jumpTargets.insert(target);
+            if (m_debugMode) {
+                std::cout << "[CFG] Found ON GOSUB target: line " << target << std::endl;
+            }
+        }
+        return;
+    }
+    
+    // Recursively scan structured statements for nested GOTOs/GOSUBs
+    
+    if (auto* ifStmt = dynamic_cast<const IfStatement*>(stmt)) {
+        for (const auto& thenStmt : ifStmt->thenStatements) {
+            collectJumpTargetsFromStatement(thenStmt.get());
+        }
+        for (const auto& elseStmt : ifStmt->elseStatements) {
+            collectJumpTargetsFromStatement(elseStmt.get());
+        }
+        return;
+    }
+    
+    if (auto* whileStmt = dynamic_cast<const WhileStatement*>(stmt)) {
+        for (const auto& bodyStmt : whileStmt->body) {
+            collectJumpTargetsFromStatement(bodyStmt.get());
+        }
+        return;
+    }
+    
+    if (auto* forStmt = dynamic_cast<const ForStatement*>(stmt)) {
+        for (const auto& bodyStmt : forStmt->body) {
+            collectJumpTargetsFromStatement(bodyStmt.get());
+        }
+        return;
+    }
+    
+    if (auto* repeatStmt = dynamic_cast<const RepeatStatement*>(stmt)) {
+        for (const auto& bodyStmt : repeatStmt->body) {
+            collectJumpTargetsFromStatement(bodyStmt.get());
+        }
+        return;
+    }
+    
+    if (auto* doStmt = dynamic_cast<const DoStatement*>(stmt)) {
+        for (const auto& bodyStmt : doStmt->body) {
+            collectJumpTargetsFromStatement(bodyStmt.get());
+        }
+        return;
+    }
+    
+    if (auto* selectStmt = dynamic_cast<const CaseStatement*>(stmt)) {
+        // Scan WHEN clauses for GOTOs
+        for (const auto& whenClause : selectStmt->whenClauses) {
+            for (const auto& whenStmt : whenClause.statements) {
+                collectJumpTargetsFromStatement(whenStmt.get());
+            }
+        }
+        // Scan OTHERWISE clause
+        for (const auto& otherwiseStmt : selectStmt->otherwiseStatements) {
+            collectJumpTargetsFromStatement(otherwiseStmt.get());
+        }
+        return;
+    }
+    
+    if (auto* tryStmt = dynamic_cast<const TryCatchStatement*>(stmt)) {
+        // Scan try block
+        for (const auto& tryBlockStmt : tryStmt->tryBlock) {
+            collectJumpTargetsFromStatement(tryBlockStmt.get());
+        }
+        // Scan catch clauses
+        for (const auto& catchClause : tryStmt->catchClauses) {
+            for (const auto& catchStmt : catchClause.block) {
+                collectJumpTargetsFromStatement(catchStmt.get());
+            }
+        }
+        // Scan finally block if present
+        for (const auto& finallyStmt : tryStmt->finallyBlock) {
+            collectJumpTargetsFromStatement(finallyStmt.get());
+        }
+        return;
+    }
+    
+    // Other statements don't contain jump targets or nested structures
+}
+
+bool CFGBuilder::isJumpTarget(int lineNumber) const {
+    return m_jumpTargets.find(lineNumber) != m_jumpTargets.end();
+}
+
+// =============================================================================
+// Line Number and Label Resolution
+// =============================================================================
+
+int CFGBuilder::resolveLineNumberToBlock(int lineNumber) {
+    auto it = m_lineNumberToBlock.find(lineNumber);
+    if (it != m_lineNumberToBlock.end()) {
+        return it->second;
+    }
+    
+    // Line number not yet seen - will be resolved later
+    if (m_debugMode) {
+        std::cout << "[CFG] Line " << lineNumber << " not yet mapped (forward reference)" << std::endl;
+    }
+    return -1;
+}
+
+void CFGBuilder::registerLineNumberBlock(int lineNumber, int blockId) {
+    m_lineNumberToBlock[lineNumber] = blockId;
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Registered line " << lineNumber << " -> block " << blockId << std::endl;
+    }
+}
+
+void CFGBuilder::registerLabel(const std::string& label, int blockId) {
+    m_labelToBlock[label] = blockId;
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Registered label '" << label << "' -> block " << blockId << std::endl;
+    }
+}
+
+int CFGBuilder::resolveLabelToBlock(const std::string& label) {
+    auto it = m_labelToBlock.find(label);
+    if (it != m_labelToBlock.end()) {
+        return it->second;
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Label '" << label << "' not found" << std::endl;
+    }
+    return -1;
+}
+
+// =============================================================================
+// Deferred Edge Resolution
+// =============================================================================
+
+void CFGBuilder::resolveDeferredEdges() {
+    if (m_deferredEdges.empty()) {
+        return;
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] Resolving " << m_deferredEdges.size() << " deferred edges" << std::endl;
+    }
+    
+    // Resolve forward references (GOTOs to later line numbers)
+    for (const auto& deferred : m_deferredEdges) {
+        int targetBlock = resolveLineNumberToBlock(deferred.targetLineNumber);
+        if (targetBlock >= 0) {
+            addEdge(deferred.sourceBlockId, targetBlock, deferred.label);
+            
+            if (m_debugMode) {
+                std::cout << "[CFG] Resolved deferred edge: block " << deferred.sourceBlockId
+                          << " -> line " << deferred.targetLineNumber 
+                          << " (block " << targetBlock << ")" << std::endl;
+            }
+        } else {
+            if (m_debugMode) {
+                std::cout << "[CFG] Warning: Could not resolve line number " 
+                          << deferred.targetLineNumber << " for deferred edge" << std::endl;
+            }
+        }
+    }
+}
+
+} // namespace FasterBASIC
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_builder_loops.cpp
+================================================================================
+
+//
+// cfg_builder_loops.cpp
+// FasterBASIC - Control Flow Graph Builder Loop Handlers (V2)
+//
+// Contains FOR, WHILE, REPEAT, and DO loop processing.
+// Part of modular CFG builder split (February 2026).
+//
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
+//
+
+#include "cfg_builder.h"
+#include <iostream>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// WHILE Loop Handler (Pre-test loop)
+// =============================================================================
+//
+// WHILE loop structure:
+// incoming -> header [condition check]
+//             header -> body [true]
+//             header -> exit [false]
+//             body -> header [back-edge]
+//             return exit
+//
+// Key: Back-edge is created immediately after building body!
+//
+BasicBlock* CFGBuilder::buildWhile(
+    const WhileStatement& stmt,
+    BasicBlock* incoming,
+    LoopContext* outerLoop,
+    SelectContext* select,
+    TryContext* tryCtx,
+    SubroutineContext* sub
+) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building WHILE loop" << std::endl;
+    }
+    
+    // 1. Create blocks
+    BasicBlock* headerBlock = createBlock("While_Header");
+    BasicBlock* bodyBlock = createBlock("While_Body");
+    BasicBlock* exitBlock = createBlock("While_Exit");
+    
+    headerBlock->isLoopHeader = true;
+    exitBlock->isLoopExit = true;
+    
+    // 2. Wire incoming to header
+    if (!isTerminated(incoming)) {
+        addUnconditionalEdge(incoming->id, headerBlock->id);
+    }
+    
+    // 3. Add condition check to header
+    addStatementToBlock(headerBlock, &stmt, getLineNumber(&stmt));
+    
+    // 4. Wire header to body (true) and exit (false)
+    addConditionalEdge(headerBlock->id, bodyBlock->id, "true");
+    addConditionalEdge(headerBlock->id, exitBlock->id, "false");
+    
+    // 5. Create loop context for EXIT WHILE and nested loops
+    LoopContext loopCtx;
+    loopCtx.headerBlockId = headerBlock->id;
+    loopCtx.exitBlockId = exitBlock->id;
+    loopCtx.loopType = "WHILE";
+    loopCtx.outerLoop = outerLoop;
+    
+    // 6. Recursively build loop body
+    // KEY FIX: Use the body field from the AST (pre-parsed by parser)
+    // This handles nested structures automatically!
+    BasicBlock* bodyExit = buildStatementRange(
+        stmt.body,
+        bodyBlock,
+        &loopCtx,  // Pass loop context to nested statements
+        select,
+        tryCtx,
+        sub
+    );
+    
+    // 7. Wire body exit back to header (back-edge)
+    // This is created immediately, not deferred!
+    if (!isTerminated(bodyExit)) {
+        addUnconditionalEdge(bodyExit->id, headerBlock->id);
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] WHILE loop complete, exit block: " << exitBlock->id << std::endl;
+    }
+    
+    // 8. Return exit block for next statement
+    return exitBlock;
+}
+
+// =============================================================================
+// FOR Loop Handler (Pre-test loop with initialization)
+// =============================================================================
+//
+// FOR loop structure:
+// incoming -> init [var = start]
+//             init -> header [condition check: var <= end or var >= end]
+//             header -> body [true]
+//             header -> exit [false]
+//             body -> increment [var = var + step]
+//             increment -> header [back-edge]
+//             return exit
+//
+BasicBlock* CFGBuilder::buildFor(
+    const ForStatement& stmt,
+    BasicBlock* incoming,
+    LoopContext* outerLoop,
+    SelectContext* select,
+    TryContext* tryCtx,
+    SubroutineContext* sub
+) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building FOR loop" << std::endl;
+    }
+    
+    // 1. Create blocks
+    BasicBlock* initBlock = createBlock("For_Init");
+    BasicBlock* headerBlock = createBlock("For_Header");
+    BasicBlock* bodyBlock = createBlock("For_Body");
+    BasicBlock* incrementBlock = createBlock("For_Increment");
+    BasicBlock* exitBlock = createBlock("For_Exit");
+    
+    headerBlock->isLoopHeader = true;
+    exitBlock->isLoopExit = true;
+    
+    // 2. Wire incoming to init
+    if (!isTerminated(incoming)) {
+        addUnconditionalEdge(incoming->id, initBlock->id);
+    }
+    
+    // 3. Add initialization to init block (var = start value)
+    // This represents: FOR i = 1 TO 10
+    addStatementToBlock(initBlock, &stmt, getLineNumber(&stmt));
+    
+    // 4. Wire init to header
+    addUnconditionalEdge(initBlock->id, headerBlock->id);
+    
+    // 5. Header contains the loop condition check (i <= 10 or i >= 10 depending on STEP)
+    // Wire header to body (true) and exit (false)
+    addConditionalEdge(headerBlock->id, bodyBlock->id, "true");
+    addConditionalEdge(headerBlock->id, exitBlock->id, "false");
+    
+    // 6. Create loop context for EXIT FOR and nested loops
+    LoopContext loopCtx;
+    loopCtx.headerBlockId = headerBlock->id;
+    loopCtx.exitBlockId = exitBlock->id;
+    loopCtx.loopType = "FOR";
+    loopCtx.outerLoop = outerLoop;
+    
+    // 7. Recursively build loop body
+    BasicBlock* bodyExit = buildStatementRange(
+        stmt.body,
+        bodyBlock,
+        &loopCtx,
+        select,
+        tryCtx,
+        sub
+    );
+    
+    // 8. Wire body exit to increment block (if not terminated)
+    if (!isTerminated(bodyExit)) {
+        addUnconditionalEdge(bodyExit->id, incrementBlock->id);
+    }
+    
+    // 9. Increment block contains: var = var + STEP
+    // Then wire back to header (back-edge)
+    addUnconditionalEdge(incrementBlock->id, headerBlock->id);
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] FOR loop complete, exit block: " << exitBlock->id << std::endl;
+    }
+    
+    // 10. Return exit block for next statement
+    return exitBlock;
+}
+
+// =============================================================================
+// REPEAT Loop Handler (Post-test loop)
+// =============================================================================
+//
+// REPEAT...UNTIL loop structure:
+// incoming -> body
+//             body -> condition [check at end]
+//             condition -> body [false - continue looping]
+//             condition -> exit [true - condition met]
+//             return exit
+//
+// KEY DIFFERENCE FROM WHILE: Body executes at least once!
+//
+BasicBlock* CFGBuilder::buildRepeat(
+    const RepeatStatement& stmt,
+    BasicBlock* incoming,
+    LoopContext* outerLoop,
+    SelectContext* select,
+    TryContext* tryCtx,
+    SubroutineContext* sub
+) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building REPEAT loop (post-test)" << std::endl;
+    }
+    
+    // 1. Create blocks
+    BasicBlock* bodyBlock = createBlock("Repeat_Body");
+    BasicBlock* conditionBlock = createBlock("Repeat_Condition");
+    BasicBlock* exitBlock = createBlock("Repeat_Exit");
+    
+    bodyBlock->isLoopHeader = true;  // Body is the "header" for post-test
+    exitBlock->isLoopExit = true;
+    
+    // 2. Wire incoming to body (executes at least once)
+    if (!isTerminated(incoming)) {
+        addUnconditionalEdge(incoming->id, bodyBlock->id);
+    }
+    
+    // 3. Create loop context for EXIT and nested loops
+    // Use condition block as "header" for CONTINUE-like semantics
+    LoopContext loopCtx;
+    loopCtx.headerBlockId = conditionBlock->id;
+    loopCtx.exitBlockId = exitBlock->id;
+    loopCtx.loopType = "REPEAT";
+    loopCtx.outerLoop = outerLoop;
+    
+    // 4. Recursively build loop body (using body field from AST)
+    BasicBlock* bodyExit = buildStatementRange(
+        stmt.body,
+        bodyBlock,
+        &loopCtx,
+        select,
+        tryCtx,
+        sub
+    );
+    
+    // 5. Wire body exit to condition block (if not terminated)
+    if (!isTerminated(bodyExit)) {
+        addUnconditionalEdge(bodyExit->id, conditionBlock->id);
+    }
+    
+    // 6. Add UNTIL condition check to condition block
+    // The condition is stored in RepeatStatement.condition
+    addStatementToBlock(conditionBlock, &stmt, getLineNumber(&stmt));
+    
+    // 7. Wire condition to exit (true) and back to body (false)
+    // UNTIL means: exit when condition is TRUE
+    addConditionalEdge(conditionBlock->id, exitBlock->id, "true");
+    addConditionalEdge(conditionBlock->id, bodyBlock->id, "false");
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] REPEAT loop complete, exit block: " << exitBlock->id << std::endl;
+    }
+    
+    // 8. Return exit block for next statement
+    return exitBlock;
+}
+
+// =============================================================================
+// DO Loop Handler (Multiple variants)
+// =============================================================================
+//
+// DO loop has multiple variants:
+// 1. DO WHILE condition ... LOOP (pre-test, continue while true)
+// 2. DO UNTIL condition ... LOOP (pre-test, continue until true)
+// 3. DO ... LOOP WHILE condition (post-test, continue while true)
+// 4. DO ... LOOP UNTIL condition (post-test, continue until true)
+// 5. DO ... LOOP (infinite loop, needs EXIT DO)
+//
+BasicBlock* CFGBuilder::buildDo(
+    const DoStatement& stmt,
+    BasicBlock* incoming,
+    LoopContext* outerLoop,
+    SelectContext* select,
+    TryContext* tryCtx,
+    SubroutineContext* sub
+) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Building DO loop" << std::endl;
+    }
+    
+    // Determine loop variant from AST
+    bool hasPreCondition = (stmt.preConditionType != DoStatement::ConditionType::NONE);
+    bool hasPostCondition = (stmt.postConditionType != DoStatement::ConditionType::NONE);
+    bool isPreWhile = (stmt.preConditionType == DoStatement::ConditionType::WHILE);
+    bool isPostWhile = (stmt.postConditionType == DoStatement::ConditionType::WHILE);
+    
+    if (hasPreCondition) {
+        // =====================================================================
+        // PRE-TEST VARIANT (like WHILE)
+        // =====================================================================
+        // incoming -> header [condition check]
+        //             header -> body [condition met]
+        //             header -> exit [condition not met]
+        //             body -> header [back-edge]
+        
+        BasicBlock* headerBlock = createBlock("Do_Header");
+        BasicBlock* bodyBlock = createBlock("Do_Body");
+        BasicBlock* exitBlock = createBlock("Do_Exit");
+        
+        headerBlock->isLoopHeader = true;
+        exitBlock->isLoopExit = true;
+        
+        if (!isTerminated(incoming)) {
+            addUnconditionalEdge(incoming->id, headerBlock->id);
+        }
+        
+        addStatementToBlock(headerBlock, &stmt, getLineNumber(&stmt));
+        
+        // Wire header to body and exit based on WHILE vs UNTIL
+        if (isPreWhile) {
+            // DO WHILE: continue when true
+            addConditionalEdge(headerBlock->id, bodyBlock->id, "true");
+            addConditionalEdge(headerBlock->id, exitBlock->id, "false");
+        } else {
+            // DO UNTIL: continue when false (exit when true)
+            addConditionalEdge(headerBlock->id, bodyBlock->id, "false");
+            addConditionalEdge(headerBlock->id, exitBlock->id, "true");
+        }
+        
+        LoopContext loopCtx;
+        loopCtx.headerBlockId = headerBlock->id;
+        loopCtx.exitBlockId = exitBlock->id;
+        loopCtx.loopType = "DO";
+        loopCtx.outerLoop = outerLoop;
+        
+        BasicBlock* bodyExit = buildStatementRange(
+            stmt.body,
+            bodyBlock,
+            &loopCtx,
+            select,
+            tryCtx,
+            sub
+        );
+        
+        if (!isTerminated(bodyExit)) {
+            addUnconditionalEdge(bodyExit->id, headerBlock->id);
+        }
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] DO (pre-test) loop complete, exit block: " << exitBlock->id << std::endl;
+        }
+        
+        return exitBlock;
+        
+    } else if (hasPostCondition) {
+        // =====================================================================
+        // POST-TEST VARIANT (like REPEAT)
+        // =====================================================================
+        // incoming -> body
+        //             body -> condition [check at end]
+        //             condition -> body [condition met]
+        //             condition -> exit [condition not met]
+        
+        BasicBlock* bodyBlock = createBlock("Do_Body");
+        BasicBlock* conditionBlock = createBlock("Do_Condition");
+        BasicBlock* exitBlock = createBlock("Do_Exit");
+        
+        bodyBlock->isLoopHeader = true;
+        exitBlock->isLoopExit = true;
+        
+        if (!isTerminated(incoming)) {
+            addUnconditionalEdge(incoming->id, bodyBlock->id);
+        }
+        
+        LoopContext loopCtx;
+        loopCtx.headerBlockId = conditionBlock->id;
+        loopCtx.exitBlockId = exitBlock->id;
+        loopCtx.loopType = "DO";
+        loopCtx.outerLoop = outerLoop;
+        
+        BasicBlock* bodyExit = buildStatementRange(
+            stmt.body,
+            bodyBlock,
+            &loopCtx,
+            select,
+            tryCtx,
+            sub
+        );
+        
+        if (!isTerminated(bodyExit)) {
+            addUnconditionalEdge(bodyExit->id, conditionBlock->id);
+        }
+        
+        addStatementToBlock(conditionBlock, &stmt, getLineNumber(&stmt));
+        
+        // Wire condition based on WHILE vs UNTIL
+        if (isPostWhile) {
+            // LOOP WHILE: continue when true
+            addConditionalEdge(conditionBlock->id, bodyBlock->id, "true");
+            addConditionalEdge(conditionBlock->id, exitBlock->id, "false");
+        } else {
+            // LOOP UNTIL: continue when false (exit when true)
+            addConditionalEdge(conditionBlock->id, exitBlock->id, "true");
+            addConditionalEdge(conditionBlock->id, bodyBlock->id, "false");
+        }
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] DO (post-test) loop complete, exit block: " << exitBlock->id << std::endl;
+        }
+        
+        return exitBlock;
+        
+    } else {
+        // =====================================================================
+        // INFINITE LOOP VARIANT: DO ... LOOP (no condition)
+        // =====================================================================
+        // incoming -> body
+        //             body -> body [back-edge]
+        //             exit block is created but only reachable via EXIT DO
+        
+        BasicBlock* bodyBlock = createBlock("Do_Body");
+        BasicBlock* exitBlock = createBlock("Do_Exit");
+        
+        bodyBlock->isLoopHeader = true;
+        exitBlock->isLoopExit = true;
+        
+        if (!isTerminated(incoming)) {
+            addUnconditionalEdge(incoming->id, bodyBlock->id);
+        }
+        
+        LoopContext loopCtx;
+        loopCtx.headerBlockId = bodyBlock->id;
+        loopCtx.exitBlockId = exitBlock->id;
+        loopCtx.loopType = "DO";
+        loopCtx.outerLoop = outerLoop;
+        
+        BasicBlock* bodyExit = buildStatementRange(
+            stmt.body,
+            bodyBlock,
+            &loopCtx,
+            select,
+            tryCtx,
+            sub
+        );
+        
+        if (!isTerminated(bodyExit)) {
+            // Infinite loop: back-edge to body
+            addUnconditionalEdge(bodyExit->id, bodyBlock->id);
+        }
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] DO (infinite) loop complete, exit block: " << exitBlock->id << std::endl;
+        }
+        
+        // Exit block is only reachable via EXIT DO
+        return exitBlock;
+    }
+}
+
+} // namespace FasterBASIC
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_builder_statements.cpp
+================================================================================
+
+//
+// cfg_builder_statements.cpp
+// FasterBASIC - Control Flow Graph Builder Statement Dispatcher (V2)
+//
+// Contains the recursive statement range builder - the heart of v2 architecture.
+// Part of modular CFG builder split (February 2026).
+//
+// V2 IMPLEMENTATION: Single-pass recursive construction with immediate edge wiring
+//
+
+#include "cfg_builder.h"
+#include <iostream>
+#include <stdexcept>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// Core Recursive Statement Range Builder
+// =============================================================================
+//
+// This is the heart of the v2 architecture. It processes statements one by one,
+// and when it encounters a control structure, it calls the appropriate builder
+// function which recursively handles the nested structure.
+//
+// The key insight: Each control structure builder returns the EXIT block where
+// control continues after that structure. This block becomes the "incoming"
+// block for the next statement.
+//
+BasicBlock* CFGBuilder::buildStatementRange(
+    const std::vector<StatementPtr>& statements,
+    BasicBlock* incoming,
+    LoopContext* currentLoop,
+    SelectContext* currentSelect,
+    TryContext* currentTry,
+    SubroutineContext* currentSub
+) {
+    if (!incoming) {
+        throw std::runtime_error("CFG: incoming block is null in buildStatementRange");
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] buildStatementRange: " << statements.size() 
+                  << " statements, incoming block " << incoming->id << std::endl;
+    }
+    
+    BasicBlock* currentBlock = incoming;
+    
+    // Process each statement in sequence
+    for (const auto& stmt : statements) {
+        if (!stmt) continue;
+        
+        // If current block is terminated (GOTO, RETURN, etc.),
+        // create a new unreachable block for subsequent statements
+        if (isTerminated(currentBlock)) {
+            if (m_debugMode) {
+                std::cout << "[CFG] Current block is terminated, creating unreachable block" << std::endl;
+            }
+            currentBlock = createUnreachableBlock();
+        }
+        
+        // Dispatch based on statement type using dynamic_cast
+        // Each builder returns the exit block for the next statement
+        
+        // =============================================================================
+        // Function/Subroutine Definitions (skip - handled at top level)
+        // =============================================================================
+        
+        // SUB, FUNCTION, and DEF FN definitions should not appear in nested contexts
+        // They are top-level declarations that are processed separately by buildProgramCFG()
+        if (dynamic_cast<const SubStatement*>(stmt.get()) ||
+            dynamic_cast<const FunctionStatement*>(stmt.get()) ||
+            dynamic_cast<const DefStatement*>(stmt.get())) {
+            if (m_debugMode) {
+                std::cout << "[CFG] Skipping function/sub definition (should be top-level)" << std::endl;
+            }
+            continue;
+        }
+        
+        // =============================================================================
+        // Control Structures (recursive builders)
+        // =============================================================================
+        
+        if (auto* ifStmt = dynamic_cast<const IfStatement*>(stmt.get())) {
+            currentBlock = buildIf(
+                *ifStmt,
+                currentBlock,
+                currentLoop,
+                currentSelect,
+                currentTry,
+                currentSub
+            );
+            continue;
+        }
+        
+        if (auto* whileStmt = dynamic_cast<const WhileStatement*>(stmt.get())) {
+            currentBlock = buildWhile(
+                *whileStmt,
+                currentBlock,
+                currentLoop,
+                currentSelect,
+                currentTry,
+                currentSub
+            );
+            continue;
+        }
+        
+        if (auto* forStmt = dynamic_cast<const ForStatement*>(stmt.get())) {
+            currentBlock = buildFor(
+                *forStmt,
+                currentBlock,
+                currentLoop,
+                currentSelect,
+                currentTry,
+                currentSub
+            );
+            continue;
+        }
+        
+        if (auto* repeatStmt = dynamic_cast<const RepeatStatement*>(stmt.get())) {
+            currentBlock = buildRepeat(
+                *repeatStmt,
+                currentBlock,
+                currentLoop,
+                currentSelect,
+                currentTry,
+                currentSub
+            );
+            continue;
+        }
+        
+        if (auto* doStmt = dynamic_cast<const DoStatement*>(stmt.get())) {
+            currentBlock = buildDo(
+                *doStmt,
+                currentBlock,
+                currentLoop,
+                currentSelect,
+                currentTry,
+                currentSub
+            );
+            continue;
+        }
+        
+        if (auto* selectStmt = dynamic_cast<const CaseStatement*>(stmt.get())) {
+            currentBlock = buildSelectCase(
+                *selectStmt,
+                currentBlock,
+                currentLoop,
+                currentSelect,
+                currentTry,
+                currentSub
+            );
+            continue;
+        }
+        
+        if (auto* tryStmt = dynamic_cast<const TryCatchStatement*>(stmt.get())) {
+            currentBlock = buildTryCatch(
+                *tryStmt,
+                currentBlock,
+                currentLoop,
+                currentSelect,
+                currentTry,
+                currentSub
+            );
+            continue;
+        }
+        
+        // =============================================================================
+        // Jump Statements (terminators)
+        // =============================================================================
+        
+        if (auto* gotoStmt = dynamic_cast<const GotoStatement*>(stmt.get())) {
+            currentBlock = handleGoto(*gotoStmt, currentBlock);
+            continue;
+        }
+        
+        if (auto* gosubStmt = dynamic_cast<const GosubStatement*>(stmt.get())) {
+            currentBlock = handleGosub(
+                *gosubStmt,
+                currentBlock,
+                currentLoop,
+                currentSelect,
+                currentTry,
+                currentSub
+            );
+            continue;
+        }
+        
+        if (auto* returnStmt = dynamic_cast<const ReturnStatement*>(stmt.get())) {
+            currentBlock = handleReturn(*returnStmt, currentBlock, currentSub);
+            continue;
+        }
+        
+        if (auto* onGotoStmt = dynamic_cast<const OnGotoStatement*>(stmt.get())) {
+            currentBlock = handleOnGoto(*onGotoStmt, currentBlock);
+            continue;
+        }
+        
+        if (auto* onGosubStmt = dynamic_cast<const OnGosubStatement*>(stmt.get())) {
+            currentBlock = handleOnGosub(
+                *onGosubStmt,
+                currentBlock,
+                currentLoop,
+                currentSelect,
+                currentTry,
+                currentSub
+            );
+            continue;
+        }
+        
+        // =============================================================================
+        // EXIT Statements (loop exits)
+        // =============================================================================
+        
+        if (auto* exitStmt = dynamic_cast<const ExitStatement*>(stmt.get())) {
+            // Dispatch based on exit type (no select parameter needed)
+            currentBlock = handleExit(*exitStmt, currentBlock, currentLoop, nullptr);
+            continue;
+        }
+        
+        // =============================================================================
+        // Special Statements
+        // =============================================================================
+        
+        if (auto* endStmt = dynamic_cast<const EndStatement*>(stmt.get())) {
+            currentBlock = handleEnd(*endStmt, currentBlock);
+            continue;
+        }
+        
+        if (auto* throwStmt = dynamic_cast<const ThrowStatement*>(stmt.get())) {
+            currentBlock = handleThrow(*throwStmt, currentBlock, currentTry);
+            continue;
+        }
+        
+        // =============================================================================
+        // Loop End Markers (skip - already handled by loop builders)
+        // =============================================================================
+        
+        if (dynamic_cast<const WendStatement*>(stmt.get()) ||
+            dynamic_cast<const NextStatement*>(stmt.get()) ||
+            dynamic_cast<const UntilStatement*>(stmt.get()) ||
+            dynamic_cast<const LoopStatement*>(stmt.get())) {
+            // These are end markers that the parser includes
+            // The v2 loop builders handle them implicitly via stmt.body
+            // So we skip them here
+            if (m_debugMode) {
+                std::cout << "[CFG] Skipping loop end marker statement" << std::endl;
+            }
+            continue;
+        }
+        
+        // =============================================================================
+        // Regular Statements (LET, PRINT, DIM, etc.)
+        // =============================================================================
+        // For all other statements, just add them to the current block
+        // These include: assignment, PRINT, INPUT, DIM, REDIM, function calls, etc.
+        
+        addStatementToBlock(currentBlock, stmt.get(), getLineNumber(stmt.get()));
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] Added regular statement to block " << currentBlock->id << std::endl;
+        }
+    }
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] buildStatementRange complete, exit block: " << currentBlock->id << std::endl;
+    }
+    
+    return currentBlock;
+}
+
+} // namespace FasterBASIC
+================================================================================
+FILE: fsh/FasterBASICT/src/cfg/cfg_comprehensive_dump.cpp
+================================================================================
+
+//
+// cfg_dump.cpp
+// FasterBASIC - Comprehensive Control Flow Graph Report Generator
+//
+// Generates detailed CFG reports with:
+// - Executive summary with key metrics
+// - Detailed block-by-block analysis
+// - Edge analysis and control flow patterns
+// - Unreachable code detection
+// - Complexity metrics
+// - Compact format for test validation
+//
+// Part of modular CFG builder (February 2026)
+// V2 IMPLEMENTATION: Single-pass recursive construction
+//
+
+#include "cfg_builder.h"
+#include <iostream>
+#include <iomanip>
+#include <sstream>
+#include <algorithm>
+#include <set>
+#include <map>
+#include <queue>
+
+namespace FasterBASIC {
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+// Calculate reachable blocks from entry using BFS
+static std::set<int> calculateReachableBlocks(const ControlFlowGraph* cfg) {
+    std::set<int> reachable;
+    if (cfg->blocks.empty()) return reachable;
+    
+    std::queue<int> toVisit;
+    toVisit.push(cfg->entryBlock);
+    reachable.insert(cfg->entryBlock);
+    
+    while (!toVisit.empty()) {
+        int current = toVisit.front();
+        toVisit.pop();
+        
+        // Find the block
+        for (const auto& block : cfg->blocks) {
+            if (block->id == current) {
+                for (int succ : block->successors) {
+                    if (reachable.find(succ) == reachable.end()) {
+                        reachable.insert(succ);
+                        toVisit.push(succ);
+                    }
+                }
+                break;
+            }
+        }
+    }
+    
+    return reachable;
+}
+
+// Find blocks with no predecessors (except entry)
+static std::vector<int> findOrphanBlocks(const ControlFlowGraph* cfg) {
+    std::vector<int> orphans;
+    for (const auto& block : cfg->blocks) {
+        if (block->id != cfg->entryBlock && 
+            block->predecessors.empty() && 
+            !block->successors.empty()) {
+            orphans.push_back(block->id);
+        }
+    }
+    return orphans;
+}
+
+// Calculate cyclomatic complexity: E - N + 2P (where P=1 for single component)
+static int calculateCyclomaticComplexity(const ControlFlowGraph* cfg) {
+    int E = cfg->edges.size();
+    int N = cfg->blocks.size();
+    return E - N + 2;
+}
+
+// Count blocks by type
+static std::map<std::string, int> categorizeBlocks(const ControlFlowGraph* cfg) {
+    std::map<std::string, int> counts;
+    counts["Total"] = cfg->blocks.size();
+    counts["Empty"] = 0;
+    counts["LoopHeader"] = 0;
+    counts["LoopExit"] = 0;
+    counts["Terminated"] = 0;
+    counts["MultiPredecessor"] = 0;
+    counts["MultiSuccessor"] = 0;
+    
+    for (const auto& block : cfg->blocks) {
+        if (block->statements.empty()) counts["Empty"]++;
+        if (block->isLoopHeader) counts["LoopHeader"]++;
+        if (block->isLoopExit) counts["LoopExit"]++;
+        if (block->isTerminator) counts["Terminated"]++;
+        if (block->predecessors.size() > 1) counts["MultiPredecessor"]++;
+        if (block->successors.size() > 1) counts["MultiSuccessor"]++;
+    }
+    
+    return counts;
+}
+
+// =============================================================================
+// Main CFG Dump Function
+// =============================================================================
+
+void CFGBuilder::dumpCFG(const std::string& phase) const {
+    if (!m_cfg) {
+        std::cerr << "\n========================================\n";
+        std::cerr << "CFG DUMP ERROR: No CFG to dump\n";
+        std::cerr << "========================================\n\n";
+        return;
+    }
+    
+    const ControlFlowGraph* cfg = m_cfg;
+    
+    // =============================================================================
+    // EXECUTIVE SUMMARY
+    // =============================================================================
+    
+    std::cerr << "\n+==========================================================================+\n";
+    std::cerr << "|                       CFG ANALYSIS REPORT                                 |\n";
+    std::cerr << "+==========================================================================╝\n\n";
+    
+    if (!phase.empty()) {
+        std::cerr << "Phase: " << phase << "\n";
+    }
+    std::cerr << "Function: " << cfg->functionName << "\n";
+    
+    if (!cfg->parameters.empty()) {
+        std::cerr << "Parameters: " << cfg->parameters.size() << " (";
+        for (size_t i = 0; i < cfg->parameters.size(); ++i) {
+            if (i > 0) std::cerr << ", ";
+            std::cerr << cfg->parameters[i];
+        }
+        std::cerr << ")\n";
+    }
+    
+    if (cfg->returnType != VariableType::UNKNOWN && cfg->returnType != VariableType::VOID) {
+        std::cerr << "Return Type: ";
+        switch (cfg->returnType) {
+            case VariableType::INT: std::cerr << "INTEGER"; break;
+            case VariableType::FLOAT: std::cerr << "FLOAT"; break;
+            case VariableType::DOUBLE: std::cerr << "DOUBLE"; break;
+            case VariableType::STRING: std::cerr << "STRING"; break;
+            default: std::cerr << "OTHER"; break;
+        }
+        std::cerr << "\n";
+    }
+    
+    std::cerr << "\n" << std::string(78, '-') << "\n";
+    std::cerr << "SUMMARY METRICS\n";
+    std::cerr << std::string(78, '-') << "\n";
+    
+    std::cerr << "  Basic Statistics:\n";
+    std::cerr << "    Total Blocks:     " << std::setw(6) << cfg->blocks.size() << "\n";
+    std::cerr << "    Total Edges:      " << std::setw(6) << cfg->edges.size() << "\n";
+    std::cerr << "    Entry Block:      " << std::setw(6) << cfg->entryBlock << "\n";
+    std::cerr << "    Exit Block:       " << std::setw(6) << cfg->exitBlock << "\n";
+    
+    // Count statements
+    int totalStmts = 0;
+    for (const auto& block : cfg->blocks) {
+        totalStmts += block->statements.size();
+    }
+    std::cerr << "    Total Statements: " << std::setw(6) << totalStmts << "\n";
+    
+    // Reachability analysis
+    auto reachable = calculateReachableBlocks(cfg);
+    int unreachableCount = cfg->blocks.size() - reachable.size();
+    
+    // Calculate unexpected unreachable count (excluding exit block)
+    int unexpectedUnreachableCount = unreachableCount;
+    if (reachable.find(cfg->exitBlock) == reachable.end()) {
+        // Exit block is unreachable - this is expected if program ends with terminator
+        unexpectedUnreachableCount--;
+    }
+    
+    std::cerr << "    Reachable Blocks: " << std::setw(6) << reachable.size() << "\n";
+    std::cerr << "    Unreachable:      " << std::setw(6) << unreachableCount;
+    if (unexpectedUnreachableCount > 0) std::cerr << " ⚠";
+    std::cerr << "\n";
+    
+    // Complexity
+    int complexity = calculateCyclomaticComplexity(cfg);
+    std::cerr << "    Cyclomatic Complexity: " << complexity;
+    if (complexity > 10) std::cerr << " (HIGH)";
+    else if (complexity > 5) std::cerr << " (MEDIUM)";
+    else std::cerr << " (LOW)";
+    std::cerr << "\n";
+    
+    // Block categorization
+    auto blockCats = categorizeBlocks(cfg);
+    std::cerr << "\n  Block Categories:\n";
+    std::cerr << "    Empty Blocks:     " << std::setw(6) << blockCats["Empty"] << "\n";
+    std::cerr << "    Loop Headers:     " << std::setw(6) << blockCats["LoopHeader"] << "\n";
+    std::cerr << "    Loop Exits:       " << std::setw(6) << blockCats["LoopExit"] << "\n";
+    std::cerr << "    Terminated:       " << std::setw(6) << blockCats["Terminated"] << "\n";
+    std::cerr << "    Multi-Pred:       " << std::setw(6) << blockCats["MultiPredecessor"] << "\n";
+    std::cerr << "    Multi-Succ:       " << std::setw(6) << blockCats["MultiSuccessor"] << "\n";
+    
+    // Edge type breakdown
+    std::map<EdgeType, int> edgeTypes;
+    for (const auto& edge : cfg->edges) {
+        edgeTypes[edge.type]++;
+    }
+    std::cerr << "\n  Edge Types:\n";
+    if (edgeTypes[EdgeType::FALLTHROUGH] > 0)
+        std::cerr << "    Fallthrough:      " << std::setw(6) << edgeTypes[EdgeType::FALLTHROUGH] << "\n";
+    if (edgeTypes[EdgeType::CONDITIONAL_TRUE] > 0)
+        std::cerr << "    Conditional True: " << std::setw(6) << edgeTypes[EdgeType::CONDITIONAL_TRUE] << "\n";
+    if (edgeTypes[EdgeType::CONDITIONAL_FALSE] > 0)
+        std::cerr << "    Conditional False:" << std::setw(6) << edgeTypes[EdgeType::CONDITIONAL_FALSE] << "\n";
+    if (edgeTypes[EdgeType::JUMP] > 0)
+        std::cerr << "    Jump:             " << std::setw(6) << edgeTypes[EdgeType::JUMP] << "\n";
+    if (edgeTypes[EdgeType::CALL] > 0)
+        std::cerr << "    Call:             " << std::setw(6) << edgeTypes[EdgeType::CALL] << "\n";
+    if (edgeTypes[EdgeType::RETURN] > 0)
+        std::cerr << "    Return:           " << std::setw(6) << edgeTypes[EdgeType::RETURN] << "\n";
+    if (edgeTypes[EdgeType::EXCEPTION] > 0)
+        std::cerr << "    Exception:        " << std::setw(6) << edgeTypes[EdgeType::EXCEPTION] << "\n";
+    
+    // =============================================================================
+    // COMPACT TEST FORMAT
+    // =============================================================================
+    
+    std::cerr << "\n" << std::string(78, '-') << "\n";
+    std::cerr << "COMPACT FORMAT (for test validation)\n";
+    std::cerr << std::string(78, '-') << "\n";
+    
+    std::cerr << "CFG:" << cfg->functionName << ":";
+    std::cerr << "B" << cfg->blocks.size() << ":";
+    std::cerr << "E" << cfg->edges.size() << ":";
+    std::cerr << "S" << totalStmts << ":";
+    std::cerr << "CC" << complexity << ":";
+    std::cerr << "R" << reachable.size();
+    if (unexpectedUnreachableCount > 0) std::cerr << "!";
+    std::cerr << "\n";
+    
+    // Edge list (compact)
+    std::cerr << "EDGES:";
+    for (const auto& edge : cfg->edges) {
+        std::cerr << " " << edge.sourceBlock << "->" << edge.targetBlock;
+    }
+    std::cerr << "\n";
+    
+    // =============================================================================
+    // DETAILED BLOCK ANALYSIS
+    // =============================================================================
+    
+    std::cerr << "\n" << std::string(78, '=') << "\n";
+    std::cerr << "DETAILED BLOCK ANALYSIS\n";
+    std::cerr << std::string(78, '=') << "\n\n";
+    
+    for (const auto& block : cfg->blocks) {
+        // Block header with ID and label
+        std::cerr << "+=== Block " << block->id << " (" << block->label << ") ";
+        std::cerr << std::string(std::max(0, 60 - (int)block->label.length()), '=') << "+\n";
+        
+        // Flags
+        std::cerr << "| Flags:";
+        bool hasFlags = false;
+        if (block->id == cfg->entryBlock) {
+            std::cerr << " [ENTRY]";
+            hasFlags = true;
+        }
+        if (block->id == cfg->exitBlock) {
+            std::cerr << " [EXIT]";
+            hasFlags = true;
+        }
+        if (block->isTerminator) {
+            std::cerr << " [TERMINATED]";
+            hasFlags = true;
+        }
+        if (block->isLoopHeader) {
+            std::cerr << " [LOOP_HEADER]";
+            hasFlags = true;
+        }
+        if (block->isLoopExit) {
+            std::cerr << " [LOOP_EXIT]";
+            hasFlags = true;
+        }
+        if (block->statements.empty()) {
+            std::cerr << " [EMPTY]";
+            hasFlags = true;
+        }
+        if (reachable.find(block->id) == reachable.end()) {
+            std::cerr << " [UNREACHABLE]";
+            hasFlags = true;
+        }
+        if (!hasFlags) {
+            std::cerr << " [NORMAL]";
+        }
+        std::cerr << "\n";
+        
+        // Source lines
+        if (!block->lineNumbers.empty()) {
+            std::cerr << "| Source Lines:";
+            int count = 0;
+            for (int line : block->lineNumbers) {
+                if (count > 0 && count % 10 == 0) {
+                    std::cerr << "\n|              ";
+                }
+                std::cerr << " " << line;
+                count++;
+            }
+            std::cerr << "\n";
+        }
+        
+        // Statement count and types
+        std::cerr << "| Statements: " << block->statements.size() << "\n";
+        if (!block->statements.empty()) {
+            std::map<std::string, int> stmtTypes;
+            for (const Statement* stmt : block->statements) {
+                std::string typeName = typeid(*stmt).name();
+                // Demangle: Extract just the class name
+                size_t pos = typeName.find("FasterBASIC");
+                if (pos != std::string::npos) {
+                    pos += 11; // strlen("FasterBASIC")
+                    size_t end = typeName.find_first_not_of("0123456789", pos);
+                    if (end != std::string::npos) {
+                        int len = 0;
+                        sscanf(typeName.c_str() + pos, "%d", &len);
+                        if (len > 0 && pos + std::to_string(len).length() < typeName.length()) {
+                            typeName = typeName.substr(pos + std::to_string(len).length(), len);
+                        }
+                    }
+                }
+                stmtTypes[typeName]++;
+            }
+            
+            std::cerr << "|   Types:";
+            bool first = true;
+            for (const auto& [type, count] : stmtTypes) {
+                if (!first) std::cerr << ",";
+                std::cerr << " " << type;
+                if (count > 1) std::cerr << "×" << count;
+                first = false;
+            }
+            std::cerr << "\n";
+            
+            // Detailed statement list
+            std::cerr << "|   Detail:\n";
+            for (size_t i = 0; i < block->statements.size(); ++i) {
+                const Statement* stmt = block->statements[i];
+                std::string typeName = typeid(*stmt).name();
+                size_t pos = typeName.find("FasterBASIC");
+                if (pos != std::string::npos) {
+                    pos += 11;
+                    size_t end = typeName.find_first_not_of("0123456789", pos);
+                    if (end != std::string::npos) {
+                        int len = 0;
+                        sscanf(typeName.c_str() + pos, "%d", &len);
+                        if (len > 0) {
+                            typeName = typeName.substr(pos + std::to_string(len).length(), len);
+                        }
+                    }
+                }
+                std::cerr << "|     [" << std::setw(2) << i << "] " << typeName;
+                
+                // Try to add helpful details
+                auto it = block->statementLineNumbers.find(stmt);
+                if (it != block->statementLineNumbers.end() && it->second > 0) {
+                    std::cerr << " (line " << it->second << ")";
+                }
+                std::cerr << "\n";
+            }
+        }
+        
+        // Predecessors
+        std::cerr << "| Predecessors (" << block->predecessors.size() << "):";
+        if (block->predecessors.empty()) {
+            std::cerr << " none\n";
+        } else {
+            for (size_t i = 0; i < block->predecessors.size(); ++i) {
+                if (i > 0) std::cerr << ",";
+                std::cerr << " " << block->predecessors[i];
+            }
+            std::cerr << "\n";
+        }
+        
+        // Successors
+        std::cerr << "| Successors (" << block->successors.size() << "):";
+        if (block->successors.empty()) {
+            std::cerr << " none\n";
+        } else {
+            for (size_t i = 0; i < block->successors.size(); ++i) {
+                if (i > 0) std::cerr << ",";
+                std::cerr << " " << block->successors[i];
+            }
+            std::cerr << "\n";
+        }
+        
+        std::cerr << "+" << std::string(76, '=') << "╝\n\n";
+    }
+    
+    // =============================================================================
+    // DETAILED EDGE ANALYSIS
+    // =============================================================================
+    
+    std::cerr << std::string(78, '-') << "\n";
+    std::cerr << "DETAILED EDGE ANALYSIS\n";
+    std::cerr << std::string(78, '-') << "\n\n";
+    
+    for (size_t i = 0; i < cfg->edges.size(); ++i) {
+        const auto& edge = cfg->edges[i];
+        std::cerr << "Edge " << std::setw(3) << i << ": ";
+        std::cerr << "Block " << std::setw(3) << edge.sourceBlock;
+        std::cerr << " --";
+        
+        // Edge type
+        switch (edge.type) {
+            case EdgeType::FALLTHROUGH:
+                std::cerr << "[FALL]";
+                break;
+            case EdgeType::CONDITIONAL_TRUE:
+                std::cerr << "[TRUE]";
+                break;
+            case EdgeType::CONDITIONAL_FALSE:
+                std::cerr << "[FALSE]";
+                break;
+            case EdgeType::JUMP:
+                std::cerr << "[JUMP]";
+                break;
+            case EdgeType::CALL:
+                std::cerr << "[CALL]";
+                break;
+            case EdgeType::RETURN:
+                std::cerr << "[RET]";
+                break;
+            case EdgeType::EXCEPTION:
+                std::cerr << "[EXC]";
+                break;
+        }
+        
+        std::cerr << "--> Block " << std::setw(3) << edge.targetBlock;
+        
+        if (!edge.label.empty()) {
+            std::cerr << " (\"" << edge.label << "\")";
+        }
+        
+        // Detect back-edges (potential loops)
+        if (edge.targetBlock <= edge.sourceBlock) {
+            std::cerr << " <- BACK-EDGE";
+        }
+        
+        std::cerr << "\n";
+    }
+    
+    // =============================================================================
+    // CONTROL FLOW ANALYSIS
+    // =============================================================================
+    
+    std::cerr << "\n" << std::string(78, '-') << "\n";
+    std::cerr << "CONTROL FLOW ANALYSIS\n";
+    std::cerr << std::string(78, '-') << "\n\n";
+    
+    // Unreachable blocks (excluding exit block, which is expected to be unreachable
+    // if the program ends with END/GOTO/RETURN)
+    std::vector<const BasicBlock*> unexpectedUnreachableBlocks;
+    
+    for (const auto& block : cfg->blocks) {
+        if (reachable.find(block->id) == reachable.end()) {
+            // Skip exit block - it's expected to be unreachable if program ends with terminator
+            if (block->id == cfg->exitBlock) {
+                continue;
+            }
+            unexpectedUnreachableBlocks.push_back(block.get());
+        }
+    }
+    
+    if (!unexpectedUnreachableBlocks.empty()) {
+        std::cerr << "⚠ UNREACHABLE BLOCKS DETECTED:\n";
+        for (const auto* block : unexpectedUnreachableBlocks) {
+            std::cerr << "  - Block " << block->id << " (" << block->label << ")";
+            if (!block->statements.empty()) {
+                std::cerr << " - contains " << block->statements.size() << " statement(s)";
+            }
+            std::cerr << "\n";
+        }
+        std::cerr << "\n";
+    } else {
+        std::cerr << "✓ All non-exit blocks are reachable from entry\n\n";
+    }
+    
+    // Orphan blocks
+    auto orphans = findOrphanBlocks(cfg);
+    if (!orphans.empty()) {
+        std::cerr << "⚠ ORPHAN BLOCKS (no predecessors but have successors):\n";
+        for (int id : orphans) {
+            std::cerr << "  - Block " << id << "\n";
+        }
+        std::cerr << "\n";
+    }
+    
+    // Back edges (loops)
+    std::vector<std::pair<int, int>> backEdges;
+    for (const auto& edge : cfg->edges) {
+        if (edge.targetBlock <= edge.sourceBlock) {
+            backEdges.push_back({edge.sourceBlock, edge.targetBlock});
+        }
+    }
+    if (!backEdges.empty()) {
+        std::cerr << "DETECTED LOOPS (back-edges):\n";
+        for (const auto& [src, tgt] : backEdges) {
+            std::cerr << "  - Block " << src << " → Block " << tgt << "\n";
+        }
+        std::cerr << "\n";
+    }
+    
+    // Terminal blocks (no successors, excluding exit)
+    std::vector<int> terminals;
+    for (const auto& block : cfg->blocks) {
+        if (block->successors.empty() && block->id != cfg->exitBlock) {
+            terminals.push_back(block->id);
+        }
+    }
+    if (!terminals.empty()) {
+        std::cerr << "TERMINAL BLOCKS (no successors, excluding exit):\n";
+        for (int id : terminals) {
+            std::cerr << "  - Block " << id;
+            // Check if it's reachable
+            if (reachable.find(id) == reachable.end()) {
+                std::cerr << " (unreachable)";
+            }
+            std::cerr << "\n";
+        }
+        std::cerr << "\n";
+    }
+    
+    // Decision points (blocks with multiple successors)
+    int decisionPoints = 0;
+    for (const auto& block : cfg->blocks) {
+        if (block->successors.size() > 1) {
+            decisionPoints++;
+        }
+    }
+    if (decisionPoints > 0) {
+        std::cerr << "DECISION POINTS (blocks with multiple successors): " << decisionPoints << "\n";
+        for (const auto& block : cfg->blocks) {
+            if (block->successors.size() > 1) {
+                std::cerr << "  - Block " << block->id << " (" << block->label << ") → ";
+                std::cerr << block->successors.size() << " paths\n";
+            }
+        }
+        std::cerr << "\n";
+    }
+    
+    // Join points (blocks with multiple predecessors)
+    int joinPoints = 0;
+    for (const auto& block : cfg->blocks) {
+        if (block->predecessors.size() > 1) {
+            joinPoints++;
+        }
+    }
+    if (joinPoints > 0) {
+        std::cerr << "JOIN POINTS (blocks with multiple predecessors): " << joinPoints << "\n";
+        for (const auto& block : cfg->blocks) {
+            if (block->predecessors.size() > 1) {
+                std::cerr << "  - Block " << block->id << " (" << block->label << ") ← ";
+                std::cerr << block->predecessors.size() << " paths\n";
+            }
+        }
+        std::cerr << "\n";
+    }
+    
+    // =============================================================================
+    // FOOTER
+    // =============================================================================
+    
+    std::cerr << std::string(78, '=') << "\n";
+    std::cerr << "END OF CFG ANALYSIS REPORT\n";
+    std::cerr << std::string(78, '=') << "\n\n";
+}
+
+} // namespace FasterBASIC

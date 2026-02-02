@@ -11,8 +11,185 @@
 #include "cfg_builder.h"
 #include <iostream>
 #include <stdexcept>
+#include <memory>
 
 namespace FasterBASIC {
+
+// =============================================================================
+// SELECT CASE Helper Functions
+// =============================================================================
+
+namespace {
+
+// Helper to clone an expression (deep copy)
+ExpressionPtr cloneExpression(const Expression* expr) {
+    if (!expr) return nullptr;
+    
+    switch (expr->getType()) {
+        case ASTNodeType::EXPR_NUMBER: {
+            const auto* num = static_cast<const NumberExpression*>(expr);
+            return std::make_unique<NumberExpression>(num->value);
+        }
+        case ASTNodeType::EXPR_STRING: {
+            const auto* str = static_cast<const StringExpression*>(expr);
+            return std::make_unique<StringExpression>(str->value, str->hasNonASCII);
+        }
+        case ASTNodeType::EXPR_VARIABLE: {
+            const auto* var = static_cast<const VariableExpression*>(expr);
+            return std::make_unique<VariableExpression>(var->name, var->typeSuffix);
+        }
+        case ASTNodeType::EXPR_BINARY: {
+            const auto* bin = static_cast<const BinaryExpression*>(expr);
+            return std::make_unique<BinaryExpression>(
+                cloneExpression(bin->left.get()),
+                bin->op,
+                cloneExpression(bin->right.get())
+            );
+        }
+        case ASTNodeType::EXPR_UNARY: {
+            const auto* un = static_cast<const UnaryExpression*>(expr);
+            return std::make_unique<UnaryExpression>(un->op, cloneExpression(un->expr.get()));
+        }
+        case ASTNodeType::EXPR_FUNCTION_CALL: {
+            const auto* func = static_cast<const FunctionCallExpression*>(expr);
+            auto clone = std::make_unique<FunctionCallExpression>(func->name, func->isFN);
+            for (const auto& arg : func->arguments) {
+                clone->addArgument(cloneExpression(arg.get()));
+            }
+            return clone;
+        }
+        case ASTNodeType::EXPR_ARRAY_ACCESS: {
+            const auto* arr = static_cast<const ArrayAccessExpression*>(expr);
+            auto clone = std::make_unique<ArrayAccessExpression>(arr->name, arr->typeSuffix);
+            for (const auto& idx : arr->indices) {
+                clone->addIndex(cloneExpression(idx.get()));
+            }
+            return clone;
+        }
+        default:
+            // For unsupported expression types, return nullptr
+            // The caller should handle this gracefully
+            return nullptr;
+    }
+}
+
+// Create a comparison expression: left == right
+ExpressionPtr createEqualityCheck(ExpressionPtr left, ExpressionPtr right) {
+    return std::make_unique<BinaryExpression>(
+        std::move(left),
+        TokenType::EQUAL,
+        std::move(right)
+    );
+}
+
+// Create an OR expression: left OR right
+ExpressionPtr createOrExpression(ExpressionPtr left, ExpressionPtr right) {
+    return std::make_unique<BinaryExpression>(
+        std::move(left),
+        TokenType::OR,
+        std::move(right)
+    );
+}
+
+// Create an AND expression: left AND right
+ExpressionPtr createAndExpression(ExpressionPtr left, ExpressionPtr right) {
+    return std::make_unique<BinaryExpression>(
+        std::move(left),
+        TokenType::AND,
+        std::move(right)
+    );
+}
+
+// Create a range check: selector >= start AND selector <= end
+ExpressionPtr createRangeCheck(const Expression* selector, const Expression* start, const Expression* end) {
+    auto selectorClone1 = cloneExpression(selector);
+    auto selectorClone2 = cloneExpression(selector);
+    auto startClone = cloneExpression(start);
+    auto endClone = cloneExpression(end);
+    
+    if (!selectorClone1 || !selectorClone2 || !startClone || !endClone) {
+        return nullptr;
+    }
+    
+    // selector >= start
+    auto geCheck = std::make_unique<BinaryExpression>(
+        std::move(selectorClone1),
+        TokenType::GREATER_EQUAL,
+        std::move(startClone)
+    );
+    
+    // selector <= end
+    auto leCheck = std::make_unique<BinaryExpression>(
+        std::move(selectorClone2),
+        TokenType::LESS_EQUAL,
+        std::move(endClone)
+    );
+    
+    // (selector >= start) AND (selector <= end)
+    return createAndExpression(std::move(geCheck), std::move(leCheck));
+}
+
+// Create a CASE IS check: selector <op> value
+ExpressionPtr createCaseIsCheck(const Expression* selector, TokenType op, const Expression* value) {
+    auto selectorClone = cloneExpression(selector);
+    auto valueClone = cloneExpression(value);
+    
+    if (!selectorClone || !valueClone) {
+        return nullptr;
+    }
+    
+    return std::make_unique<BinaryExpression>(
+        std::move(selectorClone),
+        op,
+        std::move(valueClone)
+    );
+}
+
+// Create the condition for a WHEN clause
+// Returns: selector == value1 OR selector == value2 OR ... (or range/CASE IS checks)
+ExpressionPtr createWhenCondition(const CaseStatement& stmt, const CaseStatement::WhenClause& clause) {
+    if (!stmt.caseExpression) {
+        return nullptr;
+    }
+    
+    ExpressionPtr condition = nullptr;
+    
+    // Handle CASE IS: selector <op> value
+    if (clause.isCaseIs && clause.caseIsRightExpr) {
+        condition = createCaseIsCheck(
+            stmt.caseExpression.get(),
+            clause.caseIsOperator,
+            clause.caseIsRightExpr.get()
+        );
+    }
+    // Handle range: selector >= start AND selector <= end
+    else if (clause.isRange && clause.rangeStart && clause.rangeEnd) {
+        condition = createRangeCheck(
+            stmt.caseExpression.get(),
+            clause.rangeStart.get(),
+            clause.rangeEnd.get()
+        );
+    }
+    // Handle multiple values: selector == value1 OR selector == value2 OR ...
+    else if (!clause.values.empty()) {
+        for (const auto& value : clause.values) {
+            auto selectorClone = cloneExpression(stmt.caseExpression.get());
+            if (!selectorClone) continue;
+            
+            auto check = createEqualityCheck(std::move(selectorClone), cloneExpression(value.get()));
+            
+            if (!condition) {
+                condition = std::move(check);
+            } else {
+                condition = createOrExpression(std::move(condition), std::move(check));
+            }
+        }
+    }
+    
+    return condition;
+}
+
+} // anonymous namespace
 
 // =============================================================================
 // IF Statement Handler
@@ -227,7 +404,9 @@ BasicBlock* CFGBuilder::buildIf(
 //     statements
 // END SELECT
 //
-// Creates blocks for each case, evaluates expression once, branches to matching case
+// Strategy: Create synthetic IF statements for each WHEN clause check.
+// Each check block contains an IF with the condition (selector == value1 OR ...)
+// This allows the CFG emitter to handle SELECT CASE like any other conditional.
 //
 BasicBlock* CFGBuilder::buildSelectCase(
     const CaseStatement& stmt,
@@ -242,18 +421,23 @@ BasicBlock* CFGBuilder::buildSelectCase(
                   << stmt.whenClauses.size() << " when clauses" << std::endl;
     }
     
-    // 1. Add SELECT CASE to incoming block (evaluates expression)
-    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    // Validate that we have a selector expression
+    if (!stmt.caseExpression) {
+        if (m_debugMode) {
+            std::cout << "[CFG] ERROR: SELECT CASE without selector expression" << std::endl;
+        }
+        return incoming;
+    }
     
-    // 2. Create exit block for the entire SELECT
+    // 1. Create exit block for the entire SELECT
     BasicBlock* exitBlock = createBlock("Select_Exit");
     
-    // 3. Create SELECT context (though EXIT SELECT doesn't exist in this dialect)
+    // 2. Create SELECT context
     SelectContext selectCtx;
     selectCtx.exitBlockId = exitBlock->id;
     selectCtx.outerSelect = outerSelect;
     
-    // 4. Process each WHEN clause
+    // 3. Process each WHEN clause
     BasicBlock* previousCaseCheck = incoming;
     
     for (size_t i = 0; i < stmt.whenClauses.size(); i++) {
@@ -263,20 +447,48 @@ BasicBlock* CFGBuilder::buildSelectCase(
             std::cout << "[CFG] Processing WHEN clause " << i << std::endl;
         }
         
-        // Create block for this when's statements
-        BasicBlock* whenBlock = createBlock("When_" + std::to_string(i));
+        // Create synthetic IF statement for this WHEN check
+        // This IF will compare the selector against the WHEN values
+        auto syntheticIf = std::make_unique<IfStatement>();
+        syntheticIf->condition = createWhenCondition(stmt, whenClause);
+        syntheticIf->isMultiLine = false;  // Treat as single-line for simplicity
         
-        // Create block for next when check (or otherwise for last when)
-        BasicBlock* nextCheck = (i < stmt.whenClauses.size() - 1) 
-            ? createBlock("When_Check_" + std::to_string(i + 1))
-            : createBlock("When_Otherwise");
+        if (!syntheticIf->condition) {
+            if (m_debugMode) {
+                std::cout << "[CFG] WARNING: Could not create condition for WHEN clause " << i << std::endl;
+            }
+            // Skip this clause or use a default true condition
+            syntheticIf->condition = std::make_unique<NumberExpression>(1.0);
+        }
         
-        // Wire from previous check to this when (if match) and to next check (if not)
-        std::string whenLabel = "when_" + std::to_string(i);
-        addConditionalEdge(previousCaseCheck->id, whenBlock->id, whenLabel);
-        addConditionalEdge(previousCaseCheck->id, nextCheck->id, "no_match");
+        // Add the synthetic IF to the check block
+        addStatementToBlock(previousCaseCheck, syntheticIf.get(), getLineNumber(&stmt));
         
-        // Recursively build when statements
+        // Store the synthetic IF in the CFG so it stays alive
+        // (We'll use the incoming block's statements vector to keep it alive)
+        previousCaseCheck->statements.back() = syntheticIf.release();
+        
+        // Create block for this when's body
+        BasicBlock* whenBlock = createBlock("When_Body_" + std::to_string(i));
+        
+        // Create block for next when check (or otherwise check for last when)
+        BasicBlock* nextCheck = nullptr;
+        if (i < stmt.whenClauses.size() - 1) {
+            nextCheck = createBlock("When_Check_" + std::to_string(i + 1));
+        } else {
+            // Last clause - next check goes to OTHERWISE or exit
+            if (!stmt.otherwiseStatements.empty()) {
+                nextCheck = createBlock("Otherwise");
+            } else {
+                nextCheck = exitBlock;
+            }
+        }
+        
+        // Wire conditional edges: true -> when body, false -> next check
+        addConditionalEdge(previousCaseCheck->id, whenBlock->id, "true");
+        addConditionalEdge(previousCaseCheck->id, nextCheck->id, "false");
+        
+        // Recursively build when body statements
         BasicBlock* whenExit = buildStatementRange(
             whenClause.statements,
             whenBlock,
@@ -287,7 +499,7 @@ BasicBlock* CFGBuilder::buildSelectCase(
         );
         
         // Wire when exit to SELECT exit (if not terminated)
-        // Note: Cases don't fall through in most BASIC dialects
+        // Note: Cases don't fall through in BASIC
         if (!isTerminated(whenExit)) {
             addUnconditionalEdge(whenExit->id, exitBlock->id);
         }
@@ -296,10 +508,10 @@ BasicBlock* CFGBuilder::buildSelectCase(
         previousCaseCheck = nextCheck;
     }
     
-    // 5. Process OTHERWISE clause if present
+    // 4. Process OTHERWISE clause if present
     if (!stmt.otherwiseStatements.empty()) {
-        BasicBlock* otherwiseBlock = createBlock("Otherwise");
-        addUnconditionalEdge(previousCaseCheck->id, otherwiseBlock->id);
+        // previousCaseCheck now points to the Otherwise block (created above)
+        BasicBlock* otherwiseBlock = previousCaseCheck;
         
         BasicBlock* otherwiseExit = buildStatementRange(
             stmt.otherwiseStatements,
@@ -313,16 +525,14 @@ BasicBlock* CFGBuilder::buildSelectCase(
         if (!isTerminated(otherwiseExit)) {
             addUnconditionalEdge(otherwiseExit->id, exitBlock->id);
         }
-    } else {
-        // No OTHERWISE - wire the final check to exit (no case matched)
-        addUnconditionalEdge(previousCaseCheck->id, exitBlock->id);
     }
+    // Note: If no OTHERWISE, previousCaseCheck already points to exitBlock
     
     if (m_debugMode) {
         std::cout << "[CFG] SELECT CASE complete, exit block: " << exitBlock->id << std::endl;
     }
     
-    // 6. Return exit block
+    // 5. Return exit block
     return exitBlock;
 }
 
