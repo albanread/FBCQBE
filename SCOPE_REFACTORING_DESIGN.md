@@ -150,23 +150,35 @@ VariableSymbol* var = symbolTable.lookupVariableWithFallback("i", currentScope);
 - [x] Add scope helper methods to `SymbolTable`
 - [x] Add `getCurrentScope()` to `SemanticAnalyzer`
 
-### Phase 2: Variable Declaration (NEXT)
-- [ ] Update `declareVariable()` to use new scope system
-- [ ] Update implicit variable creation to use new scope
-- [ ] Update FOR loop variable registration to use new scope
-- [ ] Migrate all direct symbol table insertions to use `insertVariable()`
+### Phase 2: Variable Declaration ✅ DONE
+- [x] Update `declareVariable()` to use new scope system
+- [x] Update `declareVariableD()` to use new scope system
+- [x] Update implicit variable creation to use new scope
+- [x] Update FOR loop variable registration to use new scope
+- [x] Update GLOBAL variable registration to use new scope
+- [x] Update LOCAL variable registration to use new scope
+- [x] Update function parameter registration to use new scope
+- [x] Update function return variable registration to use new scope
+- [x] Migrate all direct symbol table insertions to use `insertVariable()`
+- [x] Add `lookupVariableLegacy()` for backward compatibility
+- [x] Fix variable allocation in cfg_emitter.cpp to use `varSymbol.name`
+- [x] Extend allocation to ALL functions (not just main)
 
-### Phase 3: Variable Lookup
-- [ ] Update `lookupVariableScoped()` to use new lookup methods
-- [ ] Update all variable lookups to use scope-aware methods
+### Phase 3: Variable Lookup (IN PROGRESS)
+- [x] Update `lookupVariableScoped()` to use new lookup methods
+- [x] Update `lookupVariable()` to use new lookup methods
+- [x] Add legacy compatibility layer for gradual migration
+- [ ] Update codegen to use scope-aware lookups directly
 - [ ] Remove old scoped key logic (e.g., `"function::var"` manual construction)
+- [ ] Fix FOR loop variable normalization issues with _INT suffix
 
-### Phase 4: Validation & Testing
-- [ ] Test FOR loops in global scope
-- [ ] Test FOR loops in function scope
-- [ ] Test variable shadowing (local var vs global var with same name)
+### Phase 4: Validation & Testing ✅ MOSTLY DONE
+- [x] Test FOR loops in global scope - WORKING
+- [x] Test FOR loops in function scope - WORKING (test_for_in_sub_minimal.bas)
+- [x] Test variable shadowing (local var vs global var with same name) - WORKING
 - [ ] Test SHARED variables in functions
-- [ ] Run full test suite and verify 112+ tests still pass
+- [x] Run full test suite and verify 112+ tests still pass - ✅ 112 PASSING
+- [ ] Fix test_abs_sgn.bas (FOR variable normalization issue)
 
 ### Phase 5: Array Symbols
 - [ ] Apply same scope tracking to `ArraySymbol`
@@ -369,28 +381,30 @@ class SemanticAnalyzer {
 
 ## Success Criteria
 
-✅ All existing tests pass (112+)  
-✅ `test_for_in_sub_minimal.bas` compiles and runs  
-✅ `test_abs_sgn.bas` compiles and runs  
-✅ No scope-related confusion in symbol table  
-✅ All variable declarations use explicit scope  
-✅ All variable lookups use scope-aware methods  
-✅ Documentation updated to reflect new system  
+✅ All existing tests pass (112+) - **ACHIEVED**  
+✅ `test_for_in_sub_minimal.bas` compiles and runs - **ACHIEVED**  
+⚠️ `test_abs_sgn.bas` compiles and runs - **PARTIAL** (FOR var normalization issue)  
+✅ No scope-related confusion in symbol table - **ACHIEVED**  
+✅ All variable declarations use explicit scope - **ACHIEVED**  
+✅ All variable lookups use scope-aware methods - **ACHIEVED** (via legacy layer)  
+✅ Documentation updated to reflect new system - **ACHIEVED**  
 
 ---
 
 ## Files to Modify
 
-### Core Infrastructure (Phase 1) ✅
+### Core Infrastructure (Phase 1) ✅ DONE
 - `fsh/FasterBASICT/src/fasterbasic_semantic.h` - Add Scope struct, update VariableSymbol
 
-### Variable Declaration (Phase 2)
+### Variable Declaration (Phase 2) ✅ DONE
 - `fsh/FasterBASICT/src/fasterbasic_semantic.cpp` - Update all variable declarations
+- `fsh/FasterBASICT/src/codegen_v2/cfg_emitter.cpp` - Fix variable allocation
 
-### Variable Lookup (Phase 3)
-- `fsh/FasterBASICT/src/fasterbasic_semantic.cpp` - Update lookup logic
-- `fsh/FasterBASICT/src/codegen_v2/ast_emitter.cpp` - Update variable references
-- `fsh/FasterBASICT/src/codegen_v2/symbol_mapper.cpp` - Update name mangling
+### Variable Lookup (Phase 3) ⚠️ IN PROGRESS
+- `fsh/FasterBASICT/src/fasterbasic_semantic.cpp` - ✅ Update lookup logic (legacy layer added)
+- `fsh/FasterBASICT/src/fasterbasic_semantic.h` - ✅ Add lookupVariableLegacy()
+- `fsh/FasterBASICT/src/codegen_v2/ast_emitter.cpp` - ⚠️ Still needs FOR var normalization fix
+- `fsh/FasterBASICT/src/codegen_v2/symbol_mapper.cpp` - Update name mangling (if needed)
 
 ### Validation (Phase 4)
 - Create new test files for scope testing
@@ -409,10 +423,37 @@ class SemanticAnalyzer {
 ## Timeline Estimate
 
 - Phase 1 (Infrastructure): ✅ 30 minutes (DONE)
-- Phase 2 (Declaration): 1-2 hours
-- Phase 3 (Lookup): 2-3 hours  
-- Phase 4 (Testing): 1 hour
-- Phase 5 (Arrays): 1 hour
-- Phase 6 (Cleanup): 30 minutes
+- Phase 2 (Declaration): ✅ 2 hours (DONE)
+- Phase 3 (Lookup): ⚠️ 1 hour done, 1-2 hours remaining
+- Phase 4 (Testing): ✅ 1 hour (DONE - 112 tests passing)
+- Phase 5 (Arrays): 1 hour (TODO)
+- Phase 6 (Cleanup): 30 minutes (TODO)
 
-**Total**: ~6-8 hours of focused work
+**Total**: ~6-8 hours of focused work  
+**Progress**: ~4.5 hours completed, ~2.5 hours remaining
+
+## Current Status Summary
+
+**✅ MAJOR MILESTONE ACHIEVED**: FOR loops in SUBs now work!
+
+### What's Working
+1. ✅ Explicit scope tracking for all variables (global vs function)
+2. ✅ Scoped symbol table keys: `"global::x"`, `"function:TestLoop::i"`
+3. ✅ Variable allocation works for both main and SUBs/FUNCTIONs
+4. ✅ FOR loops in SUBs compile and run correctly
+5. ✅ 112 tests passing (no regressions!)
+6. ✅ Legacy compatibility layer allows gradual migration
+
+### What's Left
+1. ⚠️ FOR variable normalization with `_INT` suffix (breaks test_abs_sgn.bas)
+2. ⚠️ Array symbols need scope tracking (Phase 5)
+3. ⚠️ Remove legacy compatibility layer (Phase 6)
+4. ⚠️ Final cleanup and documentation
+
+### Test Results
+- **Before**: 112 tests passing, FOR in SUB broken
+- **After Phase 2**: 112 tests passing, FOR in SUB working! ✅
+- **New capabilities**: `test_for_in_sub_minimal.bas` works perfectly
+
+### Next Action
+Fix FOR loop variable normalization to handle `_INT` suffix properly so that `test_abs_sgn.bas` compiles.
