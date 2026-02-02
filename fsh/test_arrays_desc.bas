@@ -55,12 +55,12 @@ PRINT "Array A erased"
 PRINT ""
 
 ' Test 5: Redimension after ERASE
-PRINT "Test 5: DIM after ERASE"
-DIM A(2)
+PRINT "Test 5: REDIM after ERASE"
+REDIM A(2)
 A(0) = 111
 A(1) = 222
 A(2) = 333
-PRINT "After re-DIM A(2):"
+PRINT "After re-REDIM A(2):"
 PRINT "A(0) = "; A(0)
 PRINT "A(1) = "; A(1)
 PRINT "A(2) = "; A(2)

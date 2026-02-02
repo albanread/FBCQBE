@@ -333,6 +333,8 @@ bool SemanticAnalyzer::analyze(Program& program, const CompilerOptions& options)
         std::cerr << "[DEBUG] Finished pass2_validate" << std::endl;
     }
     
+    // Variable names are now normalized during declaration, so no post-processing needed
+    
     // Final validation
     validateControlFlow(program);
     
@@ -416,46 +418,56 @@ void SemanticAnalyzer::collectGlobalStatements(Program& program) {
                 
                 // Register global variables in symbol table
                 for (const auto& var : globalStmt.variables) {
-                    // Determine variable type
-                    VariableType varType = VariableType::DOUBLE;  // Default
+                    // Determine variable type descriptor
+                    TypeDescriptor typeDesc;
                     
                     if (var.hasAsType && !var.asTypeName.empty()) {
-                        // Map AS type name to VariableType
+                        // Map AS type name to TypeDescriptor
                         std::string typeName = var.asTypeName;
                         std::transform(typeName.begin(), typeName.end(), typeName.begin(), ::toupper);
                         
                         if (typeName == "INTEGER" || typeName == "INT") {
-                            varType = VariableType::INT;
+                            typeDesc = TypeDescriptor(BaseType::INTEGER);
                         } else if (typeName == "DOUBLE") {
-                            varType = VariableType::DOUBLE;
+                            typeDesc = TypeDescriptor(BaseType::DOUBLE);
                         } else if (typeName == "SINGLE" || typeName == "FLOAT") {
-                            varType = VariableType::FLOAT;
+                            typeDesc = TypeDescriptor(BaseType::SINGLE);
                         } else if (typeName == "STRING") {
-                            varType = VariableType::STRING;
+                            typeDesc = TypeDescriptor(BaseType::STRING);
                         } else if (typeName == "LONG") {
-                            varType = VariableType::INT;
+                            typeDesc = TypeDescriptor(BaseType::LONG);
+                        } else if (typeName == "BYTE") {
+                            typeDesc = TypeDescriptor(BaseType::BYTE);
+                        } else if (typeName == "SHORT") {
+                            typeDesc = TypeDescriptor(BaseType::SHORT);
+                        } else {
+                            // Default to DOUBLE
+                            typeDesc = TypeDescriptor(BaseType::DOUBLE);
                         }
                     } else if (var.typeSuffix != TokenType::UNKNOWN) {
-                        varType = inferTypeFromSuffix(var.typeSuffix);
+                        typeDesc = legacyTypeToDescriptor(inferTypeFromSuffix(var.typeSuffix));
                     } else {
-                        varType = inferTypeFromName(var.name);
+                        typeDesc = legacyTypeToDescriptor(inferTypeFromName(var.name));
                     }
                     
-                    // Check if already declared
-                    if (m_symbolTable.variables.count(var.name)) {
+                    // Normalize the variable name to include proper type suffix
+                    std::string normalizedName = normalizeVariableName(var.name, typeDesc);
+                    
+                    // Check if already declared (using normalized name)
+                    if (m_symbolTable.variables.count(normalizedName)) {
                         error(SemanticErrorType::ARRAY_REDECLARED,
-                              "Variable '" + var.name + "' already declared",
+                              "Variable '" + normalizedName + "' already declared",
                               stmt->location);
                         continue;
                     }
                     
                     // Create variable symbol and mark it as global with explicit scope
-                    VariableSymbol varSym(var.name, legacyTypeToDescriptor(varType), Scope::makeGlobal(), true);
+                    VariableSymbol varSym(normalizedName, typeDesc, Scope::makeGlobal(), true);
                     varSym.firstUse = stmt->location;
                     varSym.isGlobal = true;  // Mark as GLOBAL variable
                     varSym.globalOffset = nextOffset++;  // Assign slot number and increment
                     
-                    m_symbolTable.insertVariable(var.name, varSym);
+                    m_symbolTable.insertVariable(normalizedName, varSym);
                 }
             }
         }
@@ -702,6 +714,12 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
         VariableType paramType = VariableType::UNKNOWN;
         std::string paramTypeName = "";
         
+        // Debug output
+        std::ofstream debugFile("/tmp/func_param_debug.txt", std::ios::app);
+        debugFile << "[DEBUG] Processing parameter " << i << ": " << stmt.parameters[i] 
+                  << " parameterAsTypes.size()=" << stmt.parameterAsTypes.size()
+                  << " parameterTypes.size()=" << stmt.parameterTypes.size() << std::endl;
+        
         if (i < stmt.parameterAsTypes.size() && !stmt.parameterAsTypes[i].empty()) {
             // Has AS TypeName
             paramTypeName = stmt.parameterAsTypes[i];
@@ -738,9 +756,12 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
         } else if (i < stmt.parameterTypes.size()) {
             // Has type suffix
             paramType = inferTypeFromSuffix(stmt.parameterTypes[i]);
+            debugFile << "[DEBUG] Using suffix, paramType=" << static_cast<int>(paramType) << std::endl;
         } else {
             paramType = VariableType::DOUBLE;  // Default type (DOUBLE, not FLOAT)
+            debugFile << "[DEBUG] Defaulting to DOUBLE" << std::endl;
         }
+        debugFile.close();
         
         sym.parameterTypeDescs.push_back(legacyTypeToDescriptor(paramType));
     }
@@ -789,9 +810,26 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
     // Add function name as a variable (for return value assignment)
     // Create return variable with function scope
     Scope funcScope = Scope::makeFunction(stmt.functionName);
-    VariableSymbol returnVar(stmt.functionName, sym.returnTypeDesc, funcScope, true);
+    
+    // Normalize return variable name to include type suffix
+    std::string normalizedReturnVarName = normalizeVariableName(stmt.functionName, sym.returnTypeDesc);
+    
+    VariableSymbol returnVar(normalizedReturnVarName, sym.returnTypeDesc, funcScope, true);
     returnVar.firstUse = stmt.location;
-    m_symbolTable.insertVariable(stmt.functionName, returnVar);
+    m_symbolTable.insertVariable(normalizedReturnVarName, returnVar);
+    
+    // Add parameters to symbol table as variables in function scope
+    for (size_t i = 0; i < stmt.parameters.size(); ++i) {
+        std::string paramName = stmt.parameters[i];
+        TypeDescriptor paramTypeDesc = sym.parameterTypeDescs[i];
+        
+        // Normalize parameter name to include type suffix
+        std::string normalizedParamName = normalizeVariableName(paramName, paramTypeDesc);
+        
+        VariableSymbol paramVar(normalizedParamName, paramTypeDesc, funcScope, true);
+        paramVar.firstUse = stmt.location;
+        m_symbolTable.insertVariable(normalizedParamName, paramVar);
+    }
     
     // Clear current function scope
     m_currentFunctionName = "";
@@ -1527,47 +1565,27 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
             
             // Add local variables to function scope AND symbol table
             for (const auto& var : localStmt.variables) {
-                // Check for duplicate declaration
-                if (m_currentFunctionScope.localVariables.count(var.name) ||
-                    m_currentFunctionScope.sharedVariables.count(var.name)) {
-                    error(SemanticErrorType::ARRAY_REDECLARED,
-                          "Variable '" + var.name + "' already declared in this function",
-                          stmt.location);
-                }
-                
-                m_currentFunctionScope.localVariables.insert(var.name);
-                
-                // Add to symbol table with type information
-                // Use explicit scope for local variables
-                Scope funcScope = getCurrentScope();
-                
-                VariableSymbol varSym;
-                varSym.name = var.name;  // Keep original name in the symbol
-                varSym.scope = funcScope;  // Set explicit function scope
-                varSym.isDeclared = true;
-                varSym.firstUse = stmt.location;
-                varSym.isGlobal = false;
-                
-                // Determine type from AS clause or suffix
+                // Determine type descriptor first
+                TypeDescriptor typeDesc;
                 if (var.hasAsType && !var.asTypeName.empty()) {
                     // Has AS TypeName
                     std::string upperType = var.asTypeName;
                     std::transform(upperType.begin(), upperType.end(), upperType.begin(), ::toupper);
                     
                     if (upperType == "INTEGER" || upperType == "INT") {
-                        varSym.typeDesc = TypeDescriptor(BaseType::INTEGER);
+                        typeDesc = TypeDescriptor(BaseType::INTEGER);
                     } else if (upperType == "DOUBLE") {
-                        varSym.typeDesc = TypeDescriptor(BaseType::DOUBLE);
+                        typeDesc = TypeDescriptor(BaseType::DOUBLE);
                     } else if (upperType == "SINGLE" || upperType == "FLOAT") {
-                        varSym.typeDesc = TypeDescriptor(BaseType::SINGLE);
+                        typeDesc = TypeDescriptor(BaseType::SINGLE);
                     } else if (upperType == "STRING") {
-                        varSym.typeDesc = TypeDescriptor(BaseType::STRING);
+                        typeDesc = TypeDescriptor(BaseType::STRING);
                     } else if (upperType == "LONG") {
-                        varSym.typeDesc = TypeDescriptor(BaseType::LONG);
+                        typeDesc = TypeDescriptor(BaseType::LONG);
                     } else if (upperType == "BYTE") {
-                        varSym.typeDesc = TypeDescriptor(BaseType::BYTE);
+                        typeDesc = TypeDescriptor(BaseType::BYTE);
                     } else if (upperType == "SHORT") {
-                        varSym.typeDesc = TypeDescriptor(BaseType::SHORT);
+                        typeDesc = TypeDescriptor(BaseType::SHORT);
                     } else {
                         // User-defined type
                         if (m_symbolTable.types.find(var.asTypeName) == m_symbolTable.types.end()) {
@@ -1575,16 +1593,42 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
                                   "Unknown type '" + var.asTypeName + "' for LOCAL variable " + var.name,
                                   stmt.location);
                         }
-                        varSym.typeDesc = TypeDescriptor(BaseType::USER_DEFINED);
-                        varSym.typeDesc.udtName = var.asTypeName;
+                        typeDesc = TypeDescriptor(BaseType::USER_DEFINED);
+                        typeDesc.udtName = var.asTypeName;
                     }
                 } else {
                     // Infer from suffix
-                    varSym.typeDesc = legacyTypeToDescriptor(inferTypeFromSuffix(var.typeSuffix));
+                    typeDesc = legacyTypeToDescriptor(inferTypeFromSuffix(var.typeSuffix));
                 }
                 
-                // Store with scope-aware insertion
-                m_symbolTable.insertVariable(var.name, varSym);
+                // Normalize the variable name to include proper type suffix
+                std::string normalizedName = normalizeVariableName(var.name, typeDesc);
+                
+                // Check for duplicate declaration using normalized name
+                if (m_currentFunctionScope.localVariables.count(normalizedName) ||
+                    m_currentFunctionScope.sharedVariables.count(normalizedName)) {
+                    error(SemanticErrorType::ARRAY_REDECLARED,
+                          "Variable '" + normalizedName + "' already declared in this function",
+                          stmt.location);
+                }
+                
+                // Add normalized name to function scope
+                m_currentFunctionScope.localVariables.insert(normalizedName);
+                
+                // Add to symbol table with type information
+                // Use explicit scope for local variables
+                Scope funcScope = getCurrentScope();
+                
+                VariableSymbol varSym;
+                varSym.name = normalizedName;  // Use normalized name
+                varSym.scope = funcScope;  // Set explicit function scope
+                varSym.isDeclared = true;
+                varSym.firstUse = stmt.location;
+                varSym.isGlobal = false;
+                varSym.typeDesc = typeDesc;
+                
+                // Store with scope-aware insertion (using normalized name)
+                m_symbolTable.insertVariable(normalizedName, varSym);
             }
             break;
         }
@@ -2030,33 +2074,29 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
     // Type is determined by OPTION FOR setting, not by suffix
     std::string plainVarName = stmt.variable;
     
-    // Track this as a FOR loop variable (for suffix-agnostic lookup)
-    m_forLoopVariables.insert(plainVarName);
-    
     // Determine type based on OPTION FOR setting
     BaseType forVarType = (m_options.forLoopType == CompilerOptions::ForLoopType::LONG)
                           ? BaseType::LONG : BaseType::INTEGER;
     
     // Create normalized variable name with correct integer suffix
-    std::string normalizedVarName = plainVarName + getForLoopIntegerSuffix();
+    TypeDescriptor forTypeDesc(forVarType);
+    std::string normalizedVarName = normalizeVariableName(plainVarName, forTypeDesc);
     
     // Debug output to file
     std::ofstream debugFile("/tmp/for_debug.txt", std::ios::app);
     debugFile << "[DEBUG] validateForStatement called for variable: " << stmt.variable << std::endl;
     debugFile << "[DEBUG] FOR variable normalized: " << plainVarName 
-              << " -> " << normalizedVarName << " (tracked as FOR var)" << std::endl;
+              << " -> " << normalizedVarName << std::endl;
     debugFile.close();
     
     // Register the variable in symbol table with normalized name and explicit scope
     Scope currentScope = getCurrentScope();
-    VariableSymbol varSym(normalizedVarName, TypeDescriptor(forVarType), currentScope, true);
+    VariableSymbol varSym(normalizedVarName, forTypeDesc, currentScope, true);
     varSym.firstUse = stmt.location;
     m_symbolTable.insertVariable(normalizedVarName, varSym);
     
-    // Add to function's local variables set so validateVariableInFunction accepts it
+    // Add normalized name to function's local variables set so validateVariableInFunction accepts it
     if (m_currentFunctionScope.inFunction) {
-        m_currentFunctionScope.localVariables.insert(plainVarName);
-        // Also add normalized name in case lookups use that
         m_currentFunctionScope.localVariables.insert(normalizedVarName);
     }
     
@@ -3259,11 +3299,14 @@ VariableSymbol* SemanticAnalyzer::declareVariable(const std::string& name, Varia
 // New TypeDescriptor-based variable declaration
 VariableSymbol* SemanticAnalyzer::declareVariableD(const std::string& name, const TypeDescriptor& typeDesc,
                                                    const SourceLocation& loc, bool isDeclared) {
+    // Normalize the variable name to include proper type suffix
+    std::string normalizedName = normalizeVariableName(name, typeDesc);
+    
     // Get current scope
     Scope currentScope = getCurrentScope();
     
-    // Check if variable already exists in current scope
-    VariableSymbol* existing = m_symbolTable.lookupVariable(name, currentScope);
+    // Check if variable already exists in current scope (using normalized name)
+    VariableSymbol* existing = m_symbolTable.lookupVariable(normalizedName, currentScope);
     if (existing) {
         // Update existing variable with new type info
         existing->typeDesc = typeDesc;
@@ -3273,15 +3316,15 @@ VariableSymbol* SemanticAnalyzer::declareVariableD(const std::string& name, cons
         return existing;
     }
     
-    // Create new variable with explicit scope
-    VariableSymbol sym(name, typeDesc, currentScope, isDeclared);
+    // Create new variable with explicit scope and normalized name
+    VariableSymbol sym(normalizedName, typeDesc, currentScope, isDeclared);
     sym.firstUse = loc;
     
-    // Insert using scope-aware method
-    m_symbolTable.insertVariable(name, sym);
+    // Insert using scope-aware method (with normalized name)
+    m_symbolTable.insertVariable(normalizedName, sym);
     
     // Return pointer to inserted variable
-    return m_symbolTable.lookupVariable(name, currentScope);
+    return m_symbolTable.lookupVariable(normalizedName, currentScope);
 }
 
 const VariableSymbol* SemanticAnalyzer::lookupVariableScoped(const std::string& varName, 
@@ -3347,11 +3390,19 @@ std::string SemanticAnalyzer::normalizeForLoopVariable(const std::string& varNam
     // Strip any existing suffix (both character and text forms)
     std::string baseName = stripTypeSuffix(varName);
     
-    // Check if this base name is a FOR loop variable
-    if (m_forLoopVariables.count(baseName) > 0) {
-        // This is a FOR loop variable reference - return base name with correct integer suffix
-        // Use text suffix format (_INT or _LONG) to match parser mangling
-        return baseName + getForLoopIntegerSuffix();
+    // Check if this is actually a FOR loop variable by looking for it in the symbol table
+    // with integer suffix
+    BaseType forVarType = (m_options.forLoopType == CompilerOptions::ForLoopType::LONG)
+                          ? BaseType::LONG : BaseType::INTEGER;
+    TypeDescriptor forTypeDesc(forVarType);
+    std::string normalizedIntName = normalizeVariableName(baseName, forTypeDesc);
+    
+    // Check if this normalized name exists in the symbol table as an integer type
+    auto it = m_symbolTable.variables.find(normalizedIntName);
+    if (it != m_symbolTable.variables.end() && 
+        (it->second.typeDesc.baseType == BaseType::INTEGER || 
+         it->second.typeDesc.baseType == BaseType::LONG)) {
+        return normalizedIntName;
     }
     
     // Not a FOR loop variable - return original name unchanged
@@ -3359,12 +3410,9 @@ std::string SemanticAnalyzer::normalizeForLoopVariable(const std::string& varNam
 }
 
 VariableSymbol* SemanticAnalyzer::lookupVariable(const std::string& name) {
-    // Normalize FOR loop variable references
-    std::string lookupName = normalizeForLoopVariable(name);
-    
     // Use legacy lookup for backward compatibility during migration
     std::string functionScope = m_currentFunctionScope.inFunction ? m_currentFunctionScope.functionName : "";
-    VariableSymbol* result = m_symbolTable.lookupVariableLegacy(lookupName, functionScope);
+    VariableSymbol* result = m_symbolTable.lookupVariableLegacy(name, functionScope);
     if (result) {
         return result;
     }
@@ -3508,13 +3556,44 @@ int SemanticAnalyzer::resolveLabelToId(const std::string& name, const SourceLoca
 }
 
 void SemanticAnalyzer::useVariable(const std::string& name, const SourceLocation& loc) {
-    // Normalize FOR loop variable references first
-    std::string normalizedName = normalizeForLoopVariable(name);
+    // First, check if this variable already exists in the current scope with ANY suffix
+    // This is critical for FOR loop variables which are declared as INTEGER but referenced without suffix
+    Scope currentScope = getCurrentScope();
     
-    // TEST: Block variable "n" completely to verify this is where it's being added
-    if (normalizedName == "n") {
-        return;
+    // Debug output to file
+    std::ofstream debugFile("/tmp/use_var_debug.txt", std::ios::app);
+    debugFile << "[DEBUG useVariable] name='" << name << "' scope=" << currentScope.toString() << std::endl;
+    
+    // Strip any existing suffix from the name
+    std::string baseName = stripTypeSuffix(name);
+    
+    // Check if the name already has a suffix (parser mangled it)
+    bool hasExplicitSuffix = (name != baseName);
+    debugFile << "[DEBUG useVariable] baseName='" << baseName << "' hasExplicitSuffix=" << hasExplicitSuffix << std::endl;
+    
+    // If no explicit suffix, try to find the variable with any suffix in current scope
+    if (!hasExplicitSuffix) {
+        std::vector<std::string> suffixes = {"_INT", "_LONG", "_SHORT", "_BYTE", "_DOUBLE", "_FLOAT", "_STRING"};
+        for (const auto& suffix : suffixes) {
+            std::string candidate = baseName + suffix;
+            debugFile << "[DEBUG useVariable] Trying candidate: '" << candidate << "' in scope " << currentScope.toString() << std::endl;
+            auto* existingSym = m_symbolTable.lookupVariable(candidate, currentScope);
+            if (existingSym) {
+                // Found it! Use this existing variable
+                debugFile << "[DEBUG useVariable] FOUND existing variable: " << candidate << std::endl;
+                debugFile.close();
+                existingSym->isUsed = true;
+                return;
+            }
+        }
     }
+    
+    debugFile << "[DEBUG useVariable] Variable not found, will auto-declare" << std::endl;
+    debugFile.close();
+    
+    // Variable doesn't exist in current scope - infer type and create it
+    TypeDescriptor typeDesc = inferTypeFromNameD(name);
+    std::string normalizedName = normalizeVariableName(name, typeDesc);
     
     // Don't create symbol table entry for FOR EACH variables
     if (m_forEachVariables.count(normalizedName) > 0) {
@@ -3523,15 +3602,7 @@ void SemanticAnalyzer::useVariable(const std::string& name, const SourceLocation
     
     auto* sym = lookupVariable(normalizedName);
     if (!sym) {
-        // Implicitly declare using TypeDescriptor
-        TypeDescriptor typeDesc = inferTypeFromNameD(normalizedName);
-        
-        // Debug output to file
-        std::ofstream debugFile("/tmp/for_debug.txt", std::ios::app);
-        debugFile << "[DEBUG] useVariable: declaring '" << normalizedName << "' with inferred type=" 
-                  << static_cast<int>(typeDesc.baseType) << " (original name: " << name << ")" << std::endl;
-        debugFile.close();
-        
+        // Implicitly declare using the inferred TypeDescriptor
         sym = declareVariableD(normalizedName, typeDesc, loc, false);
     }
     sym->isUsed = true;
@@ -3640,6 +3711,89 @@ std::string SemanticAnalyzer::mangleNameWithSuffix(const std::string& name, Toke
         default:
             return name;
     }
+}
+
+// Normalize a variable name to include the proper type suffix
+// This is the canonical function that ensures consistency across the entire system
+std::string SemanticAnalyzer::normalizeVariableName(const std::string& name, const TypeDescriptor& typeDesc) const {
+    // Check if name already has a suffix
+    std::string baseName = stripTypeSuffix(name);
+    
+    // Determine the suffix based on the type descriptor
+    std::string suffix;
+    switch (typeDesc.baseType) {
+        case BaseType::INTEGER:
+            suffix = "_INT";
+            break;
+        case BaseType::LONG:
+            suffix = "_LONG";
+            break;
+        case BaseType::SHORT:
+            suffix = "_SHORT";
+            break;
+        case BaseType::BYTE:
+            suffix = "_BYTE";
+            break;
+        case BaseType::DOUBLE:
+            suffix = "_DOUBLE";
+            break;
+        case BaseType::SINGLE:
+            suffix = "_FLOAT";
+            break;
+        case BaseType::STRING:
+        case BaseType::UNICODE:
+            suffix = "_STRING";
+            break;
+        case BaseType::USER_DEFINED:
+            // User-defined types don't get a suffix
+            return baseName;
+        default:
+            // Unknown types return the base name
+            return baseName;
+    }
+    
+    return baseName + suffix;
+}
+
+// Normalize a variable name based on token suffix and optional AS type
+std::string SemanticAnalyzer::normalizeVariableName(const std::string& name, TokenType suffix, const std::string& asTypeName) const {
+    // If we have an AS type, use it to determine the type descriptor
+    if (!asTypeName.empty()) {
+        std::string upperType = asTypeName;
+        std::transform(upperType.begin(), upperType.end(), upperType.begin(), ::toupper);
+        
+        TypeDescriptor typeDesc;
+        if (upperType == "INTEGER" || upperType == "INT") {
+            typeDesc = TypeDescriptor(BaseType::INTEGER);
+        } else if (upperType == "DOUBLE") {
+            typeDesc = TypeDescriptor(BaseType::DOUBLE);
+        } else if (upperType == "SINGLE" || upperType == "FLOAT") {
+            typeDesc = TypeDescriptor(BaseType::SINGLE);
+        } else if (upperType == "STRING") {
+            typeDesc = TypeDescriptor(BaseType::STRING);
+        } else if (upperType == "LONG") {
+            typeDesc = TypeDescriptor(BaseType::LONG);
+        } else if (upperType == "BYTE") {
+            typeDesc = TypeDescriptor(BaseType::BYTE);
+        } else if (upperType == "SHORT") {
+            typeDesc = TypeDescriptor(BaseType::SHORT);
+        } else {
+            // User-defined type - no suffix
+            typeDesc = TypeDescriptor(BaseType::USER_DEFINED);
+            typeDesc.udtName = asTypeName;
+        }
+        return normalizeVariableName(name, typeDesc);
+    }
+    
+    // Otherwise use the token suffix
+    if (suffix == TokenType::UNKNOWN) {
+        // No type information - return name as-is (but strip any existing suffix first)
+        return stripTypeSuffix(name);
+    }
+    
+    // Convert token suffix to TypeDescriptor
+    TypeDescriptor typeDesc = tokenSuffixToDescriptor(suffix);
+    return normalizeVariableName(name, typeDesc);
 }
 
 // =============================================================================
@@ -4627,12 +4781,24 @@ void SemanticAnalyzer::validateVariableInFunction(const std::string& varName,
         return;
     }
     
-    // Check if variable is declared in function scope
+    // Check if variable is declared in function scope (try bare name first)
     if (m_currentFunctionScope.parameters.count(varName) ||
         m_currentFunctionScope.localVariables.count(varName) ||
         m_currentFunctionScope.sharedVariables.count(varName)) {
         // Variable is properly declared
         return;
+    }
+    
+    // Try with type suffixes (LOCAL i AS INTEGER stores as i_INT, but usage might be just 'i')
+    const std::string suffixes[] = {"_INT", "_DOUBLE", "_FLOAT", "_STRING", "_LONG", "_BYTE", "_SHORT"};
+    for (const auto& suffix : suffixes) {
+        std::string mangledName = varName + suffix;
+        if (m_currentFunctionScope.parameters.count(mangledName) ||
+            m_currentFunctionScope.localVariables.count(mangledName) ||
+            m_currentFunctionScope.sharedVariables.count(mangledName)) {
+            // Found with mangled name
+            return;
+        }
     }
     
     // Variable not declared - ERROR!
@@ -4641,6 +4807,79 @@ void SemanticAnalyzer::validateVariableInFunction(const std::string& varName,
           m_currentFunctionScope.functionName + ". " +
           "Use LOCAL or SHARED to declare it.",
           loc);
+}
+
+void SemanticAnalyzer::fixSymbolTableMangling() {
+    std::cerr << "\n=== Fixing Symbol Table Mangling ===" << std::endl;
+    
+    // Build a map of old name -> new name for updating function scopes
+    std::map<std::string, std::string> renames;
+    
+    for (auto& [key, varSym] : m_symbolTable.variables) {
+        std::string expectedSuffix;
+        bool needsSuffix = true;
+        
+        // Determine expected suffix based on type
+        switch (varSym.typeDesc.baseType) {
+            case BaseType::INTEGER:
+                expectedSuffix = "_INT";
+                break;
+            case BaseType::LONG:
+                expectedSuffix = "_LONG";
+                break;
+            case BaseType::SHORT:
+                expectedSuffix = "_SHORT";
+                break;
+            case BaseType::BYTE:
+                expectedSuffix = "_BYTE";
+                break;
+            case BaseType::DOUBLE:
+                expectedSuffix = "_DOUBLE";
+                break;
+            case BaseType::SINGLE:
+                expectedSuffix = "_FLOAT";
+                break;
+            case BaseType::STRING:
+            case BaseType::UNICODE:
+                expectedSuffix = "_STRING";
+                break;
+            case BaseType::USER_DEFINED:
+                needsSuffix = false;  // UDTs don't need suffix
+                break;
+            default:
+                needsSuffix = false;
+                break;
+        }
+        
+        if (needsSuffix) {
+            // Check if variable name has the expected suffix
+            bool hasSuffix = (varSym.name.length() > expectedSuffix.length() &&
+                              varSym.name.substr(varSym.name.length() - expectedSuffix.length()) == expectedSuffix);
+            
+            if (!hasSuffix) {
+                // Need to add suffix
+                std::string oldName = varSym.name;
+                std::string newName = varSym.name + expectedSuffix;
+                std::cerr << "  Renaming: '" << oldName << "' -> '" << newName << "'" << std::endl;
+                renames[oldName] = newName;
+                varSym.name = newName;  // Update the symbol's name
+            }
+        }
+    }
+    
+    // Update function scopes: We need to update the localVariables sets in all functions
+    // For now, rebuild the localVariables set from the symbol table
+    // (This is a simple approach that works for the current scope model)
+    for (auto& [key, varSym] : m_symbolTable.variables) {
+        if (varSym.scope.isFunction() && !varSym.isGlobal) {
+            // This is a local variable - ensure it's in the function's localVariables set
+            // Note: We can't directly access function scopes here, but validateVariableInFunction
+            // will need to be updated to handle mangled names
+        }
+    }
+    
+    std::cerr << "  Fixed " << renames.size() << " variable names" << std::endl;
+    std::cerr << "=== End Symbol Table Mangling Fix ===\n" << std::endl;
 }
 
 // =============================================================================

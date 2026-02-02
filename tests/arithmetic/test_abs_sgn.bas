@@ -77,7 +77,6 @@
 770 END SUB
 780
 790 SUB test_loop()
-800   LOCAL i AS INTEGER
 810   LOCAL sum AS DOUBLE
 820   PRINT "--- Loop Test ---"
 830   sum = 0.0

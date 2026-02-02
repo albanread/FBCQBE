@@ -1017,17 +1017,24 @@ public:
                                                 const std::string& functionScope = "") const;
     
     // Check if a variable is a FOR loop variable (suffix-agnostic)
+    // FOR loop variables are tracked in the symbol table with normalized names
     bool isForLoopVariable(const std::string& varName) const {
-        // Strip suffix and check base name
-        std::string baseName = varName;
-        if (!baseName.empty()) {
-            char lastChar = baseName.back();
-            if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
-                lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
-                baseName = baseName.substr(0, baseName.length() - 1);
-            }
+        // Strip suffix to get base name
+        std::string baseName = stripTypeSuffix(varName);
+        
+        // Check if this variable exists in the symbol table as an integer type
+        // (FOR variables are always integers based on OPTION FOR setting)
+        auto it = m_symbolTable.variables.find(baseName + "_INT");
+        if (it != m_symbolTable.variables.end()) {
+            return it->second.typeDesc.baseType == BaseType::INTEGER;
         }
-        return m_forLoopVariables.count(baseName) > 0;
+        
+        it = m_symbolTable.variables.find(baseName + "_LONG");
+        if (it != m_symbolTable.variables.end()) {
+            return it->second.typeDesc.baseType == BaseType::LONG;
+        }
+        
+        return false;
     }
 
     // Helper to get the correct integer suffix based on OPTION FOR setting
@@ -1227,6 +1234,11 @@ private:
     VariableType inferTypeFromName(const std::string& name);
     std::string mangleNameWithSuffix(const std::string& name, TokenType suffix);
 
+    // Variable name normalization - ensures all variable names have proper type suffixes
+    // This is the canonical function to normalize variable names throughout the system
+    std::string normalizeVariableName(const std::string& name, const TypeDescriptor& typeDesc) const;
+    std::string normalizeVariableName(const std::string& name, TokenType suffix, const std::string& asTypeName = "") const;
+
     // FOR loop variable normalization
     // If varName references a FOR loop variable (by base name), returns the normalized name
     // with the correct integer suffix based on OPTION FOR. Otherwise returns varName unchanged.
@@ -1335,6 +1347,9 @@ private:
     // Validation helper for variables in functions
     void validateVariableInFunction(const std::string& varName, const SourceLocation& loc);
     void validateReturnStatement(const ReturnStatement& stmt);
+    
+    // Symbol table fix pass - ensure all variables have correct type suffixes
+    void fixSymbolTableMangling();
 };
 
 } // namespace FasterBASIC

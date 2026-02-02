@@ -3940,6 +3940,7 @@ StatementPtr Parser::parseFunctionStatement() {
 
     std::string funcName = current().value;
     TokenType returnType = TokenType::UNKNOWN;
+    bool hasSuffix = false;
 
     // Extract and mangle type suffix from function name
     if (!funcName.empty()) {
@@ -3949,26 +3950,31 @@ StatementPtr Parser::parseFunctionStatement() {
                 returnType = TokenType::TYPE_STRING;
                 funcName.pop_back();
                 funcName += "_STRING";
+                hasSuffix = true;
                 break;
             case '%':
                 returnType = TokenType::TYPE_INT;
                 funcName.pop_back();
                 funcName += "_INT";
+                hasSuffix = true;
                 break;
             case '#':
                 returnType = TokenType::TYPE_DOUBLE;
                 funcName.pop_back();
                 funcName += "_DOUBLE";
+                hasSuffix = true;
                 break;
             case '!':
                 returnType = TokenType::TYPE_FLOAT;
                 funcName.pop_back();
                 funcName += "_FLOAT";
+                hasSuffix = true;
                 break;
             case '&':
                 returnType = TokenType::TYPE_INT;
                 funcName.pop_back();
                 funcName += "_LONG";
+                hasSuffix = true;
                 break;
         }
     }
@@ -4065,6 +4071,11 @@ StatementPtr Parser::parseFunctionStatement() {
                 }
             }
 
+            // Default to DOUBLE if no type suffix or AS clause specified
+            if (paramType == TokenType::UNKNOWN && paramAsType.empty()) {
+                paramType = TokenType::TYPE_DOUBLE;
+            }
+
             stmt->addParameter(paramName, paramType, isByRef, paramAsType);
         } while (match(TokenType::COMMA));
     }
@@ -4086,7 +4097,7 @@ StatementPtr Parser::parseFunctionStatement() {
             TokenType convertedType = asTypeToSuffix(asType);
             
             // Validate: if explicit suffix was given, it should match
-            if (returnType != TokenType::UNKNOWN && returnType != convertedType) {
+            if (hasSuffix && returnType != convertedType) {
                 error("Type suffix conflicts with AS type declaration for function " + funcName);
             }
             stmt->returnTypeSuffix = convertedType;
@@ -4098,12 +4109,28 @@ StatementPtr Parser::parseFunctionStatement() {
             advance();
             
             // Validate: user-defined types can't have type suffixes
-            if (returnType != TokenType::UNKNOWN) {
+            if (hasSuffix) {
                 error("Cannot use type suffix with user-defined return type AS " + stmt->returnTypeAsName);
             }
         } else {
             error("Expected type name after AS in function declaration");
         }
+    }
+    
+    // If no suffix and no AS clause, default to DOUBLE
+    if (returnType == TokenType::UNKNOWN && !stmt->hasReturnAsType) {
+        returnType = TokenType::TYPE_DOUBLE;
+        stmt->returnTypeSuffix = TokenType::TYPE_DOUBLE;
+        // Debug output to file
+        std::ofstream debugFile("/tmp/func_type_debug.txt", std::ios::app);
+        debugFile << "[DEBUG] Function " << funcName << " has no type suffix or AS clause, defaulting to DOUBLE" << std::endl;
+        debugFile.close();
+    } else {
+        std::ofstream debugFile("/tmp/func_type_debug.txt", std::ios::app);
+        debugFile << "[DEBUG] Function " << funcName << " returnType=" << static_cast<int>(returnType) 
+                  << " hasReturnAsType=" << stmt->hasReturnAsType 
+                  << " returnTypeSuffix=" << static_cast<int>(stmt->returnTypeSuffix) << std::endl;
+        debugFile.close();
     }
 
     // Expect end of line after FUNCTION declaration

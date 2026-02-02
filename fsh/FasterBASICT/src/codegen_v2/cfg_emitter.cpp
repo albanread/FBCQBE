@@ -74,6 +74,10 @@ void CFGEmitter::emitBlock(const BasicBlock* block, const ControlFlowGraph* cfg)
     // If this is the entry block (block 0), allocate stack space for all local variables
     if (blockId == 0) {
         const auto& symbolTable = astEmitter_.getSymbolTable();
+        
+        // Get function parameters from CFG (these are the actual QBE parameter names)
+        std::vector<std::string> cfgParams = cfg->parameters;
+        
         for (const auto& pair : symbolTable.variables) {
             const auto& varSymbol = pair.second;
             
@@ -104,14 +108,45 @@ void CFGEmitter::emitBlock(const BasicBlock* block, const ControlFlowGraph* cfg)
                     builder_.emitRaw("    " + mangledName + " =l alloc8 " + std::to_string(size));
                 }
                 
-                // Initialize to 0 (BASIC variables are implicitly initialized)
-                if (typeManager_.isString(varType)) {
-                    // Strings initialized to null pointer
-                    builder_.emitRaw("    storel 0, " + mangledName);
-                } else if (size == 4) {
-                    builder_.emitRaw("    storew 0, " + mangledName);
-                } else if (size == 8) {
-                    builder_.emitRaw("    storel 0, " + mangledName);
+                // Check if this variable is a function parameter
+                // Parameters in symbol table are normalized (e.g., X_DOUBLE)
+                // CFG parameters are bare names (e.g., X)
+                bool isParameter = false;
+                std::string qbeParamName;
+                for (const auto& cfgParam : cfgParams) {
+                    // Check if varSymbol.name starts with the CFG parameter name
+                    // e.g., varSymbol.name="X_DOUBLE" should match cfgParam="X"
+                    if (varSymbol.name.find(cfgParam) == 0 && 
+                        (varSymbol.name.length() == cfgParam.length() || 
+                         varSymbol.name[cfgParam.length()] == '_')) {
+                        isParameter = true;
+                        qbeParamName = cfgParam;  // Use the CFG parameter name (what QBE uses)
+                        break;
+                    }
+                }
+                
+                if (isParameter) {
+                    // This is a parameter - store the QBE parameter value
+                    std::string qbeParam = "%" + qbeParamName;
+                    if (size == 4) {
+                        builder_.emitRaw("    storew " + qbeParam + ", " + mangledName);
+                    } else if (size == 8) {
+                        if (typeManager_.isString(varType)) {
+                            builder_.emitRaw("    storel " + qbeParam + ", " + mangledName);
+                        } else {
+                            builder_.emitRaw("    stored " + qbeParam + ", " + mangledName);
+                        }
+                    }
+                } else {
+                    // Initialize to 0 (BASIC variables are implicitly initialized)
+                    if (typeManager_.isString(varType)) {
+                        // Strings initialized to null pointer
+                        builder_.emitRaw("    storel 0, " + mangledName);
+                    } else if (size == 4) {
+                        builder_.emitRaw("    storew 0, " + mangledName);
+                    } else if (size == 8) {
+                        builder_.emitRaw("    storel 0, " + mangledName);
+                    }
                 }
             }
         }
@@ -210,15 +245,128 @@ void CFGEmitter::emitBlock(const BasicBlock* block, const ControlFlowGraph* cfg)
 void CFGEmitter::emitBlockTerminator(const BasicBlock* block, const ControlFlowGraph* cfg) {
     std::vector<CFGEdge> outEdges = getOutEdges(block, cfg);
     
+    // Check if this block contains a RETURN statement that needs to be processed
+    const ReturnStatement* returnStmt = nullptr;
+    for (const Statement* stmt : block->statements) {
+        if (stmt && stmt->getType() == ASTNodeType::STMT_RETURN) {
+            returnStmt = static_cast<const ReturnStatement*>(stmt);
+            break;
+        }
+    }
+    
+    // If this block has a RETURN statement, process it here
+    if (returnStmt) {
+        if (returnStmt->returnValue) {
+            // FUNCTION return - evaluate expression and store in return variable
+            std::string value = astEmitter_.emitExpression(returnStmt->returnValue.get());
+            
+            const auto& symbolTable = astEmitter_.getSymbolTable();
+            auto funcIt = symbolTable.functions.find(currentFunction_);
+            if (funcIt != symbolTable.functions.end()) {
+                const auto& funcSymbol = funcIt->second;
+                BaseType returnType = funcSymbol.returnTypeDesc.baseType;
+                
+                // Get normalized return variable name
+                std::string returnVarName = currentFunction_ + "_DOUBLE"; // Default
+                switch (returnType) {
+                    case BaseType::INTEGER:
+                        returnVarName = currentFunction_ + "_INT";
+                        break;
+                    case BaseType::LONG:
+                        returnVarName = currentFunction_ + "_LONG";
+                        break;
+                    case BaseType::SHORT:
+                        returnVarName = currentFunction_ + "_SHORT";
+                        break;
+                    case BaseType::BYTE:
+                        returnVarName = currentFunction_ + "_BYTE";
+                        break;
+                    case BaseType::SINGLE:
+                        returnVarName = currentFunction_ + "_FLOAT";
+                        break;
+                    case BaseType::DOUBLE:
+                        returnVarName = currentFunction_ + "_DOUBLE";
+                        break;
+                    case BaseType::STRING:
+                    case BaseType::UNICODE:
+                        returnVarName = currentFunction_ + "_STRING";
+                        break;
+                    default:
+                        returnVarName = currentFunction_;
+                        break;
+                }
+                
+                // Store the value in the return variable
+                astEmitter_.storeVariable(returnVarName, value);
+            }
+        }
+        
+        // Now emit the jump to exit block (handled by normal edge processing below)
+        // Don't return here - let the normal edge processing handle the jump
+    }
+    
     if (outEdges.empty()) {
         // No out-edges - this is an exit block
-        // If we're in main, just return 0; otherwise, error
+        // If we're in main, just return 0; otherwise, return the function return variable
         if (currentFunction_.empty() || currentFunction_ == "main") {
             builder_.emitComment("Implicit return 0");
             builder_.emitReturn("0");
         } else {
-            builder_.emitComment("WARNING: block with no out-edges (missing return?)");
-            builder_.emitReturn();
+            // Load and return the function return variable
+            const auto& symbolTable = astEmitter_.getSymbolTable();
+            auto funcIt = symbolTable.functions.find(currentFunction_);
+            if (funcIt != symbolTable.functions.end()) {
+                const auto& funcSymbol = funcIt->second;
+                BaseType returnType = funcSymbol.returnTypeDesc.baseType;
+                
+                // SUBs have VOID return type and should just return without a value
+                if (returnType == BaseType::VOID) {
+                    builder_.emitComment("SUB exit - no return value");
+                    builder_.emitReturn();
+                    return;
+                }
+                
+                std::string qbeType = typeManager_.getQBEType(returnType);
+                
+                // Get normalized return variable name
+                std::string returnVarName = currentFunction_ + "_DOUBLE"; // Default
+                switch (returnType) {
+                    case BaseType::INTEGER:
+                        returnVarName = currentFunction_ + "_INT";
+                        break;
+                    case BaseType::LONG:
+                        returnVarName = currentFunction_ + "_LONG";
+                        break;
+                    case BaseType::SHORT:
+                        returnVarName = currentFunction_ + "_SHORT";
+                        break;
+                    case BaseType::BYTE:
+                        returnVarName = currentFunction_ + "_BYTE";
+                        break;
+                    case BaseType::SINGLE:
+                        returnVarName = currentFunction_ + "_FLOAT";
+                        break;
+                    case BaseType::DOUBLE:
+                        returnVarName = currentFunction_ + "_DOUBLE";
+                        break;
+                    case BaseType::STRING:
+                    case BaseType::UNICODE:
+                        returnVarName = currentFunction_ + "_STRING";
+                        break;
+                    default:
+                        returnVarName = currentFunction_;
+                        break;
+                }
+                
+                std::string mangledName = symbolMapper_.mangleVariableName(returnVarName, false);
+                std::string retTemp = builder_.newTemp();
+                
+                builder_.emitLoad(retTemp, qbeType, mangledName);
+                builder_.emitReturn(retTemp);
+            } else {
+                builder_.emitComment("WARNING: block with no out-edges (missing return?)");
+                builder_.emitReturn();
+            }
         }
         return;
     }
@@ -378,7 +526,12 @@ void CFGEmitter::emitBlockTerminator(const BasicBlock* block, const ControlFlowG
     if (edgeType == EdgeType::FALLTHROUGH || edgeType == EdgeType::JUMP) {
         // Simple fallthrough/jump - unconditional jump
         if (outEdges.size() == 1) {
-            builder_.emitComment(edgeType == EdgeType::FALLTHROUGH ? "Fallthrough edge" : "Jump edge");
+            // Add comment about what kind of edge this is
+            if (returnStmt) {
+                builder_.emitComment("RETURN statement - jump to exit");
+            } else {
+                builder_.emitComment(edgeType == EdgeType::FALLTHROUGH ? "Fallthrough edge" : "Jump edge");
+            }
             emitFallthrough(outEdges[0].targetBlock);
         } else {
             builder_.emitComment("ERROR: multiple FALLTHROUGH edges");
@@ -697,6 +850,11 @@ void CFGEmitter::emitBlockStatements(const BasicBlock* block) {
     
     for (const Statement* stmt : block->statements) {
         if (stmt) {
+            // Skip RETURN statements - they are control flow terminators
+            // and will be handled by emitBlockTerminator
+            if (stmt->getType() == ASTNodeType::STMT_RETURN) {
+                continue;
+            }
             astEmitter_.emitStatement(stmt);
         }
     }

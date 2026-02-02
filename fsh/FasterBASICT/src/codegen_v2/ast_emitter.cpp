@@ -553,8 +553,50 @@ std::string ASTEmitter::emitFunctionCall(const FunctionCallExpression* expr) {
     auto funcIt = symbolTable.functions.find(funcName);
     if (funcIt != symbolTable.functions.end()) {
         // User-defined function call
-        builder_.emitComment("TODO: user-defined function call " + funcName);
-        return "0";
+        const auto& funcSymbol = funcIt->second;
+        
+        // Debug output
+        std::ofstream debugFile("/tmp/func_call_debug.txt", std::ios::app);
+        debugFile << "[DEBUG] Function call: funcName='" << funcName << "'" << std::endl;
+        debugFile.close();
+        
+        // Evaluate arguments
+        std::vector<std::string> argTemps;
+        for (size_t i = 0; i < expr->arguments.size(); ++i) {
+            std::string argTemp = emitExpression(expr->arguments[i].get());
+            
+            // Convert argument to match parameter type if needed
+            BaseType argType = getExpressionType(expr->arguments[i].get());
+            BaseType paramType = funcSymbol.parameterTypeDescs[i].baseType;
+            
+            if (argType != paramType) {
+                argTemp = emitExpressionAs(expr->arguments[i].get(), paramType);
+            }
+            
+            argTemps.push_back(argTemp);
+        }
+        
+        // Build QBE function name (without $ prefix - emitCall adds it)
+        std::string qbeFuncName = "func_" + funcName;
+        
+        // Get return type
+        BaseType returnType = funcSymbol.returnTypeDesc.baseType;
+        std::string qbeReturnType = typeManager_.getQBEType(returnType);
+        
+        // Build argument string
+        std::string argsStr;
+        for (size_t i = 0; i < argTemps.size(); ++i) {
+            if (i > 0) argsStr += ", ";
+            // Get parameter type
+            BaseType paramType = funcSymbol.parameterTypeDescs[i].baseType;
+            std::string qbeParamType = typeManager_.getQBEType(paramType);
+            argsStr += qbeParamType + " " + argTemps[i];
+        }
+        
+        // Emit call
+        std::string result = builder_.newTemp();
+        builder_.emitCall(result, qbeReturnType, qbeFuncName, argsStr);
+        return result;
     }
     
     // Unknown function
@@ -820,6 +862,10 @@ void ASTEmitter::emitStatement(const Statement* stmt) {
             emitCallStatement(static_cast<const CallStatement*>(stmt));
             break;
             
+        case ASTNodeType::STMT_RETURN:
+            emitReturnStatement(static_cast<const ReturnStatement*>(stmt));
+            break;
+            
         default:
             builder_.emitComment("TODO: statement type " + std::to_string(static_cast<int>(stmt->getType())) + " not yet implemented");
             break;
@@ -916,6 +962,74 @@ void ASTEmitter::emitEndStatement(const EndStatement* stmt) {
     // END statement - terminate execution
     builder_.emitComment("END statement - program exit");
     builder_.emitReturn("0");
+}
+
+void ASTEmitter::emitReturnStatement(const ReturnStatement* stmt) {
+    // RETURN statement - return from FUNCTION or SUB
+    if (stmt->returnValue) {
+        // FUNCTION return - evaluate expression and store in return variable
+        std::string value = emitExpression(stmt->returnValue.get());
+        
+        // Get current function name
+        std::string currentFunc = symbolMapper_.getCurrentFunction();
+        if (currentFunc.empty()) {
+            builder_.emitComment("ERROR: RETURN outside of function");
+            return;
+        }
+        
+        // Look up function to get return type
+        const auto& symbolTable = semantic_.getSymbolTable();
+        auto funcIt = symbolTable.functions.find(currentFunc);
+        if (funcIt == symbolTable.functions.end()) {
+            builder_.emitComment("ERROR: Current function not found in symbol table");
+            return;
+        }
+        
+        const auto& funcSymbol = funcIt->second;
+        BaseType returnType = funcSymbol.returnTypeDesc.baseType;
+        
+        // Build normalized return variable name
+        std::string returnVarName = currentFunc + "_DOUBLE"; // Default
+        switch (returnType) {
+            case BaseType::INTEGER:
+                returnVarName = currentFunc + "_INT";
+                break;
+            case BaseType::LONG:
+                returnVarName = currentFunc + "_LONG";
+                break;
+            case BaseType::SHORT:
+                returnVarName = currentFunc + "_SHORT";
+                break;
+            case BaseType::BYTE:
+                returnVarName = currentFunc + "_BYTE";
+                break;
+            case BaseType::SINGLE:
+                returnVarName = currentFunc + "_FLOAT";
+                break;
+            case BaseType::DOUBLE:
+                returnVarName = currentFunc + "_DOUBLE";
+                break;
+            case BaseType::STRING:
+            case BaseType::UNICODE:
+                returnVarName = currentFunc + "_STRING";
+                break;
+            default:
+                returnVarName = currentFunc;
+                break;
+        }
+        
+        // Store the value in the return variable
+        storeVariable(returnVarName, value);
+        
+        builder_.emitComment("RETURN statement - jump to exit");
+        // Jump to exit block (block 1 by convention)
+        builder_.emitJump("block_1");
+    } else {
+        // SUB return (or RETURN from GOSUB) - no value
+        builder_.emitComment("RETURN statement (SUB/GOSUB)");
+        // For SUB, just jump to exit
+        builder_.emitJump("block_1");
+    }
 }
 
 void ASTEmitter::emitLocalStatement(const LocalStatement* stmt) {
@@ -1259,28 +1373,58 @@ std::string ASTEmitter::normalizeForLoopVarName(const std::string& varName) cons
     return varName;
 }
 
-std::string ASTEmitter::getVariableAddress(const std::string& varName) {
-    // For FOR loop variables, normalize to correct integer suffix
-    // The semantic analyzer has already declared the variable with the normalized name
-    std::string lookupName = normalizeForLoopVarName(varName);
+std::string ASTEmitter::normalizeVariableName(const std::string& varName) const {
+    // First check if it's a FOR loop variable
+    std::string forNormalized = normalizeForLoopVarName(varName);
+    if (forNormalized != varName) {
+        return forNormalized;
+    }
     
-    // Debug
-    std::ofstream debugFile("/tmp/for_debug.txt", std::ios::app);
-    debugFile << "[DEBUG getVariableAddress] varName='" << varName << "' lookupName='" << lookupName << "'" << std::endl;
+    // Not a FOR loop variable - check if name already has a suffix
+    // If it does, the parser already mangled it, so return as-is
+    if (varName.find("_INT") != std::string::npos ||
+        varName.find("_DOUBLE") != std::string::npos ||
+        varName.find("_FLOAT") != std::string::npos ||
+        varName.find("_STRING") != std::string::npos ||
+        varName.find("_LONG") != std::string::npos ||
+        varName.find("_BYTE") != std::string::npos ||
+        varName.find("_SHORT") != std::string::npos) {
+        return varName;
+    }
+    
+    // No suffix - check if variable exists in symbol table with any suffix
+    std::string currentFunc = symbolMapper_.getCurrentFunction();
+    const auto& symbolTable = semantic_.getSymbolTable();
+    
+    // Try all possible suffixes to see if the variable already exists
+    std::vector<std::string> suffixes = {"_INT", "_LONG", "_SHORT", "_BYTE", "_DOUBLE", "_FLOAT", "_STRING"};
+    for (const auto& suffix : suffixes) {
+        std::string candidate = varName + suffix;
+        const auto* varSymbol = semantic_.lookupVariableScoped(candidate, currentFunc);
+        if (varSymbol) {
+            return candidate;
+        }
+    }
+    
+    // Variable doesn't exist in symbol table - this is an error!
+    // Codegen should never create variables; they must all be declared by semantic analyzer
+    builder_.emitComment("ERROR: Variable '" + varName + "' not found in symbol table");
+    return varName + "_UNKNOWN";  // Return something to avoid crashes, but this is an error
+}
+
+std::string ASTEmitter::getVariableAddress(const std::string& varName) {
+    // Normalize variable name using semantic analyzer's type inference
+    std::string lookupName = normalizeVariableName(varName);
     
     // Look up variable with scoped lookup
     std::string currentFunc = symbolMapper_.getCurrentFunction();
-    debugFile << "[DEBUG getVariableAddress] currentFunc='" << currentFunc << "'" << std::endl;
     
     const auto* varSymbolPtr = semantic_.lookupVariableScoped(lookupName, currentFunc);
+    
     if (!varSymbolPtr) {
-        debugFile << "[DEBUG getVariableAddress] LOOKUP FAILED for '" << lookupName << "'" << std::endl;
-        debugFile.close();
-        builder_.emitComment("ERROR: variable not found: " + lookupName);
+        builder_.emitComment("ERROR: variable not found: " + varName + " (normalized: " + lookupName + ")");
         return builder_.newTemp();
     }
-    debugFile << "[DEBUG getVariableAddress] LOOKUP SUCCESS" << std::endl;
-    debugFile.close();
     const auto& varSymbol = *varSymbolPtr;
     
     // Check if we're in a function and the variable is SHARED
@@ -1306,8 +1450,19 @@ std::string ASTEmitter::getVariableAddress(const std::string& varName) {
 }
 
 std::string ASTEmitter::loadVariable(const std::string& varName) {
-    // For FOR loop variables, normalize to correct integer suffix
-    std::string lookupName = normalizeForLoopVarName(varName);
+    // Normalize variable name using semantic analyzer's type inference
+    std::string lookupName = normalizeVariableName(varName);
+    
+    // Look up variable with scoped lookup
+    std::string currentFunc = symbolMapper_.getCurrentFunction();
+    
+    const auto* varSymbolPtr = semantic_.lookupVariableScoped(lookupName, currentFunc);
+    
+    if (!varSymbolPtr) {
+        builder_.emitComment("ERROR: variable not found: " + varName + " (normalized: " + lookupName + ")");
+        return builder_.newTemp();
+    }
+    const auto& varSymbol = *varSymbolPtr;
     
     // Check if this is a function parameter FIRST - parameters are passed as QBE temporaries
     // and don't need to be loaded from memory
@@ -1319,15 +1474,6 @@ std::string ASTEmitter::loadVariable(const std::string& varName) {
     
     BaseType varType = getVariableType(lookupName);
     std::string qbeType = typeManager_.getQBEType(varType);
-    
-    // Look up variable with scoped lookup
-    std::string currentFunc = symbolMapper_.getCurrentFunction();
-    const auto* varSymbolPtr = semantic_.lookupVariableScoped(lookupName, currentFunc);
-    if (!varSymbolPtr) {
-        builder_.emitComment("ERROR: variable not found: " + lookupName);
-        return builder_.newTemp();
-    }
-    const auto& varSymbol = *varSymbolPtr;
     
     // Check if we're in a function and the variable is SHARED
     bool treatAsGlobal = varSymbol.isGlobal || 
@@ -1349,8 +1495,8 @@ std::string ASTEmitter::loadVariable(const std::string& varName) {
 }
 
 void ASTEmitter::storeVariable(const std::string& varName, const std::string& value) {
-    // For FOR loop variables, normalize to correct integer suffix
-    std::string lookupName = normalizeForLoopVarName(varName);
+    // Normalize variable name using semantic analyzer's type inference
+    std::string lookupName = normalizeVariableName(varName);
     
     BaseType varType = getVariableType(lookupName);
     std::string qbeType = typeManager_.getQBEType(varType);
@@ -1370,7 +1516,7 @@ void ASTEmitter::storeVariable(const std::string& varName, const std::string& va
     std::string currentFunc = symbolMapper_.getCurrentFunction();
     const auto* varSymbolPtr = semantic_.lookupVariableScoped(lookupName, currentFunc);
     if (!varSymbolPtr) {
-        builder_.emitComment("ERROR: variable not found: " + lookupName);
+        builder_.emitComment("ERROR: variable not found: " + varName + " (normalized: " + lookupName + ")");
         return;
     }
     const auto& varSymbol = *varSymbolPtr;
@@ -1655,8 +1801,11 @@ BaseType ASTEmitter::getExpressionType(const Expression* expr) {
 }
 
 BaseType ASTEmitter::getVariableType(const std::string& varName) {
+    // Normalize the variable name first to match symbol table entries
+    std::string normalizedName = normalizeVariableName(varName);
+    
     // Check if this is a parameter first - get type from function symbol
-    if (symbolMapper_.inFunctionScope() && symbolMapper_.isParameter(varName)) {
+    if (symbolMapper_.inFunctionScope() && symbolMapper_.isParameter(normalizedName)) {
         std::string currentFunc = symbolMapper_.getCurrentFunction();
         const auto& symbolTable = semantic_.getSymbolTable();
         auto it = symbolTable.functions.find(currentFunc);
@@ -1664,7 +1813,7 @@ BaseType ASTEmitter::getVariableType(const std::string& varName) {
             const auto& funcSymbol = it->second;
             // Find the parameter index
             for (size_t i = 0; i < funcSymbol.parameters.size(); ++i) {
-                if (funcSymbol.parameters[i] == varName) {
+                if (funcSymbol.parameters[i] == normalizedName) {
                     BaseType paramType = funcSymbol.parameterTypeDescs[i].baseType;
                     return paramType;
                 }
@@ -1672,9 +1821,9 @@ BaseType ASTEmitter::getVariableType(const std::string& varName) {
         }
     }
     
-    // Use scoped lookup for variable type
+    // Use scoped lookup for variable type with normalized name
     std::string currentFunc = symbolMapper_.getCurrentFunction();
-    const auto* varSymbol = semantic_.lookupVariableScoped(varName, currentFunc);
+    const auto* varSymbol = semantic_.lookupVariableScoped(normalizedName, currentFunc);
     if (!varSymbol) {
         return BaseType::UNKNOWN;
     }

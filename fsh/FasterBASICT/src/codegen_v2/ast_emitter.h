@@ -148,6 +148,12 @@ public:
     void emitEndStatement(const FasterBASIC::EndStatement* stmt);
     
     /**
+     * Emit RETURN statement
+     * @param stmt RETURN statement
+     */
+    void emitReturnStatement(const FasterBASIC::ReturnStatement* stmt);
+    
+    /**
      * Emit DIM statement (array declaration)
      * @param stmt DIM statement
      */
@@ -307,6 +313,10 @@ private:
     // If varName references a FOR loop variable, returns it with the correct integer suffix
     // Otherwise returns varName unchanged
     std::string normalizeForLoopVarName(const std::string& varName) const;
+    
+    // Normalize a variable name to include proper type suffix based on semantic analyzer's type inference
+    // This ensures codegen uses the same normalized names as the symbol table
+    std::string normalizeVariableName(const std::string& varName) const;
 };
 
 } // namespace fbc

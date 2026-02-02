@@ -3,6 +3,20 @@
 
 set -e
 
+# Check for --clean flag
+if [ "$1" = "--clean" ]; then
+    echo "=== Cleaning build artifacts ==="
+    cd "$(dirname "$0")"
+    rm -rf obj/*
+    rm -rf qbe_source/*.o
+    rm -rf qbe_source/amd64/*.o
+    rm -rf qbe_source/arm64/*.o
+    rm -rf qbe_source/rv64/*.o
+    rm -f fbc_qbe qbe_basic
+    echo "  ✓ Clean complete"
+    exit 0
+fi
+
 echo "=== Building QBE with FasterBASIC Integration (CodeGen V2) ==="
 
 cd "$(dirname "$0")"
@@ -10,6 +24,7 @@ cd "$(dirname "$0")"
 PROJECT_ROOT="$(pwd)"
 QBE_DIR="$PROJECT_ROOT/qbe_source"
 FASTERBASIC_SRC="$PROJECT_ROOT/../fsh/FasterBASICT/src"
+NUM_JOBS=8
 
 # Check if FasterBASIC sources exist
 if [ ! -d "$FASTERBASIC_SRC" ]; then
@@ -22,10 +37,20 @@ echo "Compiling FasterBASIC compiler sources..."
 
 mkdir -p obj
 
-# Compile each FasterBASIC C++ source
+# Compile each FasterBASIC C++ source in parallel
 # NOTE: Using modular CFG v2 structure (February 2026 refactor)
 # NOTE: Using NEW codegen_v2 (CFG-v2 compatible)
-clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -c \
+compile_source() {
+    local src="$1"
+    local output="obj/$(basename "$src" .cpp).o"
+    clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -c "$src" -o "$output"
+}
+
+export -f compile_source
+export FASTERBASIC_SRC
+
+# Compile sources in parallel
+printf '%s\n' \
     "$FASTERBASIC_SRC/fasterbasic_lexer.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_parser.cpp" \
     "$FASTERBASIC_SRC/fasterbasic_semantic.cpp" \
@@ -51,9 +76,13 @@ clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -c \
     "$FASTERBASIC_SRC/codegen_v2/runtime_library.cpp" \
     "$FASTERBASIC_SRC/codegen_v2/ast_emitter.cpp" \
     "$FASTERBASIC_SRC/codegen_v2/cfg_emitter.cpp" \
-    "$FASTERBASIC_SRC/codegen_v2/qbe_codegen_v2.cpp"
+    "$FASTERBASIC_SRC/codegen_v2/qbe_codegen_v2.cpp" \
+| xargs -n 1 -P "$NUM_JOBS" -I {} bash -c 'compile_source "$@"' _ {}
 
-mv *.o obj/ 2>/dev/null || true
+if [ $? -ne 0 ]; then
+    echo "  ✗ FasterBASIC compilation failed"
+    exit 1
+fi
 
 echo "  ✓ FasterBASIC compiled (with codegen_v2)"
 
@@ -62,6 +91,10 @@ echo "Compiling BASIC runtime library..."
 RUNTIME_SRC="$PROJECT_ROOT/../fsh/runtime_stubs.c"
 if [ -f "$RUNTIME_SRC" ]; then
     cc -std=c99 -O2 -c "$RUNTIME_SRC" -o "$PROJECT_ROOT/obj/runtime_stubs.o"
+    if [ $? -ne 0 ]; then
+        echo "  ✗ Runtime library compilation failed"
+        exit 1
+    fi
     echo "  ✓ Runtime library compiled"
 else
     echo "  ⚠ Warning: runtime_stubs.c not found at $RUNTIME_SRC"
@@ -74,9 +107,19 @@ clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -I"$
     -c "$PROJECT_ROOT/fasterbasic_wrapper.cpp" \
     -o "$PROJECT_ROOT/obj/fasterbasic_wrapper.o"
 
+if [ $? -ne 0 ]; then
+    echo "  ✗ Wrapper compilation failed"
+    exit 1
+fi
+
 clang++ -std=c++17 -O2 -I"$FASTERBASIC_SRC" -I"$FASTERBASIC_SRC/../runtime" -I"$QBE_DIR" \
     -c "$PROJECT_ROOT/basic_frontend.cpp" \
     -o "$PROJECT_ROOT/obj/basic_frontend.o"
+
+if [ $? -ne 0 ]; then
+    echo "  ✗ Frontend compilation failed"
+    exit 1
+fi
 
 echo "  ✓ Wrapper and frontend compiled"
 
@@ -127,17 +170,37 @@ EOF
     echo "  ✓ Generated config.h (target: $DEFAULT_TARGET)"
 fi
 
-# Compile QBE C sources
+# Compile QBE C sources in parallel
 echo "  Compiling QBE core..."
-cc -std=c99 -O2 -c \
+printf '%s\n' \
     main.c parse.c ssa.c live.c copy.c fold.c simpl.c ifopt.c gcm.c gvn.c \
-    mem.c alias.c load.c util.c rega.c emit.c cfg.c abi.c spill.c
+    mem.c alias.c load.c util.c rega.c emit.c cfg.c abi.c spill.c \
+| xargs -n 1 -P "$NUM_JOBS" -I {} cc -std=c99 -O2 -c {}
 
-# Compile architecture-specific sources
+if [ $? -ne 0 ]; then
+    echo "  ✗ QBE core compilation failed"
+    exit 1
+fi
+
+# Compile architecture-specific sources in parallel
 echo "  Compiling architecture backends..."
-(cd amd64 && cc -std=c99 -O2 -c *.c)
-(cd arm64 && cc -std=c99 -O2 -c *.c)
-(cd rv64 && cc -std=c99 -O2 -c *.c)
+(cd amd64 && ls *.c | xargs -n 1 -P "$NUM_JOBS" -I {} cc -std=c99 -O2 -c {})
+if [ $? -ne 0 ]; then
+    echo "  ✗ AMD64 backend compilation failed"
+    exit 1
+fi
+
+(cd arm64 && ls *.c | xargs -n 1 -P "$NUM_JOBS" -I {} cc -std=c99 -O2 -c {})
+if [ $? -ne 0 ]; then
+    echo "  ✗ ARM64 backend compilation failed"
+    exit 1
+fi
+
+(cd rv64 && ls *.c | xargs -n 1 -P "$NUM_JOBS" -I {} cc -std=c99 -O2 -c {})
+if [ $? -ne 0 ]; then
+    echo "  ✗ RV64 backend compilation failed"
+    exit 1
+fi
 
 echo "  ✓ QBE objects built"
 
@@ -152,6 +215,11 @@ clang++ -O2 -o "$PROJECT_ROOT/fbc_qbe" \
     rv64/*.o \
     "$PROJECT_ROOT/obj"/*.o
 
+if [ $? -ne 0 ]; then
+    echo "  ✗ Linking failed"
+    exit 1
+fi
+
 # Create symlink for backward compatibility
 cd "$PROJECT_ROOT"
 ln -sf fbc_qbe qbe_basic
@@ -160,6 +228,10 @@ echo ""
 echo "=== Build Complete ==="
 echo "Executable: $PROJECT_ROOT/fbc_qbe"
 echo "Symlink:    $PROJECT_ROOT/qbe_basic -> fbc_qbe (for backward compatibility)"
+echo ""
+echo "Build script:"
+echo "  ./build_qbe_basic.sh                   # Build compiler"
+echo "  ./build_qbe_basic.sh --clean           # Clean build artifacts"
 echo ""
 echo "Usage:"
 echo "  ./fbc_qbe input.bas                    # Compile to executable (default: 'input')"
