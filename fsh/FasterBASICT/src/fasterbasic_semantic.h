@@ -870,6 +870,42 @@ struct SymbolTable {
         return lookupVariable(varName, Scope::makeGlobal());
     }
     
+    // Legacy compatibility: lookup variable by name only (tries scoped keys first, then flat key)
+    // This allows gradual migration from flat keys to scoped keys
+    VariableSymbol* lookupVariableLegacy(const std::string& varName, const std::string& functionScope = "") {
+        // Try new scoped lookup first
+        if (!functionScope.empty()) {
+            // Try function scope
+            Scope funcScope = Scope::makeFunction(functionScope);
+            VariableSymbol* result = lookupVariable(varName, funcScope);
+            if (result) return result;
+        }
+        // Try global scope
+        VariableSymbol* result = lookupVariable(varName, Scope::makeGlobal());
+        if (result) return result;
+        
+        // Fall back to old flat key lookup (for backward compatibility)
+        auto it = variables.find(varName);
+        return (it != variables.end()) ? &it->second : nullptr;
+    }
+    
+    const VariableSymbol* lookupVariableLegacy(const std::string& varName, const std::string& functionScope = "") const {
+        // Try new scoped lookup first
+        if (!functionScope.empty()) {
+            // Try function scope
+            Scope funcScope = Scope::makeFunction(functionScope);
+            const VariableSymbol* result = lookupVariable(varName, funcScope);
+            if (result) return result;
+        }
+        // Try global scope
+        const VariableSymbol* result = lookupVariable(varName, Scope::makeGlobal());
+        if (result) return result;
+        
+        // Fall back to old flat key lookup (for backward compatibility)
+        auto it = variables.find(varName);
+        return (it != variables.end()) ? &it->second : nullptr;
+    }
+    
     // Helper: Determine string type based on stringMode and literal content
     // Returns STRING for ASCII, UNICODE for non-ASCII (in DETECTSTRING mode)
     BaseType getStringTypeForLiteral(bool hasNonASCII) const {

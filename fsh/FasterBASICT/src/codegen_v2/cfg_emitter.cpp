@@ -72,13 +72,26 @@ void CFGEmitter::emitBlock(const BasicBlock* block, const ControlFlowGraph* cfg)
     builder_.emitLabel(label);
     
     // If this is the entry block (block 0), allocate stack space for all local variables
-    if (blockId == 0 && currentFunction_ == "main") {
+    if (blockId == 0) {
         const auto& symbolTable = astEmitter_.getSymbolTable();
         for (const auto& pair : symbolTable.variables) {
             const auto& varSymbol = pair.second;
-            if (!varSymbol.isGlobal) {
+            
+            // Allocate variables that belong to current function scope
+            bool shouldAllocate = false;
+            if (currentFunction_ == "main" && !varSymbol.isGlobal && varSymbol.scope.isGlobal()) {
+                // Main program: allocate global-scope non-GLOBAL variables
+                shouldAllocate = true;
+            } else if (currentFunction_ != "main" && varSymbol.scope.isFunction() && 
+                       varSymbol.scope.name == currentFunction_) {
+                // SUB/FUNCTION: allocate variables that belong to this function
+                shouldAllocate = true;
+            }
+            
+            if (shouldAllocate) {
                 // This is a local variable - allocate on stack
-                std::string mangledName = symbolMapper_.mangleVariableName(pair.first, false);
+                // Use variable name from symbol, not the scoped key
+                std::string mangledName = symbolMapper_.mangleVariableName(varSymbol.name, false);
                 BaseType varType = varSymbol.typeDesc.baseType;
                 std::string qbeType = typeManager_.getQBEType(varType);
                 int64_t size = typeManager_.getTypeSize(varType);

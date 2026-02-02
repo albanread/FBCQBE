@@ -449,14 +449,13 @@ void SemanticAnalyzer::collectGlobalStatements(Program& program) {
                         continue;
                     }
                     
-                    // Create variable symbol and mark it as global
-                    VariableSymbol varSym(var.name, legacyTypeToDescriptor(varType), true);
-                    varSym.functionScope = "";  // Empty scope = global
+                    // Create variable symbol and mark it as global with explicit scope
+                    VariableSymbol varSym(var.name, legacyTypeToDescriptor(varType), Scope::makeGlobal(), true);
                     varSym.firstUse = stmt->location;
                     varSym.isGlobal = true;  // Mark as GLOBAL variable
                     varSym.globalOffset = nextOffset++;  // Assign slot number and increment
                     
-                    m_symbolTable.variables[var.name] = varSym;
+                    m_symbolTable.insertVariable(var.name, varSym);
                 }
             }
         }
@@ -788,13 +787,11 @@ void SemanticAnalyzer::processFunctionStatement(const FunctionStatement& stmt) {
     m_symbolTable.functions[stmt.functionName] = sym;
     
     // Add function name as a variable (for return value assignment)
-    VariableSymbol returnVar;
-    returnVar.name = stmt.functionName;
-    returnVar.typeDesc = sym.returnTypeDesc;
-    returnVar.isDeclared = true;
+    // Create return variable with function scope
+    Scope funcScope = Scope::makeFunction(stmt.functionName);
+    VariableSymbol returnVar(stmt.functionName, sym.returnTypeDesc, funcScope, true);
     returnVar.firstUse = stmt.location;
-    returnVar.functionScope = stmt.functionName;  // Mark as belonging to this function
-    m_symbolTable.variables[stmt.functionName] = returnVar;
+    m_symbolTable.insertVariable(stmt.functionName, returnVar);
     
     // Clear current function scope
     m_currentFunctionName = "";
@@ -959,9 +956,7 @@ void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
             typeDesc.udtTypeId = m_symbolTable.allocateTypeId(arrayDim.asTypeName);
             
             VariableSymbol* sym = declareVariableD(arrayDim.name, typeDesc, stmt.location, true);
-            if (sym) {
-                sym->functionScope = m_currentFunctionName;  // Track function scope
-            }
+            // Scope is already set by declareVariableD() using getCurrentScope()
             continue;
         }
         
@@ -1024,9 +1019,7 @@ void SemanticAnalyzer::processDimStatement(const DimStatement& stmt) {
             }
             
             VariableSymbol* sym = declareVariableD(arrayDim.name, typeDesc, stmt.location, true);
-            if (sym) {
-                sym->functionScope = m_currentFunctionName;  // Track function scope
-            }
+            // Scope is already set by declareVariableD() using getCurrentScope()
             continue;
         }
         
@@ -1207,13 +1200,11 @@ void SemanticAnalyzer::processDefStatement(const DefStatement& stmt) {
         sym.parameterIsByRef.push_back(false);  // DEF FN parameters are always by value
 
         // Add parameter as a variable in the symbol table so it can be looked up
-        VariableSymbol paramVar;
-        paramVar.name = paramName;
-        paramVar.typeDesc = paramTypeDesc;
-        paramVar.isDeclared = true;  // Parameters are declared
-        paramVar.functionScope = stmt.functionName;  // Scope to this function
+        // Create parameter with function scope
+        Scope funcScope = Scope::makeFunction(stmt.functionName);
+        VariableSymbol paramVar(paramName, paramTypeDesc, funcScope, true);
         paramVar.firstUse = stmt.location;
-        m_symbolTable.variables[paramName] = paramVar;
+        m_symbolTable.insertVariable(paramName, paramVar);
     }
     
     m_symbolTable.functions[stmt.functionName] = sym;
@@ -1547,14 +1538,14 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
                 m_currentFunctionScope.localVariables.insert(var.name);
                 
                 // Add to symbol table with type information
-                // Use scoped key for local variables to prevent conflicts between functions
-                std::string symbolKey = m_currentFunctionScope.functionName + "::" + var.name;
+                // Use explicit scope for local variables
+                Scope funcScope = getCurrentScope();
                 
                 VariableSymbol varSym;
                 varSym.name = var.name;  // Keep original name in the symbol
+                varSym.scope = funcScope;  // Set explicit function scope
                 varSym.isDeclared = true;
                 varSym.firstUse = stmt.location;
-                varSym.functionScope = m_currentFunctionScope.functionName;
                 varSym.isGlobal = false;
                 
                 // Determine type from AS clause or suffix
@@ -1592,8 +1583,8 @@ void SemanticAnalyzer::validateStatement(const Statement& stmt) {
                     varSym.typeDesc = legacyTypeToDescriptor(inferTypeFromSuffix(var.typeSuffix));
                 }
                 
-                // Store with scoped key
-                m_symbolTable.variables[symbolKey] = varSym;
+                // Store with scope-aware insertion
+                m_symbolTable.insertVariable(var.name, varSym);
             }
             break;
         }
@@ -2056,18 +2047,11 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
               << " -> " << normalizedVarName << " (tracked as FOR var)" << std::endl;
     debugFile.close();
     
-    // Register the variable in symbol table with normalized name
-    if (m_currentFunctionScope.inFunction) {
-        // In function: use local variable
-        VariableSymbol varSym(normalizedVarName, TypeDescriptor(forVarType), true);
-        varSym.firstUse = stmt.location;
-        m_symbolTable.variables[normalizedVarName] = varSym;
-    } else {
-        // Global: use global variable
-        VariableSymbol varSym(normalizedVarName, TypeDescriptor(forVarType), true);
-        varSym.firstUse = stmt.location;
-        m_symbolTable.variables[normalizedVarName] = varSym;
-    }
+    // Register the variable in symbol table with normalized name and explicit scope
+    Scope currentScope = getCurrentScope();
+    VariableSymbol varSym(normalizedVarName, TypeDescriptor(forVarType), currentScope, true);
+    varSym.firstUse = stmt.location;
+    m_symbolTable.insertVariable(normalizedVarName, varSym);
     
     // Validate expressions
     validateExpression(*stmt.start);
@@ -3244,61 +3228,59 @@ bool SemanticAnalyzer::isNumericType(VariableType type) {
 
 VariableSymbol* SemanticAnalyzer::declareVariable(const std::string& name, VariableType type,
                                                   const SourceLocation& loc, bool isDeclared) {
-    auto it = m_symbolTable.variables.find(name);
-    if (it != m_symbolTable.variables.end()) {
-        return &it->second;
+    // Get current scope
+    Scope currentScope = getCurrentScope();
+    
+    // Check if variable already exists in current scope
+    VariableSymbol* existing = m_symbolTable.lookupVariable(name, currentScope);
+    if (existing) {
+        return existing;
     }
     
-    VariableSymbol sym;
-    sym.name = name;
-    sym.typeDesc = legacyTypeToDescriptor(type);
-    sym.isDeclared = isDeclared;
+    // Create new variable with explicit scope
+    VariableSymbol sym(name, legacyTypeToDescriptor(type), currentScope, isDeclared);
     sym.isUsed = false;
     sym.firstUse = loc;
     
-    m_symbolTable.variables[name] = sym;
-    return &m_symbolTable.variables[name];
+    // Insert using scope-aware method
+    m_symbolTable.insertVariable(name, sym);
+    
+    // Return pointer to inserted variable
+    return m_symbolTable.lookupVariable(name, currentScope);
 }
 
 // New TypeDescriptor-based variable declaration
 VariableSymbol* SemanticAnalyzer::declareVariableD(const std::string& name, const TypeDescriptor& typeDesc,
                                                    const SourceLocation& loc, bool isDeclared) {
-    auto it = m_symbolTable.variables.find(name);
-    if (it != m_symbolTable.variables.end()) {
+    // Get current scope
+    Scope currentScope = getCurrentScope();
+    
+    // Check if variable already exists in current scope
+    VariableSymbol* existing = m_symbolTable.lookupVariable(name, currentScope);
+    if (existing) {
         // Update existing variable with new type info
-        it->second.typeDesc = typeDesc;
+        existing->typeDesc = typeDesc;
         if (typeDesc.isUserDefined()) {
-            it->second.typeName = typeDesc.udtName;
+            existing->typeName = typeDesc.udtName;
         }
-        return &it->second;
+        return existing;
     }
     
-    VariableSymbol sym(name, typeDesc, isDeclared);
+    // Create new variable with explicit scope
+    VariableSymbol sym(name, typeDesc, currentScope, isDeclared);
     sym.firstUse = loc;
     
-    m_symbolTable.variables[name] = sym;
-    return &m_symbolTable.variables[name];
+    // Insert using scope-aware method
+    m_symbolTable.insertVariable(name, sym);
+    
+    // Return pointer to inserted variable
+    return m_symbolTable.lookupVariable(name, currentScope);
 }
 
 const VariableSymbol* SemanticAnalyzer::lookupVariableScoped(const std::string& varName, 
                                                               const std::string& functionScope) const {
-    // If a function scope is provided, first try to find a local variable with scoped key
-    if (!functionScope.empty()) {
-        std::string scopedKey = functionScope + "::" + varName;
-        auto scopedIt = m_symbolTable.variables.find(scopedKey);
-        if (scopedIt != m_symbolTable.variables.end()) {
-            return &scopedIt->second;
-        }
-    }
-    
-    // Fall back to global lookup (unscoped key)
-    auto it = m_symbolTable.variables.find(varName);
-    if (it != m_symbolTable.variables.end()) {
-        return &it->second;
-    }
-    
-    // Not found in either scope
-    return nullptr;
+    // Use legacy lookup for backward compatibility during migration
+    return m_symbolTable.lookupVariableLegacy(varName, functionScope);
 }
 
 // Static helper to strip type suffix from variable name
@@ -3372,32 +3354,24 @@ std::string SemanticAnalyzer::normalizeForLoopVariable(const std::string& varNam
 VariableSymbol* SemanticAnalyzer::lookupVariable(const std::string& name) {
     // Normalize FOR loop variable references
     std::string lookupName = normalizeForLoopVariable(name);
-    // If we're in a function, first try to find a local variable with scoped key
-    if (m_currentFunctionScope.inFunction && !m_currentFunctionScope.functionName.empty()) {
-        std::string scopedKey = m_currentFunctionScope.functionName + "::" + lookupName;
-        auto scopedIt = m_symbolTable.variables.find(scopedKey);
-        if (scopedIt != m_symbolTable.variables.end()) {
-            return &scopedIt->second;
-        }
-    }
     
-    // Fall back to global lookup (unscoped key)
-    auto it = m_symbolTable.variables.find(lookupName);
-    if (it != m_symbolTable.variables.end()) {
-        return &it->second;
+    // Use legacy lookup for backward compatibility during migration
+    std::string functionScope = m_currentFunctionScope.inFunction ? m_currentFunctionScope.functionName : "";
+    VariableSymbol* result = m_symbolTable.lookupVariableLegacy(lookupName, functionScope);
+    if (result) {
+        return result;
     }
     // Also check arrays table - DIM x$ AS STRING creates a 0-dimensional array (scalar)
     // We need to treat it as a variable for assignment purposes
+    // Special case: If the variable name matches a scalar (dimensionless) array, treat it as a variable
     auto arrIt = m_symbolTable.arrays.find(name);
     if (arrIt != m_symbolTable.arrays.end() && arrIt->second.dimensions.empty()) {
-        // Found a scalar array - create a corresponding variable entry
-        VariableSymbol sym;
-        sym.name = name;
-        sym.typeDesc = arrIt->second.elementTypeDesc;
-        sym.isDeclared = true;
+        // Found a scalar array - create a corresponding variable entry with current scope
+        Scope currentScope = getCurrentScope();
+        VariableSymbol sym(name, arrIt->second.elementTypeDesc, currentScope, true);
         sym.firstUse = arrIt->second.declaration;
-        m_symbolTable.variables[name] = sym;
-        return &m_symbolTable.variables[name];
+        m_symbolTable.insertVariable(name, sym);
+        return m_symbolTable.lookupVariable(name, currentScope);
     }
     
     return nullptr;

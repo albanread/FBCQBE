@@ -1,0 +1,4 @@
+10 DIM x AS INTEGER
+20 x = 5
+30 PRINT x
+40 END
