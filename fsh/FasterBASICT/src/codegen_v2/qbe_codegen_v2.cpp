@@ -420,6 +420,20 @@ void QBECodeGeneratorV2::collectStringLiterals(const Program* program, const Pro
         }
     }
     
+    // Scan main program CFG blocks (for strings in control flow structures like SELECT CASE)
+    if (programCFG && programCFG->mainCFG) {
+        for (const auto& block : programCFG->mainCFG->blocks) {
+            if (!block) continue;
+            
+            // Scan all statements in this block
+            for (const Statement* stmt : block->statements) {
+                if (stmt) {
+                    collectStringsFromStatement(stmt);
+                }
+            }
+        }
+    }
+    
     // Scan all SUBs/FUNCTIONs for string literals
     if (programCFG) {
         for (const auto& [name, cfg] : programCFG->functionCFGs) {
@@ -534,6 +548,47 @@ void QBECodeGeneratorV2::collectStringsFromStatement(const Statement* stmt) {
             }
             if (sliceStmt->replacement) {
                 collectStringsFromExpression(sliceStmt->replacement.get());
+            }
+            break;
+        }
+        
+        case ASTNodeType::STMT_CASE: {
+            const auto* caseStmt = static_cast<const CaseStatement*>(stmt);
+            // Collect strings from the case expression
+            if (caseStmt->caseExpression) {
+                collectStringsFromExpression(caseStmt->caseExpression.get());
+            }
+            // Collect strings from each WHEN clause
+            for (const auto& whenClause : caseStmt->whenClauses) {
+                // Collect from case values
+                for (const auto& value : whenClause.values) {
+                    if (value) {
+                        collectStringsFromExpression(value.get());
+                    }
+                }
+                // Collect from CASE IS right expression
+                if (whenClause.caseIsRightExpr) {
+                    collectStringsFromExpression(whenClause.caseIsRightExpr.get());
+                }
+                // Collect from range expressions
+                if (whenClause.rangeStart) {
+                    collectStringsFromExpression(whenClause.rangeStart.get());
+                }
+                if (whenClause.rangeEnd) {
+                    collectStringsFromExpression(whenClause.rangeEnd.get());
+                }
+                // Collect from statements in the WHEN clause
+                for (const auto& s : whenClause.statements) {
+                    if (s) {
+                        collectStringsFromStatement(s.get());
+                    }
+                }
+            }
+            // Collect strings from OTHERWISE/CASE ELSE statements
+            for (const auto& s : caseStmt->otherwiseStatements) {
+                if (s) {
+                    collectStringsFromStatement(s.get());
+                }
             }
             break;
         }
