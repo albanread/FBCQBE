@@ -1201,22 +1201,37 @@ void ASTEmitter::emitCallStatement(const CallStatement* stmt) {
 // === Variable Access ===
 
 std::string ASTEmitter::getVariableAddress(const std::string& varName) {
+    // For FOR loop variables, strip suffix before lookup
+    // (I, I%, I& all refer to the same variable)
+    std::string lookupName = varName;
+    if (semantic_.isForLoopVariable(varName)) {
+        // Strip suffix from the variable name
+        if (!lookupName.empty()) {
+            char lastChar = lookupName.back();
+            if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
+                lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
+                lookupName = lookupName.substr(0, lookupName.length() - 1);
+            }
+        }
+    }
+    
     // Look up variable with scoped lookup
     std::string currentFunc = symbolMapper_.getCurrentFunction();
-    const auto* varSymbolPtr = semantic_.lookupVariableScoped(varName, currentFunc);
+    const auto* varSymbolPtr = semantic_.lookupVariableScoped(lookupName, currentFunc);
     if (!varSymbolPtr) {
-        builder_.emitComment("ERROR: variable not found: " + varName);
+        builder_.emitComment("ERROR: variable not found: " + lookupName);
         return builder_.newTemp();
     }
     const auto& varSymbol = *varSymbolPtr;
     
     // Check if we're in a function and the variable is SHARED
-    // SHARED variables in functions should use the global symbol
-    bool treatAsGlobal = varSymbol.isGlobal || 
-                         (symbolMapper_.inFunctionScope() && symbolMapper_.isSharedVariable(varName));
+    bool isShared = symbolMapper_.isSharedVariable(lookupName);
+    bool isParameter = symbolMapper_.isParameter(lookupName);
+    bool treatAsGlobal = (varSymbol.isGlobal || isShared || isParameter);
     
     // Mangle the variable name properly (strips type suffixes, sanitizes, etc.)
-    std::string mangledName = symbolMapper_.mangleVariableName(varName, treatAsGlobal);
+    // Use lookupName (with suffix stripped for FOR loop vars)
+    std::string mangledName = symbolMapper_.mangleVariableName(lookupName, treatAsGlobal);
     
     if (treatAsGlobal) {
         // Cache the address
@@ -1232,15 +1247,27 @@ std::string ASTEmitter::getVariableAddress(const std::string& varName) {
 }
 
 std::string ASTEmitter::loadVariable(const std::string& varName) {
-    // Check if this is a function parameter FIRST - parameters are passed as QBE temporaries
-    // and don't need to be loaded from memory
-    if (symbolMapper_.inFunctionScope() && symbolMapper_.isParameter(varName)) {
-        // Parameter - return the parameter temporary directly (e.g., %a_INT)
-        builder_.emitComment("Loading parameter: " + varName);
-        return "%" + varName;
+    // For FOR loop variables, strip suffix before processing
+    std::string lookupName = varName;
+    if (semantic_.isForLoopVariable(varName)) {
+        if (!lookupName.empty()) {
+            char lastChar = lookupName.back();
+            if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
+                lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
+                lookupName = lookupName.substr(0, lookupName.length() - 1);
+            }
+        }
     }
     
-    BaseType varType = getVariableType(varName);
+    // Check if this is a function parameter FIRST - parameters are passed as QBE temporaries
+    // and don't need to be loaded from memory
+    if (symbolMapper_.inFunctionScope() && symbolMapper_.isParameter(lookupName)) {
+        // Parameter - return the parameter temporary directly (e.g., %a_INT)
+        builder_.emitComment("Loading parameter: " + lookupName);
+        return "%" + lookupName;
+    }
+    
+    BaseType varType = getVariableType(lookupName);
     std::string qbeType = typeManager_.getQBEType(varType);
     
     // Look up variable with scoped lookup
@@ -1257,7 +1284,7 @@ std::string ASTEmitter::loadVariable(const std::string& varName) {
                          (symbolMapper_.inFunctionScope() && symbolMapper_.isSharedVariable(varName));
     
     // All variables (global and local) are stored in memory and must be loaded
-    std::string addr = getVariableAddress(varName);
+    std::string addr = getVariableAddress(lookupName);
     std::string result = builder_.newTemp();
     
     if (treatAsGlobal) {
@@ -1272,16 +1299,28 @@ std::string ASTEmitter::loadVariable(const std::string& varName) {
 }
 
 void ASTEmitter::storeVariable(const std::string& varName, const std::string& value) {
-    BaseType varType = getVariableType(varName);
+    // For FOR loop variables, strip suffix before processing
+    std::string lookupName = varName;
+    if (semantic_.isForLoopVariable(varName)) {
+        if (!lookupName.empty()) {
+            char lastChar = lookupName.back();
+            if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
+                lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
+                lookupName = lookupName.substr(0, lookupName.length() - 1);
+            }
+        }
+    }
+    
+    BaseType varType = getVariableType(lookupName);
     std::string qbeType = typeManager_.getQBEType(varType);
     
     // Check if this is a function parameter
     // In BASIC, parameters can be modified (pass-by-reference semantics)
-    if (symbolMapper_.inFunctionScope() && symbolMapper_.isParameter(varName)) {
+    if (symbolMapper_.inFunctionScope() && symbolMapper_.isParameter(lookupName)) {
         // Parameter - need to allocate stack space and copy parameter value there
         // Then update all references to use the stack location
         // For now, we'll treat parameters as modifiable temporaries
-        builder_.emitComment("WARNING: Modifying parameter " + varName + " (using copy assignment)");
+        builder_.emitComment("WARNING: Modifying parameter " + lookupName + " (using copy assignment)");
         builder_.emitRaw("    %" + varName + " =" + qbeType + " copy " + value);
         return;
     }
@@ -1300,7 +1339,7 @@ void ASTEmitter::storeVariable(const std::string& varName, const std::string& va
                          (symbolMapper_.inFunctionScope() && symbolMapper_.isSharedVariable(varName));
     
     // All variables (global and local) are stored in memory
-    std::string addr = getVariableAddress(varName);
+    std::string addr = getVariableAddress(lookupName);
     
     // *** STRING ASSIGNMENT WITH REFERENCE COUNTING ***
     // Strings require special handling to prevent memory leaks and ensure

@@ -2025,19 +2025,27 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
     if (getenv("FASTERBASIC_DEBUG")) {
         std::cerr << "[DEBUG] validateForStatement called for variable: " << stmt.variable << std::endl;
     }
-    // FOR loop variables are ALWAYS plain integers (no type suffix)
-    // Strip any suffix from the variable name and register as INTEGER
+    // FOR loop variables ignore type suffixes completely
+    // The parser has already stripped suffixes from stmt.variable
+    // Type is determined by OPTION FOR setting, not by suffix
     std::string plainVarName = stmt.variable;
     
-    // Register the variable as INTEGER type in symbol table
+    // Track this as a FOR loop variable (for suffix-agnostic lookup)
+    m_forLoopVariables.insert(plainVarName);
+    
+    // Determine type based on OPTION FOR setting
+    BaseType forVarType = (m_symbolTable.options.forLoopType == CompilerOptions::ForLoopType::LONG)
+                          ? BaseType::LONG : BaseType::INTEGER;
+    
+    // Register the variable in symbol table
     if (m_currentFunctionScope.inFunction) {
         // In function: use local variable
-        VariableSymbol varSym(plainVarName, TypeDescriptor(BaseType::INTEGER), true);
+        VariableSymbol varSym(plainVarName, TypeDescriptor(forVarType), true);
         varSym.firstUse = stmt.location;
         m_symbolTable.variables[plainVarName] = varSym;
     } else {
         // Global: use global variable
-        VariableSymbol varSym(plainVarName, TypeDescriptor(BaseType::INTEGER), true);
+        VariableSymbol varSym(plainVarName, TypeDescriptor(forVarType), true);
         varSym.firstUse = stmt.location;
         m_symbolTable.variables[plainVarName] = varSym;
     }
@@ -3275,9 +3283,23 @@ const VariableSymbol* SemanticAnalyzer::lookupVariableScoped(const std::string& 
 }
 
 VariableSymbol* SemanticAnalyzer::lookupVariable(const std::string& name) {
+    // Helper: strip type suffix from variable name
+    auto stripSuffix = [](const std::string& varName) -> std::string {
+        if (varName.empty()) return varName;
+        char lastChar = varName.back();
+        if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
+            lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
+            return varName.substr(0, varName.length() - 1);
+        }
+        return varName;
+    };
+    
+    // Try lookup with original name first
+    std::string lookupName = name;
+    
     // If we're in a function, first try to find a local variable with scoped key
     if (m_currentFunctionScope.inFunction && !m_currentFunctionScope.functionName.empty()) {
-        std::string scopedKey = m_currentFunctionScope.functionName + "::" + name;
+        std::string scopedKey = m_currentFunctionScope.functionName + "::" + lookupName;
         auto scopedIt = m_symbolTable.variables.find(scopedKey);
         if (scopedIt != m_symbolTable.variables.end()) {
             return &scopedIt->second;
@@ -3285,9 +3307,31 @@ VariableSymbol* SemanticAnalyzer::lookupVariable(const std::string& name) {
     }
     
     // Fall back to global lookup (unscoped key)
-    auto it = m_symbolTable.variables.find(name);
+    auto it = m_symbolTable.variables.find(lookupName);
     if (it != m_symbolTable.variables.end()) {
         return &it->second;
+    }
+    
+    // If not found and name has a suffix, check if base name is a FOR loop variable
+    std::string baseName = stripSuffix(name);
+    if (baseName != name && m_forLoopVariables.count(baseName)) {
+        // This is a reference to a FOR loop variable with a suffix
+        // Look up using the base name (suffix-agnostic)
+        lookupName = baseName;
+        
+        if (m_currentFunctionScope.inFunction && !m_currentFunctionScope.functionName.empty()) {
+            std::string scopedKey = m_currentFunctionScope.functionName + "::" + lookupName;
+            auto scopedIt = m_symbolTable.variables.find(scopedKey);
+            if (scopedIt != m_symbolTable.variables.end()) {
+                return &scopedIt->second;
+            }
+        }
+        
+        // Fall back to global lookup with base name
+        auto baseIt = m_symbolTable.variables.find(lookupName);
+        if (baseIt != m_symbolTable.variables.end()) {
+            return &baseIt->second;
+        }
     }
     
     // Also check arrays table - DIM x$ AS STRING creates a 0-dimensional array (scalar)

@@ -864,6 +864,20 @@ public:
     // Searches local scope first (if functionScope provided), then global scope
     const VariableSymbol* lookupVariableScoped(const std::string& varName, 
                                                 const std::string& functionScope = "") const;
+    
+    // Check if a variable is a FOR loop variable (suffix-agnostic)
+    bool isForLoopVariable(const std::string& varName) const {
+        // Strip suffix and check base name
+        std::string baseName = varName;
+        if (!baseName.empty()) {
+            char lastChar = baseName.back();
+            if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
+                lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
+                baseName = baseName.substr(0, baseName.length() - 1);
+            }
+        }
+        return m_forLoopVariables.count(baseName) > 0;
+    }
 
     // Ensure predefined constants are loaded (safe to call multiple times)
     void ensureConstantsLoaded();
@@ -1093,6 +1107,11 @@ private:
     
     // Track FOR EACH variables (they should NOT be in symbol table)
     std::set<std::string> m_forEachVariables;
+    
+    // Track FOR loop variables (base names without suffixes)
+    // These variables ignore type suffixes - I, I%, I& all refer to the same variable
+    std::unordered_set<std::string> m_forLoopVariables;
+    
     ConstantsManager m_constantsManager;
 
     // Configuration

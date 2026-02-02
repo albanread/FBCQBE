@@ -23,6 +23,12 @@ struct CompilerOptions {
         DETECTSTRING   // OPTION DETECTSTRING - detect per-literal (ASCII if all bytes < 128, else Unicode)
     };
     
+    // FOR loop variable type
+    enum class ForLoopType {
+        INTEGER,       // OPTION FOR INTEGER - FOR loop variables are 32-bit integers (w)
+        LONG           // OPTION FOR LONG - FOR loop variables are 64-bit integers (l)
+    };
+    
     // Array indexing: OPTION BASE 0 or OPTION BASE 1
     // Default is 1 (matches Lua's 1-based indexing)
     int arrayBase = 1;
@@ -32,6 +38,11 @@ struct CompilerOptions {
     // UNICODE: all strings are Unicode codepoint arrays
     // DETECTSTRING: automatically detect based on literal content (default)
     StringMode stringMode = StringMode::DETECTSTRING;
+    
+    // FOR loop variable type: OPTION FOR INTEGER / OPTION FOR LONG
+    // INTEGER: FOR loop variables are 32-bit integers (default, matches QBasic)
+    // LONG: FOR loop variables are 64-bit integers (for large ranges)
+    ForLoopType forLoopType = ForLoopType::INTEGER;
     
     // Loop cancellation: OPTION CANCELLABLE ON/OFF
     // When true, inject script cancellation checks into loops
@@ -72,6 +83,7 @@ struct CompilerOptions {
     void reset() {
         arrayBase = 1;
         stringMode = StringMode::DETECTSTRING;
+        forLoopType = ForLoopType::INTEGER;
         cancellableLoops = true;   // Default to enabled for safety
         boundsChecking = true;     // Default to enabled for safety
         errorTracking = true;      // Default to enabled for better UX
