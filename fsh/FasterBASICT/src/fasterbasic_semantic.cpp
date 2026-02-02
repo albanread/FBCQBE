@@ -899,6 +899,14 @@ void SemanticAnalyzer::processSubStatement(const SubStatement& stmt) {
         }
         
         sym.parameterTypeDescs.push_back(legacyTypeToDescriptor(paramType));
+        
+        // Add parameter as a variable in the symbol table so it can be looked up
+        // Create parameter with function scope
+        Scope funcScope = Scope::makeFunction(stmt.subName);
+        TypeDescriptor paramTypeDesc = legacyTypeToDescriptor(paramType);
+        VariableSymbol paramVar(stmt.parameters[i], paramTypeDesc, funcScope, true);
+        paramVar.firstUse = stmt.location;
+        m_symbolTable.insertVariable(stmt.parameters[i], paramVar);
     }
     
     m_symbolTable.functions[stmt.subName] = sym;
