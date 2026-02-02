@@ -452,6 +452,53 @@ inline BaseType baseTypeFromSuffix(char suffix) {
 // =============================================================================
 
 // Variable symbol
+// Scope information for clear scope hierarchy
+struct Scope {
+    enum class Type {
+        GLOBAL,      // Top-level/main program scope
+        FUNCTION     // Inside a SUB or FUNCTION
+    };
+    
+    Type type;
+    std::string name;        // Empty for global, function name for function scope
+    int blockNumber;         // Block number within this scope (for nested blocks)
+    
+    Scope() : type(Type::GLOBAL), name(""), blockNumber(0) {}
+    
+    Scope(Type t, const std::string& n = "", int block = 0)
+        : type(t), name(n), blockNumber(block) {}
+    
+    // Helper to create global scope
+    static Scope makeGlobal(int block = 0) {
+        return Scope(Type::GLOBAL, "", block);
+    }
+    
+    // Helper to create function scope
+    static Scope makeFunction(const std::string& funcName, int block = 0) {
+        return Scope(Type::FUNCTION, funcName, block);
+    }
+    
+    // Check if this is global scope
+    bool isGlobal() const { return type == Type::GLOBAL; }
+    
+    // Check if this is function scope
+    bool isFunction() const { return type == Type::FUNCTION; }
+    
+    // Get a string representation for debugging/lookup keys
+    std::string toString() const {
+        if (type == Type::GLOBAL) {
+            return "global";
+        } else {
+            return "function:" + name;
+        }
+    }
+    
+    // Compare scopes for equality
+    bool operator==(const Scope& other) const {
+        return type == other.type && name == other.name && blockNumber == other.blockNumber;
+    }
+};
+
 struct VariableSymbol {
     std::string name;
     TypeDescriptor typeDesc;                         // Full type descriptor with attributes
@@ -459,16 +506,24 @@ struct VariableSymbol {
     bool isDeclared;                                 // Explicit declaration vs implicit
     bool isUsed;
     SourceLocation firstUse;
-    std::string functionScope;                       // Empty string = global, otherwise function name
+    Scope scope;                                     // Explicit scope tracking (global or function)
     bool isGlobal;                                   // true if declared with GLOBAL statement
     int globalOffset;                                // Slot number in global vector (only valid if isGlobal == true)
 
     VariableSymbol()
-        : typeDesc(BaseType::UNKNOWN), isDeclared(false), isUsed(false), functionScope(""), isGlobal(false), globalOffset(-1) {}
+        : typeDesc(BaseType::UNKNOWN), isDeclared(false), isUsed(false), scope(Scope::makeGlobal()), isGlobal(false), globalOffset(-1) {}
 
     // Constructor from TypeDescriptor
     VariableSymbol(const std::string& n, const TypeDescriptor& td, bool decl = false)
-        : name(n), typeDesc(td), isDeclared(decl), isUsed(false), functionScope(""), isGlobal(false), globalOffset(-1) {
+        : name(n), typeDesc(td), isDeclared(decl), isUsed(false), scope(Scope::makeGlobal()), isGlobal(false), globalOffset(-1) {
+        if (td.isUserDefined()) {
+            typeName = td.udtName;
+        }
+    }
+
+    // Constructor with explicit scope
+    VariableSymbol(const std::string& n, const TypeDescriptor& td, const Scope& s, bool decl = false)
+        : name(n), typeDesc(td), isDeclared(decl), isUsed(false), scope(s), isGlobal(false), globalOffset(-1) {
         if (td.isUserDefined()) {
             typeName = td.udtName;
         }
@@ -477,10 +532,19 @@ struct VariableSymbol {
     std::string toString() const {
         std::ostringstream oss;
         oss << name << ": " << typeDesc.toString();
+        oss << " [" << scope.toString() << "]";
         if (!isDeclared) oss << " [implicit]";
         return oss.str();
     }
     
+    // Legacy compatibility helpers
+    std::string functionScope() const {
+        return scope.isFunction() ? scope.name : "";
+    }
+    
+    bool isInFunctionScope() const {
+        return scope.isFunction();
+    }
 
 };
 
@@ -754,6 +818,57 @@ struct SymbolTable {
     }
 
     std::string toString() const;
+    
+    // Helper: Generate a scope-qualified key for symbol table lookup
+    // Format: "global::varName" or "function:funcName::varName"
+    static std::string makeScopeKey(const std::string& varName, const Scope& scope) {
+        if (scope.isGlobal()) {
+            return "global::" + varName;
+        } else {
+            return "function:" + scope.name + "::" + varName;
+        }
+    }
+    
+    // Helper: Insert a variable with scope-qualified key
+    void insertVariable(const std::string& varName, const VariableSymbol& symbol) {
+        std::string key = makeScopeKey(varName, symbol.scope);
+        variables[key] = symbol;
+    }
+    
+    // Helper: Lookup a variable in a specific scope
+    VariableSymbol* lookupVariable(const std::string& varName, const Scope& scope) {
+        std::string key = makeScopeKey(varName, scope);
+        auto it = variables.find(key);
+        return (it != variables.end()) ? &it->second : nullptr;
+    }
+    
+    const VariableSymbol* lookupVariable(const std::string& varName, const Scope& scope) const {
+        std::string key = makeScopeKey(varName, scope);
+        auto it = variables.find(key);
+        return (it != variables.end()) ? &it->second : nullptr;
+    }
+    
+    // Helper: Lookup a variable with fallback to global scope
+    // First tries the given scope, then tries global if not found
+    VariableSymbol* lookupVariableWithFallback(const std::string& varName, const Scope& scope) {
+        // Try function scope first
+        if (scope.isFunction()) {
+            VariableSymbol* result = lookupVariable(varName, scope);
+            if (result) return result;
+        }
+        // Fall back to global scope
+        return lookupVariable(varName, Scope::makeGlobal());
+    }
+    
+    const VariableSymbol* lookupVariableWithFallback(const std::string& varName, const Scope& scope) const {
+        // Try function scope first
+        if (scope.isFunction()) {
+            const VariableSymbol* result = lookupVariable(varName, scope);
+            if (result) return result;
+        }
+        // Fall back to global scope
+        return lookupVariable(varName, Scope::makeGlobal());
+    }
     
     // Helper: Determine string type based on stringMode and literal content
     // Returns STRING for ASCII, UNICODE for non-ASCII (in DETECTSTRING mode)
@@ -1171,6 +1286,15 @@ private:
     };
     
     FunctionScope m_currentFunctionScope;
+    
+    // Get current scope (global or function)
+    Scope getCurrentScope() const {
+        if (m_currentFunctionScope.inFunction) {
+            return Scope::makeFunction(m_currentFunctionScope.functionName);
+        } else {
+            return Scope::makeGlobal();
+        }
+    }
     
     // Validation helper for variables in functions
     void validateVariableInFunction(const std::string& varName, const SourceLocation& loc);
