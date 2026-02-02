@@ -5,9 +5,9 @@
 50 REM Test 1: ERASE integer array
 60 PRINT "Test 1: ERASE integer array"
 70 DIM A%(10)
-80 FOR I% = 1 TO 10
-90   LET A%(I%) = I% * 10
-100 NEXT I%
+80 FOR I = 1 TO 10
+90   LET A%(I) = I * 10
+100 NEXT I
 110 PRINT "  Array populated: A%(5) = "; A%(5)
 120 IF A%(5) <> 50 THEN PRINT "  ERROR: Array not populated" : END
 130 ERASE A%
@@ -18,9 +18,9 @@
 180 REM Test 2: ERASE double array
 190 PRINT "Test 2: ERASE double array"
 200 DIM B#(5)
-210 FOR I% = 1 TO 5
-220   LET B#(I%) = I% * 2.5
-230 NEXT I%
+210 FOR I = 1 TO 5
+220   LET B#(I) = I * 2.5
+230 NEXT I
 240 PRINT "  Array populated: B#(3) = "; B#(3)
 250 IF B#(3) <> 7.5 THEN PRINT "  ERROR: Array not populated" : END
 260 ERASE B#
@@ -45,11 +45,11 @@
 450 DIM D%(5)
 460 DIM E#(5)
 470 DIM F$(5)
-480 FOR I% = 1 TO 5
-490   LET D%(I%) = I%
-500   LET E#(I%) = I% * 1.1
-510   LET F$(I%) = "Item"
-520 NEXT I%
+480 FOR I = 1 TO 5
+490   LET D%(I) = I
+500   LET E#(I) = I * 1.1
+510   LET F$(I) = "Item"
+520 NEXT I
 530 PRINT "  Three arrays populated"
 540 ERASE D%, E#, F$
 550 PRINT "  ERASE D%, E#, F$ executed"
@@ -59,9 +59,9 @@
 590 REM Test 5: ERASE large array (memory cleanup test)
 600 PRINT "Test 5: ERASE large array"
 610 DIM H%(100)
-620 FOR I% = 1 TO 100
-630   LET H%(I%) = I% * 5
-640 NEXT I%
+620 FOR I = 1 TO 100
+630   LET H%(I) = I * 5
+640 NEXT I
 650 PRINT "  Large array populated: H%(50) = "; H%(50)
 660 IF H%(50) <> 250 THEN PRINT "  ERROR: Large array not populated" : END
 670 ERASE H%

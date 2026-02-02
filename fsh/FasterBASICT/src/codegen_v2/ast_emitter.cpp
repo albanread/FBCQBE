@@ -454,6 +454,44 @@ std::string ASTEmitter::emitFunctionCall(const FunctionCallExpression* expr) {
         return runtime_.emitLCase(strArg);
     }
     
+    if (upperName == "__STRING_SLICE") {
+        // __STRING_SLICE(string$, start, end) - internal slice operation
+        // Used by parser for slice syntax: text$(start TO end)
+        if (expr->arguments.size() != 3) {
+            builder_.emitComment("ERROR: __STRING_SLICE requires exactly 3 arguments");
+            return "0";
+        }
+        
+        std::string strArg = emitExpression(expr->arguments[0].get());
+        std::string startArg = emitExpression(expr->arguments[1].get());
+        std::string endArg = emitExpression(expr->arguments[2].get());
+        
+        // Convert start and end to long if needed
+        BaseType startType = getExpressionType(expr->arguments[1].get());
+        BaseType endType = getExpressionType(expr->arguments[2].get());
+        
+        if (typeManager_.isIntegral(startType) && typeManager_.getQBEType(startType) == "w") {
+            std::string startLong = builder_.newTemp();
+            builder_.emitExtend(startLong, "l", "extsw", startArg);
+            startArg = startLong;
+        } else if (typeManager_.isFloatingPoint(startType)) {
+            startArg = emitTypeConversion(startArg, startType, BaseType::LONG);
+        }
+        
+        if (typeManager_.isIntegral(endType) && typeManager_.getQBEType(endType) == "w") {
+            std::string endLong = builder_.newTemp();
+            builder_.emitExtend(endLong, "l", "extsw", endArg);
+            endArg = endLong;
+        } else if (typeManager_.isFloatingPoint(endType)) {
+            endArg = emitTypeConversion(endArg, endType, BaseType::LONG);
+        }
+        
+        // Call string_slice runtime function
+        std::string result = builder_.newTemp();
+        builder_.emitCall(result, "l", "string_slice", "l " + strArg + ", l " + startArg + ", l " + endArg);
+        return result;
+    }
+    
     // Note: INSTR not yet implemented in runtime library
     if (upperName == "INSTR") {
         builder_.emitComment("TODO: INSTR function not yet implemented");
@@ -527,6 +565,48 @@ std::string ASTEmitter::emitFunctionCall(const FunctionCallExpression* expr) {
 
 std::string ASTEmitter::emitArithmeticOp(const std::string& left, const std::string& right,
                                          TokenType op, BaseType type) {
+    // Special case: POWER operator needs to call pow() runtime function
+    if (op == TokenType::POWER) {
+        std::string result = builder_.newTemp();
+        
+        // Convert operands to double for pow() call
+        std::string leftDouble = left;
+        std::string rightDouble = right;
+        
+        if (type != BaseType::DOUBLE) {
+            // Convert to double
+            if (typeManager_.isIntegral(type)) {
+                leftDouble = builder_.newTemp();
+                rightDouble = builder_.newTemp();
+                builder_.emitInstruction(leftDouble + " =d swtof " + left);
+                builder_.emitInstruction(rightDouble + " =d swtof " + right);
+            } else if (type == BaseType::SINGLE) {
+                leftDouble = builder_.newTemp();
+                rightDouble = builder_.newTemp();
+                builder_.emitInstruction(leftDouble + " =d exts " + left);
+                builder_.emitInstruction(rightDouble + " =d exts " + right);
+            }
+        }
+        
+        // Call pow(double, double) -> double
+        std::string powResult = builder_.newTemp();
+        builder_.emitCall(powResult, "d", "pow", "d " + leftDouble + ", d " + rightDouble);
+        
+        // Convert result back to original type if needed
+        if (type == BaseType::INTEGER || type == BaseType::UINTEGER) {
+            builder_.emitInstruction(result + " =w dtosi " + powResult);
+        } else if (type == BaseType::LONG || type == BaseType::ULONG) {
+            builder_.emitInstruction(result + " =l dtosi " + powResult);
+        } else if (type == BaseType::SINGLE) {
+            builder_.emitInstruction(result + " =s truncd " + powResult);
+        } else {
+            result = powResult;  // Already double
+        }
+        
+        return result;
+    }
+    
+    // Regular arithmetic operations
     std::string qbeType = typeManager_.getQBEType(type);
     std::string qbeOp = getQBEArithmeticOp(op);
     
@@ -613,6 +693,27 @@ std::string ASTEmitter::emitTypeConversion(const std::string& value,
         return result;
     }
     
+    // Handle special two-step conversions for double/float to long
+    if (convOp == "DOUBLE_TO_LONG") {
+        // QBE doesn't have direct double→long, must go double→int→long
+        std::string intTemp = builder_.newTemp();
+        builder_.emitConvert(intTemp, "w", "dtosi", value);
+        
+        std::string result = builder_.newTemp();
+        builder_.emitConvert(result, "l", "extsw", intTemp);
+        return result;
+    }
+    
+    if (convOp == "FLOAT_TO_LONG") {
+        // QBE doesn't have direct float→long, must go float→int→long
+        std::string intTemp = builder_.newTemp();
+        builder_.emitConvert(intTemp, "w", "stosi", value);
+        
+        std::string result = builder_.newTemp();
+        builder_.emitConvert(result, "l", "extsw", intTemp);
+        return result;
+    }
+    
     std::string qbeToType = typeManager_.getQBEType(toType);
     std::string result = builder_.newTemp();
     
@@ -650,6 +751,14 @@ void ASTEmitter::emitStatement(const Statement* stmt) {
             emitDimStatement(static_cast<const DimStatement*>(stmt));
             break;
             
+        case ASTNodeType::STMT_REDIM:
+            emitRedimStatement(static_cast<const RedimStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_ERASE:
+            emitEraseStatement(static_cast<const EraseStatement*>(stmt));
+            break;
+            
         case ASTNodeType::STMT_FOR:
             emitForInit(static_cast<const ForStatement*>(stmt));
             break;
@@ -671,6 +780,10 @@ void ASTEmitter::emitStatement(const Statement* stmt) {
             
         case ASTNodeType::STMT_READ:
             emitReadStatement(static_cast<const ReadStatement*>(stmt));
+            break;
+            
+        case ASTNodeType::STMT_SLICE_ASSIGN:
+            emitSliceAssignStatement(static_cast<const SliceAssignStatement*>(stmt));
             break;
             
         case ASTNodeType::STMT_RESTORE:
@@ -703,8 +816,22 @@ void ASTEmitter::emitStatement(const Statement* stmt) {
 }
 
 void ASTEmitter::emitLetStatement(const LetStatement* stmt) {
-    // Get the target variable type first
-    BaseType targetType = getVariableType(stmt->variable);
+    // Determine target type based on whether it's an array or scalar
+    BaseType targetType;
+    
+    if (!stmt->indices.empty()) {
+        // Array assignment: get element type from array descriptor
+        const auto& symbolTable = semantic_.getSymbolTable();
+        auto it = symbolTable.arrays.find(stmt->variable);
+        if (it != symbolTable.arrays.end()) {
+            targetType = it->second.elementTypeDesc.baseType;
+        } else {
+            targetType = BaseType::UNKNOWN;
+        }
+    } else {
+        // Scalar assignment: get variable type
+        targetType = getVariableType(stmt->variable);
+    }
     
     // Emit the right-hand side expression with type context for smart literal generation
     std::string value = emitExpressionAs(stmt->value.get(), targetType);
@@ -823,7 +950,7 @@ void ASTEmitter::emitLocalStatement(const LocalStatement* stmt) {
 }
 
 void ASTEmitter::emitDimStatement(const DimStatement* stmt) {
-    // DIM statement: allocate array descriptors and initialize them
+    // DIM statement: allocate arrays using runtime array_new() function
     // Note: DIM can also declare scalar variables, which we skip here
     
     for (const auto& arrayDecl : stmt->arrays) {
@@ -833,24 +960,10 @@ void ASTEmitter::emitDimStatement(const DimStatement* stmt) {
         if (arrayDecl.dimensions.empty()) {
             builder_.emitComment("DIM scalar variable: " + arrayName);
             
-            // Check if it's a local variable - if so, allocate stack space
-            const auto& symbolTable = semantic_.getSymbolTable();
-            auto varIt = symbolTable.variables.find(arrayName);
-            if (varIt != symbolTable.variables.end() && !varIt->second.isGlobal) {
-                // Local variable - allocate on stack
-                std::string mangledName = symbolMapper_.mangleVariableName(arrayName, false);
-                BaseType varType = varIt->second.typeDesc.baseType;
-                std::string qbeType = typeManager_.getQBEType(varType);
-                int64_t size = typeManager_.getTypeSize(varType);
-                
-                if (size == 4) {
-                    builder_.emitRaw("    " + mangledName + " =l alloc4 4");
-                } else if (size == 8) {
-                    builder_.emitRaw("    " + mangledName + " =l alloc8 8");
-                } else {
-                    builder_.emitRaw("    " + mangledName + " =l alloc8 " + std::to_string(size));
-                }
-            }
+            // NOTE: Local scalar variables are already allocated at function entry
+            // in CFGEmitter::emitBlock for block 0. We don't need to allocate them again.
+            // DIM for scalars is essentially a no-op in terms of codegen (declaration only).
+            
             continue;
         }
         
@@ -864,7 +977,6 @@ void ASTEmitter::emitDimStatement(const DimStatement* stmt) {
         
         const auto& arraySymbol = it->second;
         BaseType elemType = arraySymbol.elementTypeDesc.baseType;
-        int64_t elementSize = typeManager_.getTypeSize(elemType);
         
         // Determine if array is global or local
         bool isGlobal = arraySymbol.functionScope.empty();
@@ -877,137 +989,167 @@ void ASTEmitter::emitDimStatement(const DimStatement* stmt) {
             descName = "%" + descName;
         }
         
-        builder_.emitComment("DIM " + arrayName + " - allocate descriptor and data");
+        builder_.emitComment("DIM " + arrayName + " - call array_new()");
         
-        // Allocate array descriptor (64 bytes)
-        std::string descPtr = descName;
-        if (!isGlobal) {
-            descPtr = builder_.newTemp();
-            builder_.emitAlloc(descPtr, 64);
-        }
+        // Get type suffix character for runtime
+        char typeSuffix = getTypeSuffixChar(elemType);
         
-        // Determine array dimensions (1D or 2D)
+        // Determine number of dimensions
         int numDims = arraySymbol.dimensions.size();
         
-        if (numDims == 1) {
-            // 1D array
-            // dimensions[0] contains the count (upper_bound + 1), so subtract 1 to get actual upper bound
-            int64_t upperBound = arraySymbol.dimensions[0] - 1;
-            int64_t lowerBound = 0; // OPTION BASE 0 for now
-            int64_t count = upperBound - lowerBound + 1;
-            
-            // Calculate total size in bytes
-            std::string countReg = builder_.newTemp();
-            builder_.emitInstruction(countReg + " =l copy " + std::to_string(count));
-            
-            std::string totalBytes = builder_.newTemp();
-            builder_.emitBinary(totalBytes, "l", "mul", countReg, std::to_string(elementSize));
-            
-            // Allocate data with malloc
-            std::string dataPtr = builder_.newTemp();
-            builder_.emitCall(dataPtr, "l", "malloc", "l " + totalBytes);
-            
-            // Zero-initialize data with memset
-            builder_.emitCall("", "", "memset", "l " + dataPtr + ", w 0, l " + totalBytes);
-            
-            // Initialize descriptor fields
-            // Offset 0: data pointer
-            builder_.emitStore("l", dataPtr, descPtr);
-            
-            // Offset 8: lowerBound1
-            std::string lowerAddr = builder_.newTemp();
-            builder_.emitBinary(lowerAddr, "l", "add", descPtr, "8");
-            builder_.emitStore("l", std::to_string(lowerBound), lowerAddr);
-            
-            // Offset 16: upperBound1
-            std::string upperAddr = builder_.newTemp();
-            builder_.emitBinary(upperAddr, "l", "add", descPtr, "16");
-            builder_.emitStore("l", std::to_string(upperBound), upperAddr);
-            
-            // Offset 24: lowerBound2 (0 for 1D)
-            std::string lower2Addr = builder_.newTemp();
-            builder_.emitBinary(lower2Addr, "l", "add", descPtr, "24");
-            builder_.emitStore("l", "0", lower2Addr);
-            
-            // Offset 32: upperBound2 (0 for 1D)
-            std::string upper2Addr = builder_.newTemp();
-            builder_.emitBinary(upper2Addr, "l", "add", descPtr, "32");
-            builder_.emitStore("l", "0", upper2Addr);
-            
-            // Offset 40: elementSize
-            std::string elemSizeAddr = builder_.newTemp();
-            builder_.emitBinary(elemSizeAddr, "l", "add", descPtr, "40");
-            builder_.emitStore("l", std::to_string(elementSize), elemSizeAddr);
-            
-            // Offset 48: dimensions (1)
-            std::string dimsAddr = builder_.newTemp();
-            builder_.emitBinary(dimsAddr, "l", "add", descPtr, "48");
-            builder_.emitStore("w", "1", dimsAddr);
-            
-            // Offset 52: base (0)
-            std::string baseAddr = builder_.newTemp();
-            builder_.emitBinary(baseAddr, "l", "add", descPtr, "52");
-            builder_.emitStore("w", "0", baseAddr);
-            
-        } else if (numDims == 2) {
-            // 2D array
-            // dimensions contain counts (upper_bound + 1), so subtract 1 to get actual upper bounds
-            int64_t upperBound1 = arraySymbol.dimensions[0] - 1;
-            int64_t upperBound2 = arraySymbol.dimensions[1] - 1;
-            int64_t lowerBound1 = 0;
-            int64_t lowerBound2 = 0;
-            int64_t count1 = upperBound1 - lowerBound1 + 1;
-            int64_t count2 = upperBound2 - lowerBound2 + 1;
-            int64_t totalCount = count1 * count2;
-            
-            // Calculate total size in bytes
-            std::string countReg = builder_.newTemp();
-            builder_.emitInstruction(countReg + " =l copy " + std::to_string(totalCount));
-            
-            std::string totalBytes = builder_.newTemp();
-            builder_.emitBinary(totalBytes, "l", "mul", countReg, std::to_string(elementSize));
-            
-            // Allocate data with malloc
-            std::string dataPtr = builder_.newTemp();
-            builder_.emitCall(dataPtr, "l", "malloc", "l " + totalBytes);
-            
-            // Zero-initialize data
-            builder_.emitCall("", "", "memset", "l " + dataPtr + ", w 0, l " + totalBytes);
-            
-            // Initialize descriptor fields
-            builder_.emitStore("l", dataPtr, descPtr);
-            
-            std::string lowerAddr1 = builder_.newTemp();
-            builder_.emitBinary(lowerAddr1, "l", "add", descPtr, "8");
-            builder_.emitStore("l", std::to_string(lowerBound1), lowerAddr1);
-            
-            std::string upperAddr1 = builder_.newTemp();
-            builder_.emitBinary(upperAddr1, "l", "add", descPtr, "16");
-            builder_.emitStore("l", std::to_string(upperBound1), upperAddr1);
-            
-            std::string lowerAddr2 = builder_.newTemp();
-            builder_.emitBinary(lowerAddr2, "l", "add", descPtr, "24");
-            builder_.emitStore("l", std::to_string(lowerBound2), lowerAddr2);
-            
-            std::string upperAddr2 = builder_.newTemp();
-            builder_.emitBinary(upperAddr2, "l", "add", descPtr, "32");
-            builder_.emitStore("l", std::to_string(upperBound2), upperAddr2);
-            
-            std::string elemSizeAddr = builder_.newTemp();
-            builder_.emitBinary(elemSizeAddr, "l", "add", descPtr, "40");
-            builder_.emitStore("l", std::to_string(elementSize), elemSizeAddr);
-            
-            std::string dimsAddr = builder_.newTemp();
-            builder_.emitBinary(dimsAddr, "l", "add", descPtr, "48");
-            builder_.emitStore("w", "2", dimsAddr);
-            
-            std::string baseAddr = builder_.newTemp();
-            builder_.emitBinary(baseAddr, "l", "add", descPtr, "52");
-            builder_.emitStore("w", "0", baseAddr);
-            
-        } else {
-            builder_.emitComment("ERROR: Only 1D and 2D arrays supported, found " + std::to_string(numDims) + "D");
+        if (numDims < 1 || numDims > 8) {
+            builder_.emitComment("ERROR: Invalid array dimensions: " + std::to_string(numDims));
+            continue;
         }
+        
+        // Allocate bounds array on stack: [lower1, upper1, lower2, upper2, ...]
+        std::string boundsArrayPtr = builder_.newTemp();
+        int boundsSize = numDims * 2 * 4;  // 2 bounds per dimension, 4 bytes each (int32_t)
+        builder_.emitAlloc(boundsArrayPtr, boundsSize);
+        
+        // Fill in bounds array
+        for (int i = 0; i < numDims; i++) {
+            // Lower bound (always 0 for OPTION BASE 0)
+            int64_t lowerBound = 0;
+            std::string lowerAddr = builder_.newTemp();
+            int lowerOffset = i * 2 * 4;
+            builder_.emitBinary(lowerAddr, "l", "add", boundsArrayPtr, std::to_string(lowerOffset));
+            builder_.emitStore("w", std::to_string(lowerBound), lowerAddr);
+            
+            // Upper bound (dimensions[i] - 1)
+            int64_t upperBound = arraySymbol.dimensions[i] - 1;
+            std::string upperAddr = builder_.newTemp();
+            int upperOffset = (i * 2 + 1) * 4;
+            builder_.emitBinary(upperAddr, "l", "add", boundsArrayPtr, std::to_string(upperOffset));
+            builder_.emitStore("w", std::to_string(upperBound), upperAddr);
+        }
+        
+        // Call array_new(char type_suffix, int32_t dimensions, int32_t* bounds, int32_t base)
+        std::string typeSuffixReg = builder_.newTemp();
+        builder_.emitInstruction(typeSuffixReg + " =w copy " + std::to_string((int)typeSuffix));
+        
+        std::string dimsReg = builder_.newTemp();
+        builder_.emitInstruction(dimsReg + " =w copy " + std::to_string(numDims));
+        
+        std::string baseReg = builder_.newTemp();
+        builder_.emitInstruction(baseReg + " =w copy 0");  // OPTION BASE 0
+        
+        std::string arrayPtr = builder_.newTemp();
+        builder_.emitCall(arrayPtr, "l", "array_new", 
+                         "w " + typeSuffixReg + 
+                         ", w " + dimsReg + 
+                         ", l " + boundsArrayPtr + 
+                         ", w " + baseReg);
+        
+        // Store the BasicArray* pointer in the array variable
+        builder_.emitStore("l", arrayPtr, descName);
+    }
+}
+
+void ASTEmitter::emitRedimStatement(const RedimStatement* stmt) {
+    // REDIM statement: resize existing array (with or without PRESERVE)
+    
+    for (const auto& arrayDecl : stmt->arrays) {
+        const std::string& arrayName = arrayDecl.name;
+        
+        builder_.emitComment("REDIM" + std::string(stmt->preserve ? " PRESERVE " : " ") + arrayName);
+        
+        // Look up array symbol in semantic analyzer
+        const auto& symbolTable = semantic_.getSymbolTable();
+        auto it = symbolTable.arrays.find(arrayName);
+        if (it == symbolTable.arrays.end()) {
+            builder_.emitComment("ERROR: array not found in symbol table: " + arrayName);
+            continue;
+        }
+        
+        const auto& arraySymbol = it->second;
+        
+        // Get the array descriptor pointer (the array variable itself)
+        std::string descName = symbolMapper_.getArrayDescriptorName(arrayName);
+        bool isGlobal = arraySymbol.functionScope.empty();
+        if (isGlobal && descName[0] != '$') {
+            descName = "$" + descName;
+        } else if (!isGlobal && descName[0] != '%') {
+            descName = "%" + descName;
+        }
+        
+        // Evaluate dimension expressions to get new bounds
+        std::vector<std::string> newBounds;
+        for (const auto& dimExpr : arrayDecl.dimensions) {
+            std::string upperBound = emitExpressionAs(dimExpr.get(), BaseType::LONG);
+            newBounds.push_back(upperBound);
+        }
+        
+        // Allocate bounds array: [lower1, upper1, lower2, upper2, ...]
+        int numDims = newBounds.size();
+        std::string boundsArraySize = std::to_string(numDims * 2 * 4); // 2 int32_t per dimension
+        std::string boundsPtr = builder_.newTemp();
+        builder_.emitCall(boundsPtr, "l", "malloc", "l " + boundsArraySize);
+        
+        // Fill in bounds array
+        int32_t lowerBound = 0; // OPTION BASE 0 for now
+        for (int i = 0; i < numDims; i++) {
+            // Convert upper bound from long to word if needed
+            std::string upperBoundWord = builder_.newTemp();
+            builder_.emitInstruction(upperBoundWord + " =w copy " + newBounds[i]);
+            
+            // Store lower bound
+            std::string lowerAddr = builder_.newTemp();
+            builder_.emitBinary(lowerAddr, "l", "add", boundsPtr, std::to_string(i * 2 * 4));
+            builder_.emitStore("w", std::to_string(lowerBound), lowerAddr);
+            
+            // Store upper bound
+            std::string upperAddr = builder_.newTemp();
+            builder_.emitBinary(upperAddr, "l", "add", boundsPtr, std::to_string((i * 2 + 1) * 4));
+            builder_.emitStore("w", upperBoundWord, upperAddr);
+        }
+        
+        // Load the BasicArray* pointer from the descriptor variable
+        std::string arrayPtr = builder_.newTemp();
+        builder_.emitLoad(arrayPtr, "l", descName);
+        
+        // Call array_redim(array, new_bounds, preserve)
+        std::string preserveFlag = stmt->preserve ? "1" : "0";
+        builder_.emitCall("", "", "array_redim", "l " + arrayPtr + ", l " + boundsPtr + ", w " + preserveFlag);
+        
+        // Free the temporary bounds array
+        builder_.emitCall("", "", "free", "l " + boundsPtr);
+        
+        builder_.emitBlankLine();
+    }
+}
+
+void ASTEmitter::emitEraseStatement(const EraseStatement* stmt) {
+    // ERASE statement: deallocate array memory
+    
+    for (const std::string& arrayName : stmt->arrayNames) {
+        builder_.emitComment("ERASE " + arrayName);
+        
+        // Look up array symbol in semantic analyzer
+        const auto& symbolTable = semantic_.getSymbolTable();
+        auto it = symbolTable.arrays.find(arrayName);
+        if (it == symbolTable.arrays.end()) {
+            builder_.emitComment("ERROR: array not found in symbol table: " + arrayName);
+            continue;
+        }
+        
+        const auto& arraySymbol = it->second;
+        
+        // Get the array descriptor pointer
+        std::string descName = symbolMapper_.getArrayDescriptorName(arrayName);
+        bool isGlobal = arraySymbol.functionScope.empty();
+        if (isGlobal && descName[0] != '$') {
+            descName = "$" + descName;
+        } else if (!isGlobal && descName[0] != '%') {
+            descName = "%" + descName;
+        }
+        
+        // Load the BasicArray* pointer from the descriptor variable
+        std::string arrayPtr = builder_.newTemp();
+        builder_.emitLoad(arrayPtr, "l", descName);
+        
+        // Call array_erase(array)
+        builder_.emitCall("", "", "array_erase", "l " + arrayPtr);
         
         builder_.emitBlankLine();
     }
@@ -1150,12 +1292,39 @@ void ASTEmitter::storeVariable(const std::string& varName, const std::string& va
     // All variables (global and local) are stored in memory
     std::string addr = getVariableAddress(varName);
     
-    if (treatAsGlobal) {
-        // Global variable - store to global memory
-        builder_.emitStore(qbeType, value, addr);
+    // *** STRING ASSIGNMENT WITH REFERENCE COUNTING ***
+    // Strings require special handling to prevent memory leaks and ensure
+    // proper reference counting semantics
+    if (typeManager_.isString(varType)) {
+        builder_.emitComment("String assignment: " + varName + " = <value>");
+        
+        // 1. Load old string pointer from variable
+        std::string oldPtr = builder_.newTemp();
+        builder_.emitLoad(oldPtr, "l", addr);
+        
+        // 2. Retain new string (increments refcount)
+        //    This shares ownership - the variable now references the same descriptor
+        std::string retainedPtr = builder_.newTemp();
+        builder_.emitCall(retainedPtr, "l", "string_retain", "l " + value);
+        
+        // 3. Store new pointer to variable
+        builder_.emitStore("l", retainedPtr, addr);
+        
+        // 4. Release old string (decrements refcount, frees if 0)
+        //    Done AFTER storing new value to handle self-assignment correctly
+        //    string_release handles NULL pointers gracefully
+        builder_.emitCall("", "", "string_release", "l " + oldPtr);
+        
+        builder_.emitComment("End string assignment");
     } else {
-        // Local variable - store to stack allocation
-        builder_.emitStore(qbeType, value, addr);
+        // Non-string types: regular store (no reference counting needed)
+        if (treatAsGlobal) {
+            // Global variable - store to global memory
+            builder_.emitStore(qbeType, value, addr);
+        } else {
+            // Local variable - store to stack allocation
+            builder_.emitStore(qbeType, value, addr);
+        }
     }
 }
 
@@ -1172,10 +1341,8 @@ std::string ASTEmitter::emitArrayAccess(const std::string& arrayName,
     }
     
     const auto& arraySymbol = it->second;
-    BaseType elemType = arraySymbol.elementTypeDesc.baseType;
-    int64_t elementSize = typeManager_.getTypeSize(elemType);
     
-    // Get array descriptor pointer
+    // Get array descriptor pointer (now a BasicArray*)
     bool isGlobal = arraySymbol.functionScope.empty();
     std::string descName = symbolMapper_.getArrayDescriptorName(arrayName);
     if (isGlobal && descName[0] != '$') {
@@ -1185,190 +1352,49 @@ std::string ASTEmitter::emitArrayAccess(const std::string& arrayName,
     }
     
     int numIndices = indices.size();
+    builder_.emitComment("Array access: " + arrayName + " (using array_get_address)");
     
-    if (numIndices == 1) {
-        // 1D array access
-        builder_.emitComment("Array access: " + arrayName + "[i]");
-        
+    // Load the BasicArray* pointer
+    std::string arrayPtr = builder_.newTemp();
+    builder_.emitLoad(arrayPtr, "l", descName);
+    
+    // Allocate space for indices array on stack (int32_t per index)
+    std::string indicesArrayPtr = builder_.newTemp();
+    int indicesSize = numIndices * 4;  // 4 bytes per int32_t
+    builder_.emitAlloc(indicesArrayPtr, indicesSize);
+    
+    // Store each index into the indices array
+    for (int i = 0; i < numIndices; i++) {
         // Evaluate index expression
-        std::string indexReg = emitExpression(indices[0].get());
+        std::string indexReg = emitExpression(indices[i].get());
         
-        // Convert index to long if needed
-        std::string indexLong = builder_.newTemp();
-        std::string indexType = typeManager_.getQBEType(getExpressionType(indices[0].get()));
-        if (indexType == "w") {
-            builder_.emitExtend(indexLong, "l", "extsw", indexReg);
+        // Convert index to int32_t (word) if needed
+        std::string indexWord = builder_.newTemp();
+        std::string indexType = typeManager_.getQBEType(getExpressionType(indices[i].get()));
+        if (indexType == "l") {
+            // Truncate long to int
+            builder_.emitInstruction(indexWord + " =w copy " + indexReg);
         } else {
-            builder_.emitInstruction(indexLong + " =l copy " + indexReg);
+            builder_.emitInstruction(indexWord + " =w copy " + indexReg);
         }
         
-        // Load bounds from descriptor
-        std::string lowerAddr = builder_.newTemp();
-        builder_.emitBinary(lowerAddr, "l", "add", descName, "8");
-        std::string lowerBound = builder_.newTemp();
-        builder_.emitLoad(lowerBound, "l", lowerAddr);
-        
-        std::string upperAddr = builder_.newTemp();
-        builder_.emitBinary(upperAddr, "l", "add", descName, "16");
-        std::string upperBound = builder_.newTemp();
-        builder_.emitLoad(upperBound, "l", upperAddr);
-        
-        // Bounds check: index >= lowerBound AND index <= upperBound
-        std::string checkLower = builder_.newTemp();
-        builder_.emitCompare(checkLower, "l", "sge", indexLong, lowerBound);
-        
-        std::string checkUpper = builder_.newTemp();
-        builder_.emitCompare(checkUpper, "l", "sle", indexLong, upperBound);
-        
-        std::string checkBoth = builder_.newTemp();
-        builder_.emitBinary(checkBoth, "w", "and", checkLower, checkUpper);
-        
-        // Generate bounds check labels
-        std::string okLabel = symbolMapper_.getUniqueLabel("bounds_ok");
-        std::string errLabel = symbolMapper_.getUniqueLabel("bounds_err");
-        
-        builder_.emitBranch(checkBoth, okLabel, errLabel);
-        
-        // Error path
-        builder_.emitLabel(errLabel);
-        builder_.emitCall("", "", "basic_array_bounds_error", 
-                         "l " + indexLong + ", l " + lowerBound + ", l " + upperBound);
-        
-        // OK path: calculate element address
-        builder_.emitLabel(okLabel);
-        std::string adjustedIdx = builder_.newTemp();
-        builder_.emitBinary(adjustedIdx, "l", "sub", indexLong, lowerBound);
-        
-        std::string byteOffset = builder_.newTemp();
-        builder_.emitBinary(byteOffset, "l", "mul", adjustedIdx, std::to_string(elementSize));
-        
-        std::string dataPtr = builder_.newTemp();
-        builder_.emitLoad(dataPtr, "l", descName);
-        
-        std::string elementPtr = builder_.newTemp();
-        builder_.emitBinary(elementPtr, "l", "add", dataPtr, byteOffset);
-        
-        return elementPtr;
-        
-    } else if (numIndices == 2) {
-        // 2D array access
-        builder_.emitComment("Array access: " + arrayName + "[i,j]");
-        
-        // Evaluate index expressions
-        std::string index1Reg = emitExpression(indices[0].get());
-        std::string index2Reg = emitExpression(indices[1].get());
-        
-        // Convert indices to long
-        std::string index1Long = builder_.newTemp();
-        std::string indexType1 = typeManager_.getQBEType(getExpressionType(indices[0].get()));
-        if (indexType1 == "w") {
-            builder_.emitExtend(index1Long, "l", "extsw", index1Reg);
+        // Store into indices array at offset i*4
+        std::string indexAddr = builder_.newTemp();
+        int offset = i * 4;
+        if (offset == 0) {
+            builder_.emitInstruction(indexAddr + " =l copy " + indicesArrayPtr);
         } else {
-            builder_.emitInstruction(index1Long + " =l copy " + index1Reg);
+            builder_.emitBinary(indexAddr, "l", "add", indicesArrayPtr, std::to_string(offset));
         }
-        
-        std::string index2Long = builder_.newTemp();
-        std::string indexType2 = typeManager_.getQBEType(getExpressionType(indices[1].get()));
-        if (indexType2 == "w") {
-            builder_.emitExtend(index2Long, "l", "extsw", index2Reg);
-        } else {
-            builder_.emitInstruction(index2Long + " =l copy " + index2Reg);
-        }
-        
-        // Load bounds for dimension 1
-        std::string lowerAddr1 = builder_.newTemp();
-        builder_.emitBinary(lowerAddr1, "l", "add", descName, "8");
-        std::string lowerBound1 = builder_.newTemp();
-        builder_.emitLoad(lowerBound1, "l", lowerAddr1);
-        
-        std::string upperAddr1 = builder_.newTemp();
-        builder_.emitBinary(upperAddr1, "l", "add", descName, "16");
-        std::string upperBound1 = builder_.newTemp();
-        builder_.emitLoad(upperBound1, "l", upperAddr1);
-        
-        // Load bounds for dimension 2
-        std::string lowerAddr2 = builder_.newTemp();
-        builder_.emitBinary(lowerAddr2, "l", "add", descName, "24");
-        std::string lowerBound2 = builder_.newTemp();
-        builder_.emitLoad(lowerBound2, "l", lowerAddr2);
-        
-        std::string upperAddr2 = builder_.newTemp();
-        builder_.emitBinary(upperAddr2, "l", "add", descName, "32");
-        std::string upperBound2 = builder_.newTemp();
-        builder_.emitLoad(upperBound2, "l", upperAddr2);
-        
-        // Bounds check dimension 1
-        std::string checkLower1 = builder_.newTemp();
-        builder_.emitCompare(checkLower1, "l", "sge", index1Long, lowerBound1);
-        
-        std::string checkUpper1 = builder_.newTemp();
-        builder_.emitCompare(checkUpper1, "l", "sle", index1Long, upperBound1);
-        
-        std::string checkBoth1 = builder_.newTemp();
-        builder_.emitBinary(checkBoth1, "w", "and", checkLower1, checkUpper1);
-        
-        // Bounds check dimension 2
-        std::string checkLower2 = builder_.newTemp();
-        builder_.emitCompare(checkLower2, "l", "sge", index2Long, lowerBound2);
-        
-        std::string checkUpper2 = builder_.newTemp();
-        builder_.emitCompare(checkUpper2, "l", "sle", index2Long, upperBound2);
-        
-        std::string checkBoth2 = builder_.newTemp();
-        builder_.emitBinary(checkBoth2, "w", "and", checkLower2, checkUpper2);
-        
-        // Combined check
-        std::string checkAll = builder_.newTemp();
-        builder_.emitBinary(checkAll, "w", "and", checkBoth1, checkBoth2);
-        
-        std::string okLabel = symbolMapper_.getUniqueLabel("bounds_ok");
-        std::string errLabel = symbolMapper_.getUniqueLabel("bounds_err");
-        
-        builder_.emitBranch(checkAll, okLabel, errLabel);
-        
-        // Error path (simplified - just use first index for error message)
-        builder_.emitLabel(errLabel);
-        builder_.emitCall("", "", "basic_array_bounds_error", 
-                         "l " + index1Long + ", l " + lowerBound1 + ", l " + upperBound1);
-        
-        // OK path: calculate element address
-        // Row-major: offset = ((i - lower1) * dim2_size + (j - lower2)) * elemSize
-        builder_.emitLabel(okLabel);
-        
-        std::string adjustedIdx1 = builder_.newTemp();
-        builder_.emitBinary(adjustedIdx1, "l", "sub", index1Long, lowerBound1);
-        
-        std::string adjustedIdx2 = builder_.newTemp();
-        builder_.emitBinary(adjustedIdx2, "l", "sub", index2Long, lowerBound2);
-        
-        // Calculate dim2_size = upperBound2 - lowerBound2 + 1
-        std::string dim2Size = builder_.newTemp();
-        builder_.emitBinary(dim2Size, "l", "sub", upperBound2, lowerBound2);
-        std::string dim2SizePlus1 = builder_.newTemp();
-        builder_.emitBinary(dim2SizePlus1, "l", "add", dim2Size, "1");
-        
-        // Calculate linear offset
-        std::string rowOffset = builder_.newTemp();
-        builder_.emitBinary(rowOffset, "l", "mul", adjustedIdx1, dim2SizePlus1);
-        
-        std::string linearIdx = builder_.newTemp();
-        builder_.emitBinary(linearIdx, "l", "add", rowOffset, adjustedIdx2);
-        
-        std::string byteOffset = builder_.newTemp();
-        builder_.emitBinary(byteOffset, "l", "mul", linearIdx, std::to_string(elementSize));
-        
-        std::string dataPtr = builder_.newTemp();
-        builder_.emitLoad(dataPtr, "l", descName);
-        
-        std::string elementPtr = builder_.newTemp();
-        builder_.emitBinary(elementPtr, "l", "add", dataPtr, byteOffset);
-        
-        return elementPtr;
-        
-    } else {
-        builder_.emitComment("ERROR: Only 1D and 2D arrays supported");
-        return builder_.newTemp();
+        builder_.emitStore("w", indexWord, indexAddr);
     }
+    
+    // Call array_get_address(BasicArray* array, int32_t* indices)
+    std::string elementPtr = builder_.newTemp();
+    builder_.emitCall(elementPtr, "l", "array_get_address", 
+                     "l " + arrayPtr + ", l " + indicesArrayPtr);
+    
+    return elementPtr;
 }
 
 std::string ASTEmitter::loadArrayElement(const std::string& arrayName,
@@ -1506,7 +1532,7 @@ BaseType ASTEmitter::getExpressionType(const Expression* expr) {
                 upperName == "LEFT" || upperName == "RIGHT" || upperName == "MID" ||
                 upperName == "SPACE" || upperName == "STRING" || upperName == "UCASE" || 
                 upperName == "LCASE" || upperName == "TRIM" || upperName == "LTRIM" || 
-                upperName == "RTRIM") {
+                upperName == "RTRIM" || upperName == "__STRING_SLICE") {
                 return BaseType::STRING;
             }
             
@@ -1793,9 +1819,11 @@ void ASTEmitter::emitReadStatement(const ReadStatement* stmt) {
             builder_.emitInstruction(finalValueReg + " =s cast " + dataValueReg);
             
         } else if (qbeType == "l" && typeManager_.isString(varType)) {
-            // Target is string (l) - just copy pointer
-            builder_.emitComment("Copy DATA string pointer");
-            finalValueReg = dataValueReg;  // Already correct type
+            // Target is string (l) - convert C string pointer to StringDescriptor
+            builder_.emitComment("Convert DATA C string to StringDescriptor");
+            std::string strDescReg = builder_.getNextTemp();
+            builder_.emitCall(strDescReg, "l", "string_new_utf8", "l " + dataValueReg);
+            finalValueReg = strDescReg;
             
         } else if (qbeType == "l") {
             // Target is long (l) - just copy
@@ -1824,7 +1852,7 @@ void ASTEmitter::emitRestoreStatement(const RestoreStatement* stmt) {
         std::string labelPos = "$data_label_" + stmt->label;
         std::string posReg = builder_.getNextTemp();
         builder_.emitLoad(posReg, "l", labelPos);
-        builder_.emitCall("", "", "fb_restore_to_label", "l " + posReg);
+        builder_.emitStore("l", posReg, "$__data_pointer");
         
     } else if (stmt->lineNumber > 0) {
         // RESTORE line_number
@@ -1832,12 +1860,90 @@ void ASTEmitter::emitRestoreStatement(const RestoreStatement* stmt) {
         std::string linePos = "$data_line_" + std::to_string(stmt->lineNumber);
         std::string posReg = builder_.getNextTemp();
         builder_.emitLoad(posReg, "l", linePos);
-        builder_.emitCall("", "", "fb_restore_to_line", "l " + posReg);
+        builder_.emitStore("l", posReg, "$__data_pointer");
         
     } else {
         // RESTORE with no argument - reset to start
         builder_.emitComment("RESTORE to start");
-        builder_.emitCall("", "", "fb_restore", "");
+        std::string startReg = builder_.getNextTemp();
+        builder_.emitLoad(startReg, "l", "$__data_start");
+        builder_.emitStore("l", startReg, "$__data_pointer");
+    }
+}
+
+void ASTEmitter::emitSliceAssignStatement(const SliceAssignStatement* stmt) {
+    if (!stmt || !stmt->start || !stmt->end || !stmt->replacement) {
+        builder_.emitComment("ERROR: invalid slice assignment");
+        return;
+    }
+    
+    builder_.emitComment("String slice assignment: " + stmt->variable + "$(start TO end) = value");
+    
+    // Get the variable address
+    std::string varAddr = getVariableAddress(stmt->variable);
+    
+    // Load current string pointer
+    std::string currentPtr = builder_.newTemp();
+    builder_.emitLoad(currentPtr, "l", varAddr);
+    
+    // Evaluate start, end, and replacement expressions
+    std::string startReg = emitExpression(stmt->start.get());
+    std::string endReg = emitExpression(stmt->end.get());
+    std::string replReg = emitExpression(stmt->replacement.get());
+    
+    // Convert start and end to long if needed
+    BaseType startType = getExpressionType(stmt->start.get());
+    BaseType endType = getExpressionType(stmt->end.get());
+    
+    if (typeManager_.isIntegral(startType) && typeManager_.getQBEType(startType) == "w") {
+        std::string startLong = builder_.newTemp();
+        builder_.emitExtend(startLong, "l", "extsw", startReg);
+        startReg = startLong;
+    } else if (typeManager_.isFloatingPoint(startType)) {
+        startReg = emitTypeConversion(startReg, startType, BaseType::LONG);
+    }
+    
+    if (typeManager_.isIntegral(endType) && typeManager_.getQBEType(endType) == "w") {
+        std::string endLong = builder_.newTemp();
+        builder_.emitExtend(endLong, "l", "extsw", endReg);
+        endReg = endLong;
+    } else if (typeManager_.isFloatingPoint(endType)) {
+        endReg = emitTypeConversion(endReg, endType, BaseType::LONG);
+    }
+    
+    // Call string_slice_assign - it handles copy-on-write and returns modified/new descriptor
+    // IMPORTANT: string_slice_assign manages its own memory:
+    //   - If refcount > 1: clones, decrements original
+    //   - If same length: modifies in place
+    //   - If different length: creates new, frees old
+    // So we don't release the old pointer - the function handles it
+    std::string resultPtr = builder_.newTemp();
+    builder_.emitCall(resultPtr, "l", "string_slice_assign", 
+                     "l " + currentPtr + ", l " + startReg + ", l " + endReg + ", l " + replReg);
+    
+    // Store the result back to the variable
+    builder_.emitStore("l", resultPtr, varAddr);
+    
+    builder_.emitComment("End slice assignment");
+}
+
+// Helper: Convert BaseType to runtime type suffix character
+char ASTEmitter::getTypeSuffixChar(BaseType type) {
+    switch (type) {
+        case BaseType::INTEGER:
+        case BaseType::UINTEGER:
+            return '%';  // INTEGER
+        case BaseType::LONG:
+        case BaseType::ULONG:
+            return '&';  // LONG
+        case BaseType::SINGLE:
+            return '!';  // SINGLE
+        case BaseType::DOUBLE:
+            return '#';  // DOUBLE
+        case BaseType::STRING:
+            return '$';  // STRING
+        default:
+            return '#';  // Default to DOUBLE for unknown types
     }
 }
 

@@ -5,9 +5,9 @@
 50 REM Test 1: REDIM PRESERVE integer array to larger size
 60 PRINT "Test 1: REDIM PRESERVE to larger size (preserve data)"
 70 DIM A%(5)
-80 FOR I% = 1 TO 5
-90   LET A%(I%) = I% * 10
-100 NEXT I%
+80 FOR I = 1 TO 5
+90   LET A%(I) = I * 10
+100 NEXT I
 110 PRINT "  Original: A%(3) = "; A%(3); ", A%(5) = "; A%(5)
 120 IF A%(3) <> 30 THEN PRINT "  ERROR: Original data wrong" : END
 130 IF A%(5) <> 50 THEN PRINT "  ERROR: Original data wrong" : END
@@ -17,9 +17,9 @@
 170 IF A%(3) <> 30 THEN PRINT "  ERROR: Data not preserved" : END
 180 IF A%(5) <> 50 THEN PRINT "  ERROR: Data not preserved" : END
 190 REM Fill new elements
-200 FOR I% = 6 TO 10
-210   LET A%(I%) = I% * 10
-220 NEXT I%
+200 FOR I = 6 TO 10
+210   LET A%(I) = I * 10
+220 NEXT I
 230 PRINT "  New element: A%(8) = "; A%(8)
 240 IF A%(8) <> 80 THEN PRINT "  ERROR: New elements not writable" : END
 250 PRINT "  PASS: Data preserved, array enlarged"
@@ -28,9 +28,9 @@
 280 REM Test 2: REDIM PRESERVE to smaller size (truncate)
 290 PRINT "Test 2: REDIM PRESERVE to smaller size (truncate)"
 300 DIM B%(10)
-310 FOR I% = 1 TO 10
-320   LET B%(I%) = I% + 100
-330 NEXT I%
+310 FOR I = 1 TO 10
+320   LET B%(I) = I + 100
+330 NEXT I
 340 PRINT "  Original: B%(4) = "; B%(4); ", B%(9) = "; B%(9)
 350 IF B%(4) <> 104 THEN PRINT "  ERROR: Original data wrong" : END
 360 REDIM PRESERVE B%(6)
@@ -106,18 +106,18 @@
 1060 REM Test 6: REDIM PRESERVE then regular REDIM
 1070 PRINT "Test 6: PRESERVE then regular REDIM"
 1080 DIM F%(4)
-1090 FOR I% = 1 TO 4
-1100   LET F%(I%) = I% * 100
-1110 NEXT I%
+1090 FOR I = 1 TO 4
+1100   LET F%(I) = I * 100
+1110 NEXT I
 1120 PRINT "  Original: F%(2) = "; F%(2)
 1130 REDIM PRESERVE F%(6)
 1140 PRINT "  PRESERVE to size 6: F%(2) = "; F%(2)
 1150 IF F%(2) <> 200 THEN PRINT "  ERROR: PRESERVE failed" : END
 1160 REDIM F%(8)
 1170 PRINT "  Regular REDIM to size 8 (data lost)"
-1180 FOR I% = 1 TO 8
-1190   LET F%(I%) = I% * 50
-1200 NEXT I%
+1180 FOR I = 1 TO 8
+1190   LET F%(I) = I * 50
+1200 NEXT I
 1210 PRINT "  After regular REDIM: F%(5) = "; F%(5)
 1220 IF F%(5) <> 250 THEN PRINT "  ERROR: Regular REDIM failed" : END
 1230 PRINT "  PASS: Can mix PRESERVE and regular REDIM"
@@ -126,9 +126,9 @@
 1260 REM Test 7: REDIM PRESERVE with same size
 1270 PRINT "Test 7: REDIM PRESERVE same size (no-op)"
 1280 DIM G%(5)
-1290 FOR I% = 1 TO 5
-1300   LET G%(I%) = I% * 7
-1310 NEXT I%
+1290 FOR I = 1 TO 5
+1300   LET G%(I) = I * 7
+1310 NEXT I
 1320 PRINT "  Before: G%(3) = "; G%(3)
 1330 IF G%(3) <> 21 THEN PRINT "  ERROR: Setup failed" : END
 1340 REDIM PRESERVE G%(5)
@@ -144,10 +144,10 @@
 1440 LET H%(1) = 1
 1450 LET H%(2) = 2
 1460 PRINT "  Start: size 2"
-1470 FOR SIZE% = 3 TO 6
-1480   REDIM PRESERVE H%(SIZE%)
-1490   LET H%(SIZE%) = SIZE%
-1500 NEXT SIZE%
+1470 FOR SZ = 3 TO 6
+1480   REDIM PRESERVE H%(SZ)
+1490   LET H%(SZ) = SZ
+1500 NEXT SZ
 1510 PRINT "  Grown to size 6"
 1520 PRINT "  H%(1) = "; H%(1); ", H%(4) = "; H%(4); ", H%(6) = "; H%(6)
 1530 IF H%(1) <> 1 THEN PRINT "  ERROR: Original data lost" : END
@@ -159,9 +159,9 @@
 1590 REM Test 9: REDIM PRESERVE with expression for size
 1600 PRINT "Test 9: REDIM PRESERVE with expression"
 1610 DIM J%(5)
-1620 FOR I% = 1 TO 5
-1630   LET J%(I%) = I% * 20
-1640 NEXT I%
+1620 FOR I = 1 TO 5
+1630   LET J%(I) = I * 20
+1640 NEXT I
 1650 LET NEWSIZE% = 12
 1660 PRINT "  Original size: 5, new size: "; NEWSIZE%
 1670 REDIM PRESERVE J%(NEWSIZE%)

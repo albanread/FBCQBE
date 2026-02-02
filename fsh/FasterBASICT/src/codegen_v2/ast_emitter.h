@@ -88,6 +88,12 @@ public:
     void emitRestoreStatement(const FasterBASIC::RestoreStatement* stmt);
     
     /**
+     * Emit slice assignment statement (text$(start TO end) = value)
+     * @param stmt Slice assignment statement
+     */
+    void emitSliceAssignStatement(const FasterBASIC::SliceAssignStatement* stmt);
+    
+    /**
      * Emit IF statement (handled by CFGEmitter for control flow)
      * This just emits the condition evaluation
      * @param stmt IF statement
@@ -132,6 +138,18 @@ public:
      * @param stmt DIM statement
      */
     void emitDimStatement(const FasterBASIC::DimStatement* stmt);
+    
+    /**
+     * Emit REDIM statement (array redimensioning)
+     * @param stmt REDIM statement
+     */
+    void emitRedimStatement(const FasterBASIC::RedimStatement* stmt);
+    
+    /**
+     * Emit ERASE statement (array deallocation)
+     * @param stmt ERASE statement
+     */
+    void emitEraseStatement(const FasterBASIC::EraseStatement* stmt);
     
     /**
      * Emit LOCAL statement (local variable declaration in SUB/FUNCTION)
@@ -268,6 +286,7 @@ private:
     // === Helper: get type suffix character ===
     
     char getTypeSuffixChar(FasterBASIC::TokenType suffix);
+    char getTypeSuffixChar(FasterBASIC::BaseType type);
     std::string getQBEComparisonOp(FasterBASIC::TokenType op);
 };
 
