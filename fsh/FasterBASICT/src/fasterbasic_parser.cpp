@@ -2386,16 +2386,19 @@ StatementPtr Parser::parseForStatement() {
     }
 
     // FOR loop variables are plain names - no suffix mangling
-    // Just get the raw identifier text
+    // Get the raw identifier text and strip any type suffix character
     std::string varName = current().value;
-    advance(); // consume identifier
-
-    // Skip any type suffix token (%, &, !, #, @, ^)
-    if (current().type == TokenType::TYPE_INT || current().type == TokenType::TYPE_FLOAT ||
-        current().type == TokenType::TYPE_DOUBLE || current().type == TokenType::TYPE_STRING ||
-        current().type == TokenType::TYPE_BYTE || current().type == TokenType::TYPE_SHORT) {
-        advance(); // skip suffix
+    
+    // Strip type suffix character from the end if present (%, &, !, #, $, @, ^)
+    if (!varName.empty()) {
+        char lastChar = varName.back();
+        if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
+            lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
+            varName = varName.substr(0, varName.length() - 1);
+        }
     }
+    
+    advance(); // consume identifier (with suffix already stripped from varName)
 
     // Check if this is FOR...IN (without EACH) or traditional FOR...TO
     if (current().type == TokenType::IN) {
