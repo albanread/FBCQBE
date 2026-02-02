@@ -768,6 +768,16 @@ void ASTEmitter::emitStatement(const Statement* stmt) {
             builder_.emitComment("WHILE loop header");
             break;
             
+        case ASTNodeType::STMT_DO:
+            // DO condition is handled by CFG edges
+            builder_.emitComment("DO loop header");
+            break;
+            
+        case ASTNodeType::STMT_LOOP:
+            // LOOP condition is handled by CFG edges
+            builder_.emitComment("LOOP statement");
+            break;
+            
         case ASTNodeType::STMT_IF:
             // IF condition is handled by CFG edges
             builder_.emitComment("IF statement");
@@ -1736,6 +1746,36 @@ std::string ASTEmitter::emitIfCondition(const IfStatement* stmt) {
 }
 
 std::string ASTEmitter::emitWhileCondition(const WhileStatement* stmt) {
+    return emitExpression(stmt->condition.get());
+}
+
+std::string ASTEmitter::emitDoPreCondition(const DoStatement* stmt) {
+    if (stmt->preConditionType == DoStatement::ConditionType::NONE) {
+        return "";  // No pre-condition
+    }
+    
+    if (!stmt->preCondition) {
+        return "";  // Shouldn't happen, but handle gracefully
+    }
+    
+    // Just emit the condition - CFG has already set up edges correctly
+    // For DO WHILE: true → body, false → exit
+    // For DO UNTIL: true → exit, false → body (CFG reverses edges)
+    return emitExpression(stmt->preCondition.get());
+}
+
+std::string ASTEmitter::emitLoopPostCondition(const LoopStatement* stmt) {
+    if (stmt->conditionType == LoopStatement::ConditionType::NONE) {
+        return "";  // No post-condition
+    }
+    
+    if (!stmt->condition) {
+        return "";  // Shouldn't happen, but handle gracefully
+    }
+    
+    // Just emit the condition - CFG has already set up edges correctly
+    // For LOOP WHILE: true → body, false → exit
+    // For LOOP UNTIL: true → exit, false → body (CFG reverses edges)
     return emitExpression(stmt->condition.get());
 }
 

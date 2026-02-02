@@ -118,6 +118,23 @@ std::string RuntimeLibrary::emitStringLiteral(const std::string& stringConstant)
     return emitRuntimeCall("string_new_utf8", "l", "l $" + stringConstant);
 }
 
+// === String Lifecycle Management ===
+
+std::string RuntimeLibrary::emitStringClone(const std::string& stringPtr) {
+    // string_clone creates a deep copy with encoding preservation
+    return emitRuntimeCall("string_clone", "l", "l " + stringPtr);
+}
+
+std::string RuntimeLibrary::emitStringRetain(const std::string& stringPtr) {
+    // string_retain increments refcount and returns the same pointer
+    return emitRuntimeCall("string_retain", "l", "l " + stringPtr);
+}
+
+void RuntimeLibrary::emitStringRelease(const std::string& stringPtr) {
+    // string_release decrements refcount and frees if it reaches 0
+    emitRuntimeCallVoid("string_release", "l " + stringPtr);
+}
+
 // === Array Operations ===
 
 std::string RuntimeLibrary::emitArrayAccess(const std::string& arrayBase, 
@@ -240,7 +257,7 @@ std::string RuntimeLibrary::emitStr(const std::string& value, BasicType valueTyp
         if (qbeType == "w") {
             // Convert 32-bit int to 64-bit long
             longValue = builder_.newTemp();
-            builder_.emitConvert(longValue, "l", "sextw", value);
+            builder_.emitConvert(longValue, "l", "extsw", value);
         }
         return emitRuntimeCall("string_from_int", "l", "l " + longValue);
     } else if (valueType == BasicType::SINGLE) {

@@ -154,6 +154,28 @@ public:
      * @return Temporary holding string descriptor (l)
      */
     std::string emitStringLiteral(const std::string& stringConstant);
+    
+    // === String Lifecycle Management ===
+    
+    /**
+     * Emit a string clone call (deep copy with new refcount)
+     * @param stringPtr String descriptor pointer to clone
+     * @return Temporary holding new cloned string descriptor (l)
+     */
+    std::string emitStringClone(const std::string& stringPtr);
+    
+    /**
+     * Emit a string retain call (increment refcount)
+     * @param stringPtr String descriptor pointer to retain
+     * @return Same pointer (for chaining)
+     */
+    std::string emitStringRetain(const std::string& stringPtr);
+    
+    /**
+     * Emit a string release call (decrement refcount, free if 0)
+     * @param stringPtr String descriptor pointer to release
+     */
+    void emitStringRelease(const std::string& stringPtr);
 
     // === Array Operations ===
     

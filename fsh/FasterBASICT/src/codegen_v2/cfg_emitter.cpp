@@ -129,6 +129,36 @@ void CFGEmitter::emitBlock(const BasicBlock* block, const ControlFlowGraph* cfg)
         }
     }
     
+    // Check if this is a DO loop header - emit pre-condition check
+    if (block->isLoopHeader && block->label.find("Do_Header") != std::string::npos) {
+        // The DoStatement is in this block
+        for (const Statement* stmt : block->statements) {
+            if (stmt && stmt->getType() == ASTNodeType::STMT_DO) {
+                const DoStatement* doStmt = static_cast<const DoStatement*>(stmt);
+                std::string condition = astEmitter_.emitDoPreCondition(doStmt);
+                // Store condition for use by terminator (empty string if no pre-condition)
+                currentLoopCondition_ = condition;
+                break;
+            }
+        }
+    }
+    
+    // Check if this is a DO loop condition block (for post-test DO loops)
+    if (block->label.find("Do_Condition") != std::string::npos) {
+        // The DoStatement with postCondition is in this block
+        for (const Statement* stmt : block->statements) {
+            if (stmt && stmt->getType() == ASTNodeType::STMT_DO) {
+                const DoStatement* doStmt = static_cast<const DoStatement*>(stmt);
+                // Emit the post-condition from the DoStatement
+                if (doStmt->postConditionType != DoStatement::ConditionType::NONE && doStmt->postCondition) {
+                    std::string condition = astEmitter_.emitExpression(doStmt->postCondition.get());
+                    currentLoopCondition_ = condition;
+                }
+                break;
+            }
+        }
+    }
+    
     // Check if this is a FOR loop increment block - emit increment
     if (block->label.find("For_Increment") != std::string::npos) {
         // Find the ForStatement by searching predecessors

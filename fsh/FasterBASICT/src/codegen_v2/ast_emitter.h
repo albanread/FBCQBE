@@ -109,6 +109,20 @@ public:
     std::string emitWhileCondition(const FasterBASIC::WhileStatement* stmt);
     
     /**
+     * Emit DO loop pre-condition check (DO WHILE/UNTIL)
+     * @param stmt DO statement
+     * @return Temporary holding condition result (empty if no pre-condition)
+     */
+    std::string emitDoPreCondition(const FasterBASIC::DoStatement* stmt);
+    
+    /**
+     * Emit LOOP post-condition check (LOOP WHILE/UNTIL)
+     * @param stmt LOOP statement
+     * @return Temporary holding condition result (empty if no post-condition)
+     */
+    std::string emitLoopPostCondition(const FasterBASIC::LoopStatement* stmt);
+    
+    /**
      * Emit FOR loop initialization
      * @param stmt FOR statement
      */

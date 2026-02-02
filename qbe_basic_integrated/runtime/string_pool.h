@@ -20,23 +20,16 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include "string_descriptor.h"  // Use canonical StringDescriptor definition
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 //
-// StringDescriptor: 40-byte descriptor for UTF-32 strings
+// NOTE: StringDescriptor is defined in string_descriptor.h
+// This file provides pooling infrastructure for StringDescriptor instances.
 //
-typedef struct StringDescriptor {
-    uint32_t* data;        // Offset 0:  Pointer to UTF-32 code points
-    int64_t   length;      // Offset 8:  Length in code points
-    int64_t   capacity;    // Offset 16: Allocated capacity in code points
-    int32_t   refcount;    // Offset 24: Reference count for sharing
-    uint8_t   dirty;       // Offset 28: UTF-8 cache needs update flag
-    uint8_t   _padding[3]; // Offset 29: Alignment padding
-    char*     utf8_cache;  // Offset 32: Cached UTF-8 representation
-} StringDescriptor;
 
 //
 // StringDescriptorPool: Manages a pool of reusable descriptors
@@ -139,16 +132,19 @@ static inline void string_desc_free_data(StringDescriptor* desc) {
 }
 
 // Clone a descriptor (allocates new descriptor from pool)
+// NOTE: This is a pool-based clone. Use string_clone() from string_descriptor.h
+// for encoding-aware cloning that preserves ASCII vs UTF-32.
 static inline StringDescriptor* string_desc_clone(const StringDescriptor* src) {
     if (!src) return NULL;
     
     StringDescriptor* dest = string_desc_alloc();
     if (!dest) return NULL;
     
-    // Allocate new data buffer
+    // Allocate new data buffer - size depends on encoding
     if (src->length > 0 && src->data) {
-        size_t bytes = src->length * sizeof(uint32_t);
-        dest->data = (uint32_t*)malloc(bytes);
+        size_t elem_size = (src->encoding == STRING_ENCODING_ASCII) ? sizeof(uint8_t) : sizeof(uint32_t);
+        size_t bytes = src->length * elem_size;
+        dest->data = malloc(bytes);
         if (!dest->data) {
             string_desc_free(dest);
             return NULL;
@@ -161,6 +157,7 @@ static inline StringDescriptor* string_desc_clone(const StringDescriptor* src) {
     dest->length = src->length;
     dest->capacity = src->length; // Set capacity to actual length
     dest->refcount = 1;
+    dest->encoding = src->encoding; // Preserve encoding
     dest->dirty = 1;
     dest->utf8_cache = NULL; // Don't copy cache, will regenerate if needed
     

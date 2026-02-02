@@ -287,14 +287,14 @@ std::string TypeManager::mapConversion(char fromQBE, char toQBE) const {
     // From float (s) conversions
     if (fromQBE == 's') {
         if (toQBE == 'w') return "stosi";     // Float to signed int
-        if (toQBE == 'l') return "stosl";     // Float to signed long
+        if (toQBE == 'l') return "FLOAT_TO_LONG";  // Special: needs two-step conversion (stosi + extsw)
         if (toQBE == 'd') return "exts";      // Extend float to double
     }
     
     // From double (d) conversions
     if (fromQBE == 'd') {
         if (toQBE == 'w') return "dtosi";     // Double to signed int
-        if (toQBE == 'l') return "dtosl";     // Double to signed long
+        if (toQBE == 'l') return "DOUBLE_TO_LONG";  // Special: needs two-step conversion (dtosi + extsw)
         if (toQBE == 's') return "truncd";    // Truncate double to float
     }
     

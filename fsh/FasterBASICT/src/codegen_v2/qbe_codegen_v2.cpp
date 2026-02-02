@@ -438,6 +438,14 @@ void QBECodeGeneratorV2::collectStringLiterals(const Program* program, const Pro
             }
         }
     }
+    
+    // Collect string literals from DATA values
+    for (const auto& value : dataValues_.values) {
+        if (std::holds_alternative<std::string>(value)) {
+            const std::string& strValue = std::get<std::string>(value);
+            builder_->registerString(strValue);
+        }
+    }
 }
 
 void QBECodeGeneratorV2::collectStringsFromStatement(const Statement* stmt) {
@@ -511,6 +519,21 @@ void QBECodeGeneratorV2::collectStringsFromStatement(const Statement* stmt) {
                 if (arg) {
                     collectStringsFromExpression(arg.get());
                 }
+            }
+            break;
+        }
+        
+        case ASTNodeType::STMT_SLICE_ASSIGN: {
+            const auto* sliceStmt = static_cast<const SliceAssignStatement*>(stmt);
+            // Collect strings from start, end, and replacement expressions
+            if (sliceStmt->start) {
+                collectStringsFromExpression(sliceStmt->start.get());
+            }
+            if (sliceStmt->end) {
+                collectStringsFromExpression(sliceStmt->end.get());
+            }
+            if (sliceStmt->replacement) {
+                collectStringsFromExpression(sliceStmt->replacement.get());
             }
             break;
         }
@@ -640,8 +663,8 @@ void QBECodeGeneratorV2::emitDataSegment() {
             builder_->emitGlobalData(dataLabel, "l", std::to_string(u.bits));
         } else if (std::holds_alternative<std::string>(dataValues_.values[i])) {
             const std::string& value = std::get<std::string>(dataValues_.values[i]);
-            // Add to string pool and get the label
-            std::string strLabel = builder_->registerString(value);
+            // Get the label (already registered during collection phase)
+            std::string strLabel = builder_->getStringLabel(value);
             // Store pointer to string constant (64-bit pointer) - add $ prefix
             builder_->emitGlobalData(dataLabel, "l", "$" + strLabel);
         }

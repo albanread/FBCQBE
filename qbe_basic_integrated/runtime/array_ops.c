@@ -353,64 +353,214 @@ void array_redim(BasicArray* array, int32_t* new_bounds, bool preserve) {
         return;
     }
     
-    // For now, we'll implement a simple version that doesn't preserve data
-    // A full implementation would copy over overlapping elements
-    if (preserve) {
-        // TODO: Implement REDIM PRESERVE
-        basic_error_msg("REDIM PRESERVE not yet implemented");
-        return;
-    }
+    // Save old bounds and data if preserving
+    void* old_data = NULL;
+    int32_t* old_bounds = NULL;
+    int32_t* old_strides = NULL;
     
-    // Free old data
-    if (array->data) {
-        if (array->type_suffix == '$') {
-            // Release all strings
-            size_t total_elements = 1;
-            for (int32_t i = 0; i < array->dimensions; i++) {
-                int32_t lower = array->bounds[i * 2];
-                int32_t upper = array->bounds[i * 2 + 1];
-                total_elements *= (upper - lower + 1);
-            }
-            
-            StringDescriptor** strings = (StringDescriptor**)array->data;
-            for (size_t i = 0; i < total_elements; i++) {
-                if (strings[i]) {
-                    string_release(strings[i]);
+    if (preserve && array->data) {
+        // Save old state
+        old_data = array->data;
+        old_bounds = (int32_t*)malloc(array->dimensions * 2 * sizeof(int32_t));
+        old_strides = (int32_t*)malloc(array->dimensions * sizeof(int32_t));
+        if (!old_bounds || !old_strides) {
+            if (old_bounds) free(old_bounds);
+            if (old_strides) free(old_strides);
+            basic_error_msg("Out of memory (REDIM PRESERVE)");
+            return;
+        }
+        memcpy(old_bounds, array->bounds, array->dimensions * 2 * sizeof(int32_t));
+        memcpy(old_strides, array->strides, array->dimensions * sizeof(int32_t));
+    } else {
+        // Not preserving - free old data
+        if (array->data) {
+            if (array->type_suffix == '$') {
+                // Release all strings
+                size_t total_elements = 1;
+                for (int32_t i = 0; i < array->dimensions; i++) {
+                    int32_t lower = array->bounds[i * 2];
+                    int32_t upper = array->bounds[i * 2 + 1];
+                    total_elements *= (upper - lower + 1);
+                }
+                
+                StringDescriptor** strings = (StringDescriptor**)array->data;
+                for (size_t i = 0; i < total_elements; i++) {
+                    if (strings[i]) {
+                        string_release(strings[i]);
+                    }
                 }
             }
+            free(array->data);
+            array->data = NULL;
         }
-        free(array->data);
     }
     
     // Update bounds
     memcpy(array->bounds, new_bounds, array->dimensions * 2 * sizeof(int32_t));
     
     // Recalculate strides and total size
-    size_t total_elements = 1;
+    size_t new_total_elements = 1;
     for (int32_t i = array->dimensions - 1; i >= 0; i--) {
         int32_t lower = new_bounds[i * 2];
         int32_t upper = new_bounds[i * 2 + 1];
         int32_t size = upper - lower + 1;
         
         if (size <= 0) {
+            if (old_bounds) free(old_bounds);
+            if (old_strides) free(old_strides);
+            if (old_data) free(old_data);
             basic_error_msg("Invalid array bounds in REDIM");
             return;
         }
         
-        array->strides[i] = (int32_t)total_elements;
-        total_elements *= size;
+        array->strides[i] = (int32_t)new_total_elements;
+        new_total_elements *= size;
     }
     
     // Allocate new data
-    size_t data_size = total_elements * array->element_size;
-    array->data = malloc(data_size);
-    if (!array->data) {
+    size_t new_data_size = new_total_elements * array->element_size;
+    void* new_data = malloc(new_data_size);
+    if (!new_data) {
+        if (old_bounds) free(old_bounds);
+        if (old_strides) free(old_strides);
+        if (old_data) {
+            array->data = old_data;  // Restore old data
+        }
         basic_error_msg("Out of memory (REDIM)");
         return;
     }
     
-    // Initialize to zero
-    memset(array->data, 0, data_size);
+    // Initialize new data to zero
+    memset(new_data, 0, new_data_size);
+    
+    // If preserving, copy overlapping elements
+    if (preserve && old_data) {
+        // For 1D arrays, use simple linear copy
+        if (array->dimensions == 1) {
+            int32_t old_lower = old_bounds[0];
+            int32_t old_upper = old_bounds[1];
+            int32_t new_lower = new_bounds[0];
+            int32_t new_upper = new_bounds[1];
+            
+            int32_t start = (old_lower > new_lower) ? old_lower : new_lower;
+            int32_t end = (old_upper < new_upper) ? old_upper : new_upper;
+            
+            for (int32_t i = start; i <= end; i++) {
+                size_t old_offset = (i - old_lower) * old_strides[0];
+                size_t new_offset = (i - new_lower) * array->strides[0];
+                
+                void* old_ptr = (char*)old_data + (old_offset * array->element_size);
+                void* new_ptr = (char*)new_data + (new_offset * array->element_size);
+                
+                if (array->type_suffix == '$') {
+                    StringDescriptor** old_str = (StringDescriptor**)old_ptr;
+                    StringDescriptor** new_str = (StringDescriptor**)new_ptr;
+                    if (*old_str) {
+                        *new_str = string_retain(*old_str);
+                    }
+                } else {
+                    memcpy(new_ptr, old_ptr, array->element_size);
+                }
+            }
+        } else {
+            // For multi-dimensional arrays, iterate through all overlapping indices
+            // Calculate overlapping ranges for each dimension
+            int32_t* overlap_start = (int32_t*)malloc(array->dimensions * sizeof(int32_t));
+            int32_t* overlap_end = (int32_t*)malloc(array->dimensions * sizeof(int32_t));
+            int32_t* current_idx = (int32_t*)malloc(array->dimensions * sizeof(int32_t));
+            
+            if (!overlap_start || !overlap_end || !current_idx) {
+                if (overlap_start) free(overlap_start);
+                if (overlap_end) free(overlap_end);
+                if (current_idx) free(current_idx);
+                free(new_data);
+                free(old_data);
+                free(old_bounds);
+                free(old_strides);
+                basic_error_msg("Out of memory (REDIM PRESERVE copy)");
+                return;
+            }
+            
+            for (int32_t d = 0; d < array->dimensions; d++) {
+                int32_t old_lower = old_bounds[d * 2];
+                int32_t old_upper = old_bounds[d * 2 + 1];
+                int32_t new_lower = new_bounds[d * 2];
+                int32_t new_upper = new_bounds[d * 2 + 1];
+                
+                overlap_start[d] = (old_lower > new_lower) ? old_lower : new_lower;
+                overlap_end[d] = (old_upper < new_upper) ? old_upper : new_upper;
+                current_idx[d] = overlap_start[d];
+            }
+            
+            // Iterate through all overlapping elements
+            int done = 0;
+            while (!done) {
+                // Calculate offsets
+                size_t old_offset = 0;
+                size_t new_offset = 0;
+                for (int32_t d = 0; d < array->dimensions; d++) {
+                    old_offset += (current_idx[d] - old_bounds[d * 2]) * old_strides[d];
+                    new_offset += (current_idx[d] - new_bounds[d * 2]) * array->strides[d];
+                }
+                
+                // Copy element
+                void* old_ptr = (char*)old_data + (old_offset * array->element_size);
+                void* new_ptr = (char*)new_data + (new_offset * array->element_size);
+                
+                if (array->type_suffix == '$') {
+                    StringDescriptor** old_str = (StringDescriptor**)old_ptr;
+                    StringDescriptor** new_str = (StringDescriptor**)new_ptr;
+                    if (*old_str) {
+                        *new_str = string_retain(*old_str);
+                    }
+                } else {
+                    memcpy(new_ptr, old_ptr, array->element_size);
+                }
+                
+                // Increment indices (rightmost dimension first)
+                int32_t d = array->dimensions - 1;
+                while (d >= 0) {
+                    current_idx[d]++;
+                    if (current_idx[d] <= overlap_end[d]) {
+                        break;
+                    }
+                    current_idx[d] = overlap_start[d];
+                    d--;
+                }
+                if (d < 0) {
+                    done = 1;
+                }
+            }
+            
+            free(overlap_start);
+            free(overlap_end);
+            free(current_idx);
+        }
+        
+        // Free old data (strings already handled by copy or will be released)
+        if (array->type_suffix == '$') {
+            // Release all strings from old array (copied ones have increased refcount)
+            size_t old_total_elements = 1;
+            for (int32_t i = 0; i < array->dimensions; i++) {
+                int32_t lower = old_bounds[i * 2];
+                int32_t upper = old_bounds[i * 2 + 1];
+                old_total_elements *= (upper - lower + 1);
+            }
+            
+            StringDescriptor** strings = (StringDescriptor**)old_data;
+            for (size_t i = 0; i < old_total_elements; i++) {
+                if (strings[i]) {
+                    string_release(strings[i]);
+                }
+            }
+        }
+        free(old_data);
+        free(old_bounds);
+        free(old_strides);
+    }
+    
+    // Update array data pointer
+    array->data = new_data;
 }
 
 // =============================================================================
@@ -474,22 +624,36 @@ free(bounds);
 return array;
 }
 
-// Erase an array (set to length 0)
+// Erase an array (deallocate memory but keep descriptor)
 void array_erase(BasicArray* array) {
-if (!array) return;
+    if (!array) return;
     
-// Create new bounds with size 0 for all dimensions
-int32_t* new_bounds = (int32_t*)malloc(array->dimensions * 2 * sizeof(int32_t));
-if (!new_bounds) {
-    basic_error_msg("Out of memory (array_erase)");
-    return;
-}
+    // Free the data
+    if (array->data) {
+        // If string array, release all strings first
+        if (array->type_suffix == '$') {
+            size_t total_elements = 1;
+            for (int32_t i = 0; i < array->dimensions; i++) {
+                int32_t lower = array->bounds[i * 2];
+                int32_t upper = array->bounds[i * 2 + 1];
+                total_elements *= (upper - lower + 1);
+            }
+            
+            StringDescriptor** strings = (StringDescriptor**)array->data;
+            for (size_t i = 0; i < total_elements; i++) {
+                if (strings[i]) {
+                    string_release(strings[i]);
+                }
+            }
+        }
+        
+        free(array->data);
+        array->data = NULL;
+    }
     
-for (int32_t i = 0; i < array->dimensions; i++) {
-    new_bounds[i * 2] = 0;
-    new_bounds[i * 2 + 1] = -1;  // Make upper < lower to indicate empty
-}
-    
-// Redim to size 0 without preserve
-array_redim(array, new_bounds, false);
+    // Set bounds to indicate empty array (0, -1 means size 0)
+    for (int32_t i = 0; i < array->dimensions; i++) {
+        array->bounds[i * 2] = 0;
+        array->bounds[i * 2 + 1] = -1;
+    }
 }

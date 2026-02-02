@@ -530,6 +530,14 @@ void basic_check_bounds(BasicArray* array, int32_t* indices);
 // Array bounds error handler (for descriptor-based arrays)
 void basic_array_bounds_error(int64_t index, int64_t lower, int64_t upper);
 
+// DATA exhaustion error handler
+void fb_error_out_of_data(void);
+
+// RESTORE statement support
+void fb_restore(void);
+void fb_restore_to_label(char* label_pos);
+void fb_restore_to_line(char* line_pos);
+
 // =============================================================================
 // DATA/READ/RESTORE Support
 // =============================================================================

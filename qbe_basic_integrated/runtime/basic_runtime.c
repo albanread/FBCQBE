@@ -267,6 +267,26 @@ void basic_error_multidim_arrays() {
     basic_error_msg("Multi-dimensional arrays (>2D) not yet supported");
 }
 
+void fb_error_out_of_data() {
+    basic_error_msg("Out of DATA");
+}
+
+// RESTORE statement support
+// These functions are called from generated code which handles the actual pointer updates
+// The generated code loads $__data_start, calls this to validate, then stores to $__data_pointer
+// So these are currently no-ops - the actual work is done inline in the generated QBE code
+void fb_restore() {
+    // No-op: generated code handles pointer reset inline
+}
+
+void fb_restore_to_label(char* label_pos) {
+    // No-op: generated code handles pointer update inline
+}
+
+void fb_restore_to_line(char* line_pos) {
+    // No-op: generated code handles pointer update inline
+}
+
 // =============================================================================
 // Exception Handling Implementation
 // =============================================================================
