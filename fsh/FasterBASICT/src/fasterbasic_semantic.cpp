@@ -2053,6 +2053,13 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
     varSym.firstUse = stmt.location;
     m_symbolTable.insertVariable(normalizedVarName, varSym);
     
+    // Add to function's local variables set so validateVariableInFunction accepts it
+    if (m_currentFunctionScope.inFunction) {
+        m_currentFunctionScope.localVariables.insert(plainVarName);
+        // Also add normalized name in case lookups use that
+        m_currentFunctionScope.localVariables.insert(normalizedVarName);
+    }
+    
     // Validate expressions
     validateExpression(*stmt.start);
     validateExpression(*stmt.end);
