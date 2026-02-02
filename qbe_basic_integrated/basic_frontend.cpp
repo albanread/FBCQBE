@@ -10,6 +10,7 @@
 extern "C" char* compile_basic_to_qbe_string(const char *basic_path);
 extern "C" void set_trace_cfg_impl(int enable);
 extern "C" void set_trace_ast_impl(int enable);
+extern "C" void set_trace_symbols_impl(int enable);
 extern "C" void set_show_il_impl(int enable);
 
 extern "C" {
@@ -55,6 +56,10 @@ void set_trace_cfg(int enable) {
 /* Enable AST tracing in the compiler */
 void set_trace_ast(int enable) {
     set_trace_ast_impl(enable);
+}
+
+void set_trace_symbols(int enable) {
+    set_trace_symbols_impl(enable);
 }
 
 /* Enable IL output in the compiler */

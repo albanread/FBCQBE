@@ -1,164 +1,3 @@
-[DEBUG] compile_basic_to_il: Starting...
-[DEBUG] Starting pass1_collectDeclarations
-[DEBUG] Starting pass2_validate
-[DEBUG] pass2_validate: processing 72 lines
-[DEBUG] pass2_validate: line 1000 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1010 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1020 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1030 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1040 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1050 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1060 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1070 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1080 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1090 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1100 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1110 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1120 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1130 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1140 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1150 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1160 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1170 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1180 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1190 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1200 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1210 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1220 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1230 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1240 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1250 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1260 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1270 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1280 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1290 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1300 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1310 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1320 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1330 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1340 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1350 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1360 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1370 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1380 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1390 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1400 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1410 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1420 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1430 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1440 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1450 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1460 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1470 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1480 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1490 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1500 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1510 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1520 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1530 has 1 statements
-[DEBUG] validateStatement called for type: 28
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1540 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1550 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1560 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1570 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1580 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1590 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1600 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1610 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1620 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1630 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1640 has 1 statements
-[DEBUG] validateStatement called for type: 28
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1650 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1660 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1670 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1680 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1690 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1700 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1710 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] Finished pass2_validate
-[DEBUG] validateControlFlow called, FOR stack size: 0
-[INFO] Building complete ProgramCFG (main + all SUBs/FUNCTIONs)...
-[INFO] ProgramCFG build successful!
-[INFO] Main program CFG + 0 function/subroutine CFGs
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║                    PROGRAM CFG ANALYSIS REPORT                           ║
@@ -198,7 +37,8 @@ SUMMARY METRICS
     Multi-Succ:            4
 
   Edge Types:
-    Conditional True:      8
+    Conditional True:      4
+    Conditional False:     4
     Jump:                  7
 
 ------------------------------------------------------------------------------
@@ -411,16 +251,16 @@ DETAILED EDGE ANALYSIS
 
 Edge   0: Block   0 --[JUMP]--> Block   2
 Edge   1: Block   2 --[TRUE]--> Block   3 ("true")
-Edge   2: Block   2 --[TRUE]--> Block   4 ("false")
+Edge   2: Block   2 --[FALSE]--> Block   4 ("false")
 Edge   3: Block   3 --[TRUE]--> Block   5 ("true")
-Edge   4: Block   3 --[TRUE]--> Block   6 ("false")
+Edge   4: Block   3 --[FALSE]--> Block   6 ("false")
 Edge   5: Block   5 --[JUMP]--> Block   6
 Edge   6: Block   6 --[JUMP]--> Block   2 <- BACK-EDGE
 Edge   7: Block   4 --[JUMP]--> Block   7
 Edge   8: Block   7 --[TRUE]--> Block   8 ("true")
-Edge   9: Block   7 --[TRUE]--> Block   9 ("false")
+Edge   9: Block   7 --[FALSE]--> Block   9 ("false")
 Edge  10: Block   8 --[TRUE]--> Block  10 ("true")
-Edge  11: Block   8 --[TRUE]--> Block  11 ("false")
+Edge  11: Block   8 --[FALSE]--> Block  11 ("false")
 Edge  12: Block  10 --[JUMP]--> Block  11
 Edge  13: Block  11 --[JUMP]--> Block   7 <- BACK-EDGE
 Edge  14: Block   9 --[JUMP]--> Block   1 <- BACK-EDGE
@@ -452,23 +292,3 @@ JOIN POINTS (blocks with multiple predecessors): 4
 END OF CFG ANALYSIS REPORT
 ==============================================================================
 
-
-========================================
-CODE GENERATION: DISABLED
-========================================
-The new CFG builder generates correct control flow graphs.
-Code generation will be re-enabled after adapting the
-QBE code generator to work with the new CFG structure.
-
-To test CFG generation:
-  ./qbe_basic -G program.bas
-
-========================================
-
-[DEBUG] compile_basic_to_il: Returned from wrapper
-[DEBUG] compile_basic_to_il: qbe_il is valid
-[DEBUG] compile_basic_to_il: len = 0
-[DEBUG] compile_basic_to_il: About to call fmemopen...
-[DEBUG] compile_basic_to_il: fmemopen returned
-[DEBUG] compile_basic_to_il: fmemopen failed, freeing and returning NULL
-failed to compile BASIC file 'tests/rosetta//addition_chain_exponentiation.bas'

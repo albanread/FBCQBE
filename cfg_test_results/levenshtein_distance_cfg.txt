@@ -1,251 +1,3 @@
-[DEBUG] compile_basic_to_il: Starting...
-[DEBUG] Starting pass1_collectDeclarations
-[DEBUG] Starting pass2_validate
-[DEBUG] pass2_validate: processing 109 lines
-[DEBUG] pass2_validate: line 1000 has 0 statements
-[DEBUG] pass2_validate: line 1010 has 0 statements
-[DEBUG] pass2_validate: line 1020 has 0 statements
-[DEBUG] pass2_validate: line 1030 has 0 statements
-[DEBUG] pass2_validate: line 1040 has 0 statements
-[DEBUG] pass2_validate: line 1050 has 0 statements
-[DEBUG] pass2_validate: line 1060 has 0 statements
-[DEBUG] pass2_validate: line 1070 has 0 statements
-[DEBUG] pass2_validate: line 1080 has 0 statements
-[DEBUG] pass2_validate: line 1090 has 0 statements
-[DEBUG] pass2_validate: line 1110 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1120 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1140 has 0 statements
-[DEBUG] pass2_validate: line 1150 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1160 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1170 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1175 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1176 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1177 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1178 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1179 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1180 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1181 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1182 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1183 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1184 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1185 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1186 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1188 has 0 statements
-[DEBUG] pass2_validate: line 1189 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1190 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1191 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1192 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1193 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1194 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1195 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1196 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1197 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1198 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1199 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1200 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1202 has 0 statements
-[DEBUG] pass2_validate: line 1204 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1210 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1220 has 1 statements
-[DEBUG] validateStatement called for type: 11
-[DEBUG] pass2_validate: line 1230 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1240 has 1 statements
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 2
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1290 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1310 has 0 statements
-[DEBUG] pass2_validate: line 1320 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1330 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1340 has 1 statements
-[DEBUG] validateStatement called for type: 11
-[DEBUG] pass2_validate: line 1350 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1360 has 1 statements
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 2
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1410 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1430 has 0 statements
-[DEBUG] pass2_validate: line 1440 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1450 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1460 has 1 statements
-[DEBUG] validateStatement called for type: 11
-[DEBUG] pass2_validate: line 1470 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1480 has 1 statements
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 2
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1530 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1550 has 0 statements
-[DEBUG] pass2_validate: line 1560 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1570 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1580 has 1 statements
-[DEBUG] validateStatement called for type: 11
-[DEBUG] pass2_validate: line 1590 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1600 has 1 statements
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 2
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1650 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1670 has 0 statements
-[DEBUG] pass2_validate: line 1680 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1690 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1700 has 1 statements
-[DEBUG] validateStatement called for type: 11
-[DEBUG] pass2_validate: line 1710 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1720 has 1 statements
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 2
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1770 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1790 has 0 statements
-[DEBUG] pass2_validate: line 1800 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1810 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1820 has 1 statements
-[DEBUG] validateStatement called for type: 11
-[DEBUG] pass2_validate: line 1830 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1850 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1860 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1870 has 1 statements
-[DEBUG] validateStatement called for type: 11
-[DEBUG] pass2_validate: line 1875 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1880 has 1 statements
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 2
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1930 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1950 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1960 has 1 statements
-[DEBUG] validateStatement called for type: 34
-[DEBUG] pass2_validate: line 1980 has 0 statements
-[DEBUG] pass2_validate: line 1990 has 0 statements
-[DEBUG] pass2_validate: line 2000 has 0 statements
-[DEBUG] pass2_validate: line 2010 has 0 statements
-[DEBUG] pass2_validate: line 2020 has 0 statements
-[DEBUG] pass2_validate: line 2050 has 0 statements
-[DEBUG] pass2_validate: line 2060 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 2070 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 2170 has 0 statements
-[DEBUG] pass2_validate: line 2180 has 1 statements
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 16
-[DEBUG] pass2_validate: line 2230 has 1 statements
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 16
-[DEBUG] pass2_validate: line 2280 has 0 statements
-[DEBUG] pass2_validate: line 2290 has 0 statements
-[DEBUG] pass2_validate: line 2300 has 0 statements
-[DEBUG] pass2_validate: line 2340 has 1 statements
-[DEBUG] validateStatement called for type: 25
-[DEBUG] validateForStatement called for variable: i
-[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
-[DEBUG] validateStatement called for type: 7
-[DEBUG] FOR stack POP after body, stack size before pop: 1
-[DEBUG] FOR stack size after pop: 0
-[DEBUG] pass2_validate: line 2380 has 1 statements
-[DEBUG] validateStatement called for type: 25
-[DEBUG] validateForStatement called for variable: j
-[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
-[DEBUG] validateStatement called for type: 7
-[DEBUG] FOR stack POP after body, stack size before pop: 1
-[DEBUG] FOR stack size after pop: 0
-[DEBUG] pass2_validate: line 2430 has 1 statements
-[DEBUG] validateStatement called for type: 25
-[DEBUG] validateForStatement called for variable: i
-[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
-[DEBUG] validateStatement called for type: 25
-[DEBUG] validateForStatement called for variable: j
-[DEBUG] FOR stack PUSH at 0:0, stack size now: 2
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] FOR stack POP after body, stack size before pop: 2
-[DEBUG] FOR stack size after pop: 1
-[DEBUG] FOR stack POP after body, stack size before pop: 1
-[DEBUG] FOR stack size after pop: 0
-[DEBUG] pass2_validate: line 2780 has 0 statements
-[DEBUG] pass2_validate: line 2790 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 2800 has 1 statements
-[DEBUG] validateStatement called for type: 16
-[DEBUG] Finished pass2_validate
-[DEBUG] validateControlFlow called, FOR stack size: 0
-[INFO] Building complete ProgramCFG (main + all SUBs/FUNCTIONs)...
-[INFO] ProgramCFG build successful!
-[INFO] Main program CFG + 0 function/subroutine CFGs
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║                    PROGRAM CFG ANALYSIS REPORT                           ║
@@ -268,13 +20,13 @@ SUMMARY METRICS
 ------------------------------------------------------------------------------
   Basic Statistics:
     Total Blocks:         64
-    Total Edges:          83
+    Total Edges:          86
     Entry Block:           0
     Exit Block:            1
     Total Statements:    114
     Reachable Blocks:     64
     Unreachable:           0
-    Cyclomatic Complexity: 21 (HIGH)
+    Cyclomatic Complexity: 24 (HIGH)
 
   Block Categories:
     Empty Blocks:         17
@@ -285,15 +37,17 @@ SUMMARY METRICS
     Multi-Succ:           23
 
   Edge Types:
-    Fallthrough:           7
-    Conditional True:     32
+    Conditional True:     16
+    Conditional False:    16
     Jump:                 44
+    Call:                  7
+    Return:                3
 
 ------------------------------------------------------------------------------
 COMPACT FORMAT (for test validation)
 ------------------------------------------------------------------------------
-CFG:main:B64:E83:S114:CC21:R64
-EDGES: 0->2 2->3 2->4 3->5 4->5 5->6 6->7 6->8 7->9 8->9 9->10 10->11 10->12 11->13 12->13 13->14 14->15 14->16 15->17 16->17 17->18 18->19 18->20 19->21 20->21 21->22 22->23 23->24 23->25 24->26 25->26 26->1 27->28 27->29 29->30 29->31 31->32 32->33 33->34 33->36 34->35 35->33 36->37 37->38 38->39 38->41 39->40 40->38 41->42 42->43 43->44 43->46 44->47 47->48 48->49 48->51 49->52 49->53 52->54 53->54 54->55 54->56 55->58 55->59 58->60 59->60 60->57 56->61 56->62 61->63 62->63 63->57 57->50 50->48 51->45 45->43 0->27 5->27 9->27 13->27 17->27 21->27 22->27
+CFG:main:B64:E86:S114:CC24:R64
+EDGES: 0->2 2->3 2->4 3->5 4->5 5->6 6->7 6->8 7->9 8->9 9->10 10->11 10->12 11->13 12->13 13->14 14->15 14->16 15->17 16->17 17->18 18->19 18->20 19->21 20->21 21->22 22->23 23->24 23->25 24->26 25->26 26->1 27->28 27->29 28->-1 29->30 29->31 30->-1 31->32 32->33 33->34 33->36 34->35 35->33 36->37 37->38 38->39 38->41 39->40 40->38 41->42 42->43 43->44 43->46 44->47 47->48 48->49 48->51 49->52 49->53 52->54 53->54 54->55 54->56 55->58 55->59 58->60 59->60 60->57 56->61 56->62 61->63 62->63 63->57 57->50 50->48 51->45 45->43 46->-1 0->27 5->27 9->27 13->27 17->27 21->27 22->27
 
 ==============================================================================
 DETAILED BLOCK ANALYSIS
@@ -980,87 +734,90 @@ DETAILED EDGE ANALYSIS
 
 Edge   0: Block   0 --[JUMP]--> Block   2
 Edge   1: Block   2 --[TRUE]--> Block   3 ("true")
-Edge   2: Block   2 --[TRUE]--> Block   4 ("false")
+Edge   2: Block   2 --[FALSE]--> Block   4 ("false")
 Edge   3: Block   3 --[JUMP]--> Block   5
 Edge   4: Block   4 --[JUMP]--> Block   5
 Edge   5: Block   5 --[JUMP]--> Block   6
 Edge   6: Block   6 --[TRUE]--> Block   7 ("true")
-Edge   7: Block   6 --[TRUE]--> Block   8 ("false")
+Edge   7: Block   6 --[FALSE]--> Block   8 ("false")
 Edge   8: Block   7 --[JUMP]--> Block   9
 Edge   9: Block   8 --[JUMP]--> Block   9
 Edge  10: Block   9 --[JUMP]--> Block  10
 Edge  11: Block  10 --[TRUE]--> Block  11 ("true")
-Edge  12: Block  10 --[TRUE]--> Block  12 ("false")
+Edge  12: Block  10 --[FALSE]--> Block  12 ("false")
 Edge  13: Block  11 --[JUMP]--> Block  13
 Edge  14: Block  12 --[JUMP]--> Block  13
 Edge  15: Block  13 --[JUMP]--> Block  14
 Edge  16: Block  14 --[TRUE]--> Block  15 ("true")
-Edge  17: Block  14 --[TRUE]--> Block  16 ("false")
+Edge  17: Block  14 --[FALSE]--> Block  16 ("false")
 Edge  18: Block  15 --[JUMP]--> Block  17
 Edge  19: Block  16 --[JUMP]--> Block  17
 Edge  20: Block  17 --[JUMP]--> Block  18
 Edge  21: Block  18 --[TRUE]--> Block  19 ("true")
-Edge  22: Block  18 --[TRUE]--> Block  20 ("false")
+Edge  22: Block  18 --[FALSE]--> Block  20 ("false")
 Edge  23: Block  19 --[JUMP]--> Block  21
 Edge  24: Block  20 --[JUMP]--> Block  21
 Edge  25: Block  21 --[JUMP]--> Block  22
 Edge  26: Block  22 --[JUMP]--> Block  23
 Edge  27: Block  23 --[TRUE]--> Block  24 ("true")
-Edge  28: Block  23 --[TRUE]--> Block  25 ("false")
+Edge  28: Block  23 --[FALSE]--> Block  25 ("false")
 Edge  29: Block  24 --[JUMP]--> Block  26
 Edge  30: Block  25 --[JUMP]--> Block  26
 Edge  31: Block  26 --[JUMP]--> Block   1 <- BACK-EDGE
 Edge  32: Block  27 --[TRUE]--> Block  28 ("true")
-Edge  33: Block  27 --[TRUE]--> Block  29 ("false")
-Edge  34: Block  29 --[TRUE]--> Block  30 ("true")
-Edge  35: Block  29 --[TRUE]--> Block  31 ("false")
-Edge  36: Block  31 --[JUMP]--> Block  32
-Edge  37: Block  32 --[JUMP]--> Block  33
-Edge  38: Block  33 --[TRUE]--> Block  34 ("true")
-Edge  39: Block  33 --[TRUE]--> Block  36 ("false")
-Edge  40: Block  34 --[JUMP]--> Block  35
-Edge  41: Block  35 --[JUMP]--> Block  33 <- BACK-EDGE
-Edge  42: Block  36 --[JUMP]--> Block  37
-Edge  43: Block  37 --[JUMP]--> Block  38
-Edge  44: Block  38 --[TRUE]--> Block  39 ("true")
-Edge  45: Block  38 --[TRUE]--> Block  41 ("false")
-Edge  46: Block  39 --[JUMP]--> Block  40
-Edge  47: Block  40 --[JUMP]--> Block  38 <- BACK-EDGE
-Edge  48: Block  41 --[JUMP]--> Block  42
-Edge  49: Block  42 --[JUMP]--> Block  43
-Edge  50: Block  43 --[TRUE]--> Block  44 ("true")
-Edge  51: Block  43 --[TRUE]--> Block  46 ("false")
-Edge  52: Block  44 --[JUMP]--> Block  47
-Edge  53: Block  47 --[JUMP]--> Block  48
-Edge  54: Block  48 --[TRUE]--> Block  49 ("true")
-Edge  55: Block  48 --[TRUE]--> Block  51 ("false")
-Edge  56: Block  49 --[TRUE]--> Block  52 ("true")
-Edge  57: Block  49 --[TRUE]--> Block  53 ("false")
-Edge  58: Block  52 --[JUMP]--> Block  54
-Edge  59: Block  53 --[JUMP]--> Block  54
-Edge  60: Block  54 --[TRUE]--> Block  55 ("true")
-Edge  61: Block  54 --[TRUE]--> Block  56 ("false")
-Edge  62: Block  55 --[TRUE]--> Block  58 ("true")
-Edge  63: Block  55 --[TRUE]--> Block  59 ("false")
-Edge  64: Block  58 --[JUMP]--> Block  60
-Edge  65: Block  59 --[JUMP]--> Block  60
-Edge  66: Block  60 --[JUMP]--> Block  57 <- BACK-EDGE
-Edge  67: Block  56 --[TRUE]--> Block  61 ("true")
-Edge  68: Block  56 --[TRUE]--> Block  62 ("false")
-Edge  69: Block  61 --[JUMP]--> Block  63
-Edge  70: Block  62 --[JUMP]--> Block  63
-Edge  71: Block  63 --[JUMP]--> Block  57 <- BACK-EDGE
-Edge  72: Block  57 --[JUMP]--> Block  50 <- BACK-EDGE
-Edge  73: Block  50 --[JUMP]--> Block  48 <- BACK-EDGE
-Edge  74: Block  51 --[JUMP]--> Block  45 <- BACK-EDGE
-Edge  75: Block  45 --[JUMP]--> Block  43 <- BACK-EDGE
-Edge  76: Block   0 --[FALL]--> Block  27 ("call")
-Edge  77: Block   5 --[FALL]--> Block  27 ("call")
-Edge  78: Block   9 --[FALL]--> Block  27 ("call")
-Edge  79: Block  13 --[FALL]--> Block  27 ("call")
-Edge  80: Block  17 --[FALL]--> Block  27 ("call")
-Edge  81: Block  21 --[FALL]--> Block  27 ("call")
-Edge  82: Block  22 --[FALL]--> Block  27 ("call")
+Edge  33: Block  27 --[FALSE]--> Block  29 ("false")
+Edge  34: Block  28 --[RET]--> Block  -1 ("return") <- BACK-EDGE
+Edge  35: Block  29 --[TRUE]--> Block  30 ("true")
+Edge  36: Block  29 --[FALSE]--> Block  31 ("false")
+Edge  37: Block  30 --[RET]--> Block  -1 ("return") <- BACK-EDGE
+Edge  38: Block  31 --[JUMP]--> Block  32
+Edge  39: Block  32 --[JUMP]--> Block  33
+Edge  40: Block  33 --[TRUE]--> Block  34 ("true")
+Edge  41: Block  33 --[FALSE]--> Block  36 ("false")
+Edge  42: Block  34 --[JUMP]--> Block  35
+Edge  43: Block  35 --[JUMP]--> Block  33 <- BACK-EDGE
+Edge  44: Block  36 --[JUMP]--> Block  37
+Edge  45: Block  37 --[JUMP]--> Block  38
+Edge  46: Block  38 --[TRUE]--> Block  39 ("true")
+Edge  47: Block  38 --[FALSE]--> Block  41 ("false")
+Edge  48: Block  39 --[JUMP]--> Block  40
+Edge  49: Block  40 --[JUMP]--> Block  38 <- BACK-EDGE
+Edge  50: Block  41 --[JUMP]--> Block  42
+Edge  51: Block  42 --[JUMP]--> Block  43
+Edge  52: Block  43 --[TRUE]--> Block  44 ("true")
+Edge  53: Block  43 --[FALSE]--> Block  46 ("false")
+Edge  54: Block  44 --[JUMP]--> Block  47
+Edge  55: Block  47 --[JUMP]--> Block  48
+Edge  56: Block  48 --[TRUE]--> Block  49 ("true")
+Edge  57: Block  48 --[FALSE]--> Block  51 ("false")
+Edge  58: Block  49 --[TRUE]--> Block  52 ("true")
+Edge  59: Block  49 --[FALSE]--> Block  53 ("false")
+Edge  60: Block  52 --[JUMP]--> Block  54
+Edge  61: Block  53 --[JUMP]--> Block  54
+Edge  62: Block  54 --[TRUE]--> Block  55 ("true")
+Edge  63: Block  54 --[FALSE]--> Block  56 ("false")
+Edge  64: Block  55 --[TRUE]--> Block  58 ("true")
+Edge  65: Block  55 --[FALSE]--> Block  59 ("false")
+Edge  66: Block  58 --[JUMP]--> Block  60
+Edge  67: Block  59 --[JUMP]--> Block  60
+Edge  68: Block  60 --[JUMP]--> Block  57 <- BACK-EDGE
+Edge  69: Block  56 --[TRUE]--> Block  61 ("true")
+Edge  70: Block  56 --[FALSE]--> Block  62 ("false")
+Edge  71: Block  61 --[JUMP]--> Block  63
+Edge  72: Block  62 --[JUMP]--> Block  63
+Edge  73: Block  63 --[JUMP]--> Block  57 <- BACK-EDGE
+Edge  74: Block  57 --[JUMP]--> Block  50 <- BACK-EDGE
+Edge  75: Block  50 --[JUMP]--> Block  48 <- BACK-EDGE
+Edge  76: Block  51 --[JUMP]--> Block  45 <- BACK-EDGE
+Edge  77: Block  45 --[JUMP]--> Block  43 <- BACK-EDGE
+Edge  78: Block  46 --[RET]--> Block  -1 ("return") <- BACK-EDGE
+Edge  79: Block   0 --[CALL]--> Block  27 ("call")
+Edge  80: Block   5 --[CALL]--> Block  27 ("call")
+Edge  81: Block   9 --[CALL]--> Block  27 ("call")
+Edge  82: Block  13 --[CALL]--> Block  27 ("call")
+Edge  83: Block  17 --[CALL]--> Block  27 ("call")
+Edge  84: Block  21 --[CALL]--> Block  27 ("call")
+Edge  85: Block  22 --[CALL]--> Block  27 ("call")
 
 ------------------------------------------------------------------------------
 CONTROL FLOW ANALYSIS
@@ -1070,6 +827,8 @@ CONTROL FLOW ANALYSIS
 
 DETECTED LOOPS (back-edges):
   - Block 26 → Block 1
+  - Block 28 → Block -1
+  - Block 30 → Block -1
   - Block 35 → Block 33
   - Block 40 → Block 38
   - Block 60 → Block 57
@@ -1078,6 +837,7 @@ DETECTED LOOPS (back-edges):
   - Block 50 → Block 48
   - Block 51 → Block 45
   - Block 45 → Block 43
+  - Block 46 → Block -1
 
 TERMINAL BLOCKS (no successors, excluding exit):
   - Block 28
@@ -1130,23 +890,3 @@ JOIN POINTS (blocks with multiple predecessors): 15
 END OF CFG ANALYSIS REPORT
 ==============================================================================
 
-
-========================================
-CODE GENERATION: DISABLED
-========================================
-The new CFG builder generates correct control flow graphs.
-Code generation will be re-enabled after adapting the
-QBE code generator to work with the new CFG structure.
-
-To test CFG generation:
-  ./qbe_basic -G program.bas
-
-========================================
-
-[DEBUG] compile_basic_to_il: Returned from wrapper
-[DEBUG] compile_basic_to_il: qbe_il is valid
-[DEBUG] compile_basic_to_il: len = 0
-[DEBUG] compile_basic_to_il: About to call fmemopen...
-[DEBUG] compile_basic_to_il: fmemopen returned
-[DEBUG] compile_basic_to_il: fmemopen failed, freeing and returning NULL
-failed to compile BASIC file 'tests/rosetta//levenshtein_distance.bas'

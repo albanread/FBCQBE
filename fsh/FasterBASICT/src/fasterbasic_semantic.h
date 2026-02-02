@@ -879,6 +879,10 @@ public:
         return m_forLoopVariables.count(baseName) > 0;
     }
 
+    // Helper to get the correct integer suffix based on OPTION FOR setting
+    // Returns text suffix used by parser mangling (_INT or _LONG)
+    std::string getForLoopIntegerSuffix() const;
+
     // Ensure predefined constants are loaded (safe to call multiple times)
     void ensureConstantsLoaded();
 
@@ -1072,6 +1076,14 @@ private:
     VariableType inferTypeFromName(const std::string& name);
     std::string mangleNameWithSuffix(const std::string& name, TokenType suffix);
 
+    // FOR loop variable normalization
+    // If varName references a FOR loop variable (by base name), returns the normalized name
+    // with the correct integer suffix based on OPTION FOR. Otherwise returns varName unchanged.
+    std::string normalizeForLoopVariable(const std::string& varName) const;
+    
+    // Helper to strip type suffix from variable name
+    static std::string stripTypeSuffix(const std::string& name);
+
     // Built-in function support
     bool isBuiltinFunction(const std::string& name) const;
     VariableType getBuiltinReturnType(const std::string& name) const;
@@ -1115,6 +1127,7 @@ private:
     ConstantsManager m_constantsManager;
 
     // Configuration
+    CompilerOptions m_options;  // Store compiler options (including FOR loop type)
     bool m_strictMode;
     bool m_warnUnused;
     bool m_requireExplicitDim;

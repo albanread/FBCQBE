@@ -24,6 +24,7 @@ using namespace FasterBASIC;
 // Global flags for trace options
 static bool g_traceCFG = false;
 static bool g_traceAST = false;
+static bool g_traceSymbols = false;
 static bool g_showIL = false;
 static bool g_verbose = false;
 
@@ -127,22 +128,29 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
         }
         
         // Debug: Dump symbol table if requested
-        if (getenv("TRACE_SYMBOLS")) {
+        if (g_traceSymbols || getenv("TRACE_SYMBOLS")) {
             std::cerr << "\n=== Symbol Table Dump ===\n";
             const auto& symbols = semantic.getSymbolTable();
             
-            std::cerr << "\nArrays:\n";
+            std::cerr << "\nVariables (" << symbols.variables.size() << "):\n";
+            for (const auto& [name, var] : symbols.variables) {
+                std::cerr << "  " << name << ": typeDesc=" << var.typeDesc.toString() 
+                          << " (isDeclared=" << var.isDeclared << ", isUsed=" << var.isUsed << ")\n";
+            }
+            
+            std::cerr << "\nArrays (" << symbols.arrays.size() << "):\n";
             for (const auto& [name, arr] : symbols.arrays) {
                 std::cerr << "  " << name << ": elementTypeDesc=" << arr.elementTypeDesc.toString()
                           << " dimensions=" << arr.dimensions.size() << "\n";
             }
             
-            std::cerr << "\nVariables:\n";
-            for (const auto& [name, var] : symbols.variables) {
-                std::cerr << "  " << name << ": typeDesc=" << var.typeDesc.toString() << "\n";
+            std::cerr << "\nFunctions (" << symbols.functions.size() << "):\n";
+            for (const auto& [name, func] : symbols.functions) {
+                std::cerr << "  " << name << ": returnTypeDesc=" << func.returnTypeDesc.toString() << "\n";
             }
             
             std::cerr << "=== End Symbol Table ===\n\n";
+            return nullptr;  // Exit after dumping symbols
         }
         
         // Build CFG using new single-pass recursive builder
@@ -265,6 +273,10 @@ void set_trace_cfg_impl(int enable) {
 /* Enable/disable AST tracing */
 void set_trace_ast_impl(int enable) {
     g_traceAST = (enable != 0);
+}
+
+void set_trace_symbols_impl(int enable) {
+    g_traceSymbols = (enable != 0);
 }
 
 /* Enable/disable IL output */

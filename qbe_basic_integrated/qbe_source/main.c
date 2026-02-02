@@ -10,6 +10,8 @@
 extern FILE* compile_basic_to_il(const char *basic_path);
 extern int is_basic_file(const char *filename);
 extern void set_trace_cfg(int enable);
+extern void set_trace_ast(int enable);
+extern void set_trace_symbols(int enable);
 extern void set_show_il(int enable);
 
 /* Global flag for MADD fusion control */
@@ -176,6 +178,8 @@ main(int ac, char *av[])
 	int compile_only = 0, is_basic = 0, il_only = 0;
 	int need_linking = 0;
 	int trace_cfg = 0;
+	int trace_ast = 0;
+	int trace_symbols = 0;
 	int debug_mode = 0;
 	int i;
 	char *target_name = NULL;
@@ -206,6 +210,8 @@ main(int ac, char *av[])
 			fprintf(stderr, "  %-20s output IL only (stop before assembly)\n", "-i");
 			fprintf(stderr, "  %-20s compile only (stop at assembly)\n", "-c");
 			fprintf(stderr, "  %-20s trace CFG and exit (BASIC files only)\n", "-G");
+			fprintf(stderr, "  %-20s trace AST and exit (BASIC files only)\n", "-A");
+			fprintf(stderr, "  %-20s trace symbols and exit (BASIC files only)\n", "-S");
 			fprintf(stderr, "  %-20s enable debug output\n", "-D, --debug");
 			fprintf(stderr, "  %-20s enable MADD/MSUB fusion (default)\n", "--enable-madd-fusion");
 			fprintf(stderr, "  %-20s disable MADD/MSUB fusion\n", "--disable-madd-fusion");
@@ -228,6 +234,12 @@ main(int ac, char *av[])
 		}
 		else if (strcmp(arg, "-G") == 0) {
 			trace_cfg = 1;
+		}
+		else if (strcmp(arg, "-A") == 0) {
+			trace_ast = 1;
+		}
+		else if (strcmp(arg, "-S") == 0) {
+			trace_symbols = 1;
 		}
 		else if (strcmp(arg, "-o") == 0) {
 			if (i + 1 >= ac) {
@@ -303,6 +315,12 @@ main(int ac, char *av[])
 	/* Set trace-cfg flag before compilation */
 	if (trace_cfg) {
 		set_trace_cfg(1);
+	}
+	if (trace_ast) {
+		set_trace_ast(1);
+	}
+	if (trace_symbols) {
+		set_trace_symbols(1);
 	}
 	
 	/* Set show-il flag if -i was specified */

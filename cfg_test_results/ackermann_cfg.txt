@@ -1,83 +1,3 @@
-[DEBUG] compile_basic_to_il: Starting...
-[DEBUG] Starting pass1_collectDeclarations
-[DEBUG] Starting pass2_validate
-[DEBUG] pass2_validate: processing 26 lines
-[DEBUG] pass2_validate: line 1000 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1010 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1020 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1030 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1040 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1050 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1060 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1070 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1080 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1090 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1100 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1110 has 1 statements
-[DEBUG] validateStatement called for type: 25
-[DEBUG] validateForStatement called for variable: m
-[DEBUG] FOR stack PUSH at 0:0, stack size now: 1
-[DEBUG] validateStatement called for type: 25
-[DEBUG] validateForStatement called for variable: n
-[DEBUG] FOR stack PUSH at 0:0, stack size now: 2
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 2
-[DEBUG] FOR stack POP after body, stack size before pop: 2
-[DEBUG] FOR stack size after pop: 1
-[DEBUG] FOR stack POP after body, stack size before pop: 1
-[DEBUG] FOR stack size after pop: 0
-[DEBUG] pass2_validate: line 1120 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1130 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1140 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1150 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1160 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1170 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1180 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1190 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1200 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1210 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1220 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1230 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1240 has 1 statements
-[DEBUG] validateStatement called for type: 34
-[DEBUG] pass2_validate: line 1250 has 1 statements
-[DEBUG] validateStatement called for type: 93
-[DEBUG] validateStatement called for type: 43
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 22
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] validateStatement called for type: 7
-[DEBUG] Finished pass2_validate
-[DEBUG] validateControlFlow called, FOR stack size: 0
-[INFO] Building complete ProgramCFG (main + all SUBs/FUNCTIONs)...
-[INFO] ProgramCFG build successful!
-[INFO] Main program CFG + 1 function/subroutine CFGs
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║                    PROGRAM CFG ANALYSIS REPORT                           ║
@@ -117,7 +37,8 @@ SUMMARY METRICS
     Multi-Succ:            2
 
   Edge Types:
-    Conditional True:      4
+    Conditional True:      2
+    Conditional False:     2
     Jump:                  9
 
 ------------------------------------------------------------------------------
@@ -263,11 +184,11 @@ DETAILED EDGE ANALYSIS
 Edge   0: Block   0 --[JUMP]--> Block   2
 Edge   1: Block   2 --[JUMP]--> Block   3
 Edge   2: Block   3 --[TRUE]--> Block   4 ("true")
-Edge   3: Block   3 --[TRUE]--> Block   6 ("false")
+Edge   3: Block   3 --[FALSE]--> Block   6 ("false")
 Edge   4: Block   4 --[JUMP]--> Block   7
 Edge   5: Block   7 --[JUMP]--> Block   8
 Edge   6: Block   8 --[TRUE]--> Block   9 ("true")
-Edge   7: Block   8 --[TRUE]--> Block  11 ("false")
+Edge   7: Block   8 --[FALSE]--> Block  11 ("false")
 Edge   8: Block   9 --[JUMP]--> Block  10
 Edge   9: Block  10 --[JUMP]--> Block   8 <- BACK-EDGE
 Edge  10: Block  11 --[JUMP]--> Block   5 <- BACK-EDGE
@@ -330,7 +251,8 @@ SUMMARY METRICS
     Multi-Succ:            2
 
   Edge Types:
-    Conditional True:      4
+    Conditional True:      2
+    Conditional False:     2
     Jump:                  5
 
 ------------------------------------------------------------------------------
@@ -422,10 +344,10 @@ DETAILED EDGE ANALYSIS
 ------------------------------------------------------------------------------
 
 Edge   0: Block   0 --[TRUE]--> Block   2 ("true")
-Edge   1: Block   0 --[TRUE]--> Block   3 ("false")
+Edge   1: Block   0 --[FALSE]--> Block   3 ("false")
 Edge   2: Block   2 --[JUMP]--> Block   4
 Edge   3: Block   3 --[TRUE]--> Block   5 ("true")
-Edge   4: Block   3 --[TRUE]--> Block   6 ("false")
+Edge   4: Block   3 --[FALSE]--> Block   6 ("false")
 Edge   5: Block   5 --[JUMP]--> Block   7
 Edge   6: Block   6 --[JUMP]--> Block   7
 Edge   7: Block   7 --[JUMP]--> Block   4 <- BACK-EDGE
@@ -453,23 +375,3 @@ JOIN POINTS (blocks with multiple predecessors): 2
 END OF CFG ANALYSIS REPORT
 ==============================================================================
 
-
-========================================
-CODE GENERATION: DISABLED
-========================================
-The new CFG builder generates correct control flow graphs.
-Code generation will be re-enabled after adapting the
-QBE code generator to work with the new CFG structure.
-
-To test CFG generation:
-  ./qbe_basic -G program.bas
-
-========================================
-
-[DEBUG] compile_basic_to_il: Returned from wrapper
-[DEBUG] compile_basic_to_il: qbe_il is valid
-[DEBUG] compile_basic_to_il: len = 0
-[DEBUG] compile_basic_to_il: About to call fmemopen...
-[DEBUG] compile_basic_to_il: fmemopen returned
-[DEBUG] compile_basic_to_il: fmemopen failed, freeing and returning NULL
-failed to compile BASIC file 'tests/rosetta//ackermann.bas'

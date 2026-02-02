@@ -2,6 +2,7 @@
 #include <sstream>
 #include <cmath>
 #include <iostream>
+#include <fstream>
 
 namespace fbc {
 
@@ -1200,28 +1201,86 @@ void ASTEmitter::emitCallStatement(const CallStatement* stmt) {
 
 // === Variable Access ===
 
-std::string ASTEmitter::getVariableAddress(const std::string& varName) {
-    // For FOR loop variables, strip suffix before lookup
-    // (I, I%, I& all refer to the same variable)
-    std::string lookupName = varName;
-    if (semantic_.isForLoopVariable(varName)) {
-        // Strip suffix from the variable name
-        if (!lookupName.empty()) {
-            char lastChar = lookupName.back();
-            if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
-                lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
-                lookupName = lookupName.substr(0, lookupName.length() - 1);
-            }
+// Helper to normalize FOR loop variable names
+// If varName references a FOR loop variable (by base name), returns the normalized name
+// with the correct integer suffix. Otherwise returns varName unchanged.
+std::string ASTEmitter::normalizeForLoopVarName(const std::string& varName) const {
+    if (varName.empty()) return varName;
+    
+    // Debug
+    std::ofstream debugFile("/tmp/for_debug.txt", std::ios::app);
+    debugFile << "[DEBUG normalize] Input varName: '" << varName << "'" << std::endl;
+    
+    // Strip any existing suffix to get base name (handle both character and text suffixes)
+    std::string baseName = varName;
+    
+    // Check for text suffixes first (from parser mangling)
+    if (baseName.length() > 4 && baseName.substr(baseName.length() - 4) == "_INT") {
+        baseName = baseName.substr(0, baseName.length() - 4);
+    } else if (baseName.length() > 5 && baseName.substr(baseName.length() - 5) == "_LONG") {
+        baseName = baseName.substr(0, baseName.length() - 5);
+    } else if (baseName.length() > 7 && baseName.substr(baseName.length() - 7) == "_STRING") {
+        baseName = baseName.substr(0, baseName.length() - 7);
+    } else if (baseName.length() > 7 && baseName.substr(baseName.length() - 7) == "_DOUBLE") {
+        baseName = baseName.substr(0, baseName.length() - 7);
+    } else if (baseName.length() > 6 && baseName.substr(baseName.length() - 6) == "_FLOAT") {
+        baseName = baseName.substr(0, baseName.length() - 6);
+    } else if (baseName.length() > 5 && baseName.substr(baseName.length() - 5) == "_BYTE") {
+        baseName = baseName.substr(0, baseName.length() - 5);
+    } else if (baseName.length() > 6 && baseName.substr(baseName.length() - 6) == "_SHORT") {
+        baseName = baseName.substr(0, baseName.length() - 6);
+    } else {
+        // Check for character suffixes (if not already converted by parser)
+        char lastChar = baseName.back();
+        if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
+            lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
+            baseName = baseName.substr(0, baseName.length() - 1);
         }
     }
     
+    // Check if this base name is a FOR loop variable
+    debugFile << "[DEBUG normalize] Stripped baseName: '" << baseName << "'" << std::endl;
+    debugFile << "[DEBUG normalize] isForLoopVariable(baseName): " << semantic_.isForLoopVariable(baseName) << std::endl;
+    
+    if (semantic_.isForLoopVariable(baseName)) {
+        // This is a FOR loop variable - return base name with correct integer suffix
+        // The suffix is determined by OPTION FOR setting
+        // Use text suffix format (_INT or _LONG) to match parser mangling
+        std::string intSuffix = semantic_.getForLoopIntegerSuffix();
+        std::string result = baseName + intSuffix;
+        debugFile << "[DEBUG normalize] Normalized to: '" << result << "'" << std::endl;
+        debugFile.close();
+        return result;
+    }
+    
+    // Not a FOR loop variable - return original name unchanged
+    debugFile << "[DEBUG normalize] NOT a FOR var, returning unchanged: '" << varName << "'" << std::endl;
+    debugFile.close();
+    return varName;
+}
+
+std::string ASTEmitter::getVariableAddress(const std::string& varName) {
+    // For FOR loop variables, normalize to correct integer suffix
+    // The semantic analyzer has already declared the variable with the normalized name
+    std::string lookupName = normalizeForLoopVarName(varName);
+    
+    // Debug
+    std::ofstream debugFile("/tmp/for_debug.txt", std::ios::app);
+    debugFile << "[DEBUG getVariableAddress] varName='" << varName << "' lookupName='" << lookupName << "'" << std::endl;
+    
     // Look up variable with scoped lookup
     std::string currentFunc = symbolMapper_.getCurrentFunction();
+    debugFile << "[DEBUG getVariableAddress] currentFunc='" << currentFunc << "'" << std::endl;
+    
     const auto* varSymbolPtr = semantic_.lookupVariableScoped(lookupName, currentFunc);
     if (!varSymbolPtr) {
+        debugFile << "[DEBUG getVariableAddress] LOOKUP FAILED for '" << lookupName << "'" << std::endl;
+        debugFile.close();
         builder_.emitComment("ERROR: variable not found: " + lookupName);
         return builder_.newTemp();
     }
+    debugFile << "[DEBUG getVariableAddress] LOOKUP SUCCESS" << std::endl;
+    debugFile.close();
     const auto& varSymbol = *varSymbolPtr;
     
     // Check if we're in a function and the variable is SHARED
@@ -1247,17 +1306,8 @@ std::string ASTEmitter::getVariableAddress(const std::string& varName) {
 }
 
 std::string ASTEmitter::loadVariable(const std::string& varName) {
-    // For FOR loop variables, strip suffix before processing
-    std::string lookupName = varName;
-    if (semantic_.isForLoopVariable(varName)) {
-        if (!lookupName.empty()) {
-            char lastChar = lookupName.back();
-            if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
-                lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
-                lookupName = lookupName.substr(0, lookupName.length() - 1);
-            }
-        }
-    }
+    // For FOR loop variables, normalize to correct integer suffix
+    std::string lookupName = normalizeForLoopVarName(varName);
     
     // Check if this is a function parameter FIRST - parameters are passed as QBE temporaries
     // and don't need to be loaded from memory
@@ -1272,16 +1322,16 @@ std::string ASTEmitter::loadVariable(const std::string& varName) {
     
     // Look up variable with scoped lookup
     std::string currentFunc = symbolMapper_.getCurrentFunction();
-    const auto* varSymbolPtr = semantic_.lookupVariableScoped(varName, currentFunc);
+    const auto* varSymbolPtr = semantic_.lookupVariableScoped(lookupName, currentFunc);
     if (!varSymbolPtr) {
-        builder_.emitComment("ERROR: variable not found: " + varName);
+        builder_.emitComment("ERROR: variable not found: " + lookupName);
         return builder_.newTemp();
     }
     const auto& varSymbol = *varSymbolPtr;
     
     // Check if we're in a function and the variable is SHARED
     bool treatAsGlobal = varSymbol.isGlobal || 
-                         (symbolMapper_.inFunctionScope() && symbolMapper_.isSharedVariable(varName));
+                         (symbolMapper_.inFunctionScope() && symbolMapper_.isSharedVariable(lookupName));
     
     // All variables (global and local) are stored in memory and must be loaded
     std::string addr = getVariableAddress(lookupName);
@@ -1299,17 +1349,8 @@ std::string ASTEmitter::loadVariable(const std::string& varName) {
 }
 
 void ASTEmitter::storeVariable(const std::string& varName, const std::string& value) {
-    // For FOR loop variables, strip suffix before processing
-    std::string lookupName = varName;
-    if (semantic_.isForLoopVariable(varName)) {
-        if (!lookupName.empty()) {
-            char lastChar = lookupName.back();
-            if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
-                lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
-                lookupName = lookupName.substr(0, lookupName.length() - 1);
-            }
-        }
-    }
+    // For FOR loop variables, normalize to correct integer suffix
+    std::string lookupName = normalizeForLoopVarName(varName);
     
     BaseType varType = getVariableType(lookupName);
     std::string qbeType = typeManager_.getQBEType(varType);
@@ -1327,16 +1368,16 @@ void ASTEmitter::storeVariable(const std::string& varName, const std::string& va
     
     // Look up variable with scoped lookup
     std::string currentFunc = symbolMapper_.getCurrentFunction();
-    const auto* varSymbolPtr = semantic_.lookupVariableScoped(varName, currentFunc);
+    const auto* varSymbolPtr = semantic_.lookupVariableScoped(lookupName, currentFunc);
     if (!varSymbolPtr) {
-        builder_.emitComment("ERROR: variable not found: " + varName);
+        builder_.emitComment("ERROR: variable not found: " + lookupName);
         return;
     }
     const auto& varSymbol = *varSymbolPtr;
     
     // Check if we're in a function and the variable is SHARED
     bool treatAsGlobal = varSymbol.isGlobal || 
-                         (symbolMapper_.inFunctionScope() && symbolMapper_.isSharedVariable(varName));
+                         (symbolMapper_.inFunctionScope() && symbolMapper_.isSharedVariable(lookupName));
     
     // All variables (global and local) are stored in memory
     std::string addr = getVariableAddress(lookupName);

@@ -13,6 +13,7 @@
 #include <sstream>
 #include <cmath>
 #include <iostream>
+#include <fstream>
 
 #ifdef FBRUNNER3_BUILD
 #include "../../FBRunner3/register_voice.h"
@@ -285,9 +286,17 @@ void SemanticAnalyzer::registerDataLabels(const std::map<std::string, int>& data
 // =============================================================================
 
 bool SemanticAnalyzer::analyze(Program& program, const CompilerOptions& options) {
+    // Debug: write to file immediately to confirm this function is called
+    std::ofstream debugFileAnalyze("/tmp/for_debug.txt", std::ios::app);
+    debugFileAnalyze << "[DEBUG] analyze() called, starting semantic analysis" << std::endl;
+    debugFileAnalyze.close();
+    
     m_program = &program;
     m_errors.clear();
     m_warnings.clear();
+    
+    // Store compiler options
+    m_options = options;
     
     // Preserve predefined constants before resetting symbol table
     auto savedConstants = m_symbolTable.constants;
@@ -2034,20 +2043,30 @@ void SemanticAnalyzer::validateForStatement(const ForStatement& stmt) {
     m_forLoopVariables.insert(plainVarName);
     
     // Determine type based on OPTION FOR setting
-    BaseType forVarType = (m_symbolTable.options.forLoopType == CompilerOptions::ForLoopType::LONG)
+    BaseType forVarType = (m_options.forLoopType == CompilerOptions::ForLoopType::LONG)
                           ? BaseType::LONG : BaseType::INTEGER;
     
-    // Register the variable in symbol table
+    // Create normalized variable name with correct integer suffix
+    std::string normalizedVarName = plainVarName + getForLoopIntegerSuffix();
+    
+    // Debug output to file
+    std::ofstream debugFile("/tmp/for_debug.txt", std::ios::app);
+    debugFile << "[DEBUG] validateForStatement called for variable: " << stmt.variable << std::endl;
+    debugFile << "[DEBUG] FOR variable normalized: " << plainVarName 
+              << " -> " << normalizedVarName << " (tracked as FOR var)" << std::endl;
+    debugFile.close();
+    
+    // Register the variable in symbol table with normalized name
     if (m_currentFunctionScope.inFunction) {
         // In function: use local variable
-        VariableSymbol varSym(plainVarName, TypeDescriptor(forVarType), true);
+        VariableSymbol varSym(normalizedVarName, TypeDescriptor(forVarType), true);
         varSym.firstUse = stmt.location;
-        m_symbolTable.variables[plainVarName] = varSym;
+        m_symbolTable.variables[normalizedVarName] = varSym;
     } else {
         // Global: use global variable
-        VariableSymbol varSym(plainVarName, TypeDescriptor(forVarType), true);
+        VariableSymbol varSym(normalizedVarName, TypeDescriptor(forVarType), true);
         varSym.firstUse = stmt.location;
-        m_symbolTable.variables[plainVarName] = varSym;
+        m_symbolTable.variables[normalizedVarName] = varSym;
     }
     
     // Validate expressions
@@ -3282,21 +3301,77 @@ const VariableSymbol* SemanticAnalyzer::lookupVariableScoped(const std::string& 
     return nullptr;
 }
 
+// Static helper to strip type suffix from variable name
+// Handles both character suffixes (%, &, etc.) and text suffixes (_INT, _LONG, etc.)
+std::string SemanticAnalyzer::stripTypeSuffix(const std::string& name) {
+    if (name.empty()) return name;
+    
+    // Check for text suffixes first (from parser mangling)
+    if (name.length() > 4 && name.substr(name.length() - 4) == "_INT") {
+        return name.substr(0, name.length() - 4);
+    }
+    if (name.length() > 5 && name.substr(name.length() - 5) == "_LONG") {
+        return name.substr(0, name.length() - 5);
+    }
+    if (name.length() > 7 && name.substr(name.length() - 7) == "_STRING") {
+        return name.substr(0, name.length() - 7);
+    }
+    if (name.length() > 7 && name.substr(name.length() - 7) == "_DOUBLE") {
+        return name.substr(0, name.length() - 7);
+    }
+    if (name.length() > 6 && name.substr(name.length() - 6) == "_FLOAT") {
+        return name.substr(0, name.length() - 6);
+    }
+    if (name.length() > 5 && name.substr(name.length() - 5) == "_BYTE") {
+        return name.substr(0, name.length() - 5);
+    }
+    if (name.length() > 6 && name.substr(name.length() - 6) == "_SHORT") {
+        return name.substr(0, name.length() - 6);
+    }
+    
+    // Check for character suffixes (if not already converted by parser)
+    char lastChar = name.back();
+    if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
+        lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
+        return name.substr(0, name.length() - 1);
+    }
+    
+    return name;
+}
+
+// Get the correct integer suffix based on OPTION FOR setting
+// Returns text suffix used by parser mangling (_INT or _LONG)
+std::string SemanticAnalyzer::getForLoopIntegerSuffix() const {
+    // Check the OPTION FOR setting
+    if (m_options.forLoopType == CompilerOptions::ForLoopType::LONG) {
+        return "_LONG";  // LONG suffix
+    } else {
+        return "_INT";   // INTEGER suffix (default)
+    }
+}
+
+// Normalize FOR loop variable names: if varName references a FOR loop variable,
+// return the base name with the correct integer suffix; otherwise return unchanged
+std::string SemanticAnalyzer::normalizeForLoopVariable(const std::string& varName) const {
+    if (varName.empty()) return varName;
+    
+    // Strip any existing suffix (both character and text forms)
+    std::string baseName = stripTypeSuffix(varName);
+    
+    // Check if this base name is a FOR loop variable
+    if (m_forLoopVariables.count(baseName) > 0) {
+        // This is a FOR loop variable reference - return base name with correct integer suffix
+        // Use text suffix format (_INT or _LONG) to match parser mangling
+        return baseName + getForLoopIntegerSuffix();
+    }
+    
+    // Not a FOR loop variable - return original name unchanged
+    return varName;
+}
+
 VariableSymbol* SemanticAnalyzer::lookupVariable(const std::string& name) {
-    // Helper: strip type suffix from variable name
-    auto stripSuffix = [](const std::string& varName) -> std::string {
-        if (varName.empty()) return varName;
-        char lastChar = varName.back();
-        if (lastChar == '%' || lastChar == '&' || lastChar == '!' || 
-            lastChar == '#' || lastChar == '$' || lastChar == '@' || lastChar == '^') {
-            return varName.substr(0, varName.length() - 1);
-        }
-        return varName;
-    };
-    
-    // Try lookup with original name first
-    std::string lookupName = name;
-    
+    // Normalize FOR loop variable references
+    std::string lookupName = normalizeForLoopVariable(name);
     // If we're in a function, first try to find a local variable with scoped key
     if (m_currentFunctionScope.inFunction && !m_currentFunctionScope.functionName.empty()) {
         std::string scopedKey = m_currentFunctionScope.functionName + "::" + lookupName;
@@ -3311,29 +3386,6 @@ VariableSymbol* SemanticAnalyzer::lookupVariable(const std::string& name) {
     if (it != m_symbolTable.variables.end()) {
         return &it->second;
     }
-    
-    // If not found and name has a suffix, check if base name is a FOR loop variable
-    std::string baseName = stripSuffix(name);
-    if (baseName != name && m_forLoopVariables.count(baseName)) {
-        // This is a reference to a FOR loop variable with a suffix
-        // Look up using the base name (suffix-agnostic)
-        lookupName = baseName;
-        
-        if (m_currentFunctionScope.inFunction && !m_currentFunctionScope.functionName.empty()) {
-            std::string scopedKey = m_currentFunctionScope.functionName + "::" + lookupName;
-            auto scopedIt = m_symbolTable.variables.find(scopedKey);
-            if (scopedIt != m_symbolTable.variables.end()) {
-                return &scopedIt->second;
-            }
-        }
-        
-        // Fall back to global lookup with base name
-        auto baseIt = m_symbolTable.variables.find(lookupName);
-        if (baseIt != m_symbolTable.variables.end()) {
-            return &baseIt->second;
-        }
-    }
-    
     // Also check arrays table - DIM x$ AS STRING creates a 0-dimensional array (scalar)
     // We need to treat it as a variable for assignment purposes
     auto arrIt = m_symbolTable.arrays.find(name);
@@ -3475,29 +3527,31 @@ int SemanticAnalyzer::resolveLabelToId(const std::string& name, const SourceLoca
 }
 
 void SemanticAnalyzer::useVariable(const std::string& name, const SourceLocation& loc) {
+    // Normalize FOR loop variable references first
+    std::string normalizedName = normalizeForLoopVariable(name);
+    
     // TEST: Block variable "n" completely to verify this is where it's being added
-    if (name == "n") {
+    if (normalizedName == "n") {
         return;
     }
     
     // Don't create symbol table entry for FOR EACH variables
-    if (m_forEachVariables.count(name) > 0) {
+    if (m_forEachVariables.count(normalizedName) > 0) {
         return;
     }
     
-    auto* sym = lookupVariable(name);
+    auto* sym = lookupVariable(normalizedName);
     if (!sym) {
         // Implicitly declare using TypeDescriptor
-        TypeDescriptor typeDesc = inferTypeFromNameD(name);
-        if (getenv("FASTERBASIC_DEBUG")) {
-            std::cerr << "[DEBUG] useVariable: declaring '" << name << "' with inferred type=" 
-                      << static_cast<int>(typeDesc.baseType) << std::endl;
-        }
-        sym = declareVariableD(name, typeDesc, loc, false);
-        if (getenv("FASTERBASIC_DEBUG")) {
-            std::cerr << "[DEBUG] useVariable: after declareVariableD, sym->typeDesc.baseType=" 
-                      << static_cast<int>(sym->typeDesc.baseType) << std::endl;
-        }
+        TypeDescriptor typeDesc = inferTypeFromNameD(normalizedName);
+        
+        // Debug output to file
+        std::ofstream debugFile("/tmp/for_debug.txt", std::ios::app);
+        debugFile << "[DEBUG] useVariable: declaring '" << normalizedName << "' with inferred type=" 
+                  << static_cast<int>(typeDesc.baseType) << " (original name: " << name << ")" << std::endl;
+        debugFile.close();
+        
+        sym = declareVariableD(normalizedName, typeDesc, loc, false);
     }
     sym->isUsed = true;
 }

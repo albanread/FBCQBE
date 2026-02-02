@@ -1,32 +1,3 @@
-[DEBUG] compile_basic_to_il: Starting...
-[DEBUG] Starting pass1_collectDeclarations
-[DEBUG] Starting pass2_validate
-[DEBUG] pass2_validate: processing 10 lines
-[DEBUG] pass2_validate: line 1000 has 1 statements
-[DEBUG] validateStatement called for type: 37
-[DEBUG] pass2_validate: line 1010 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1020 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1030 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1040 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1050 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1060 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1070 has 1 statements
-[DEBUG] validateStatement called for type: 7
-[DEBUG] pass2_validate: line 1080 has 1 statements
-[DEBUG] validateStatement called for type: 2
-[DEBUG] pass2_validate: line 1090 has 1 statements
-[DEBUG] validateStatement called for type: 34
-[DEBUG] Finished pass2_validate
-[DEBUG] validateControlFlow called, FOR stack size: 0
-[INFO] Building complete ProgramCFG (main + all SUBs/FUNCTIONs)...
-[INFO] ProgramCFG build successful!
-[INFO] Main program CFG + 0 function/subroutine CFGs
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║                    PROGRAM CFG ANALYSIS REPORT                           ║
@@ -121,23 +92,3 @@ CONTROL FLOW ANALYSIS
 END OF CFG ANALYSIS REPORT
 ==============================================================================
 
-
-========================================
-CODE GENERATION: DISABLED
-========================================
-The new CFG builder generates correct control flow graphs.
-Code generation will be re-enabled after adapting the
-QBE code generator to work with the new CFG structure.
-
-To test CFG generation:
-  ./qbe_basic -G program.bas
-
-========================================
-
-[DEBUG] compile_basic_to_il: Returned from wrapper
-[DEBUG] compile_basic_to_il: qbe_il is valid
-[DEBUG] compile_basic_to_il: len = 0
-[DEBUG] compile_basic_to_il: About to call fmemopen...
-[DEBUG] compile_basic_to_il: fmemopen returned
-[DEBUG] compile_basic_to_il: fmemopen failed, freeing and returning NULL
-failed to compile BASIC file 'tests/compare_local.bas'

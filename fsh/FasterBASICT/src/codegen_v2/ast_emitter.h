@@ -302,6 +302,11 @@ private:
     char getTypeSuffixChar(FasterBASIC::TokenType suffix);
     char getTypeSuffixChar(FasterBASIC::BaseType type);
     std::string getQBEComparisonOp(FasterBASIC::TokenType op);
+    
+    // === Helper: normalize FOR loop variable names ===
+    // If varName references a FOR loop variable, returns it with the correct integer suffix
+    // Otherwise returns varName unchanged
+    std::string normalizeForLoopVarName(const std::string& varName) const;
 };
 
 } // namespace fbc
