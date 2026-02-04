@@ -169,6 +169,57 @@ void QBEBuilder::emitBranch(const std::string& condition,
     emitInstruction(oss.str());
 }
 
+void QBEBuilder::emitSwitch(const std::string& type, const std::string& selector,
+                           const std::string& defaultLabel,
+                           const std::vector<std::string>& caseLabels) {
+    // QBE doesn't have a native switch instruction with bracket syntax.
+    // We need to emit a chain of comparisons and conditional jumps.
+    // The selector is already 0-indexed (converted from BASIC's 1-indexed).
+    //
+    // Generated code pattern for ON x GOTO L1, L2, L3:
+    //   if selector == 0 goto L1
+    //   if selector == 1 goto L2
+    //   if selector == 2 goto L3
+    //   goto default
+    
+    if (caseLabels.empty()) {
+        // No cases, just jump to default
+        emitJump(defaultLabel);
+        return;
+    }
+    
+    // Generate comparison chain
+    for (size_t i = 0; i < caseLabels.size(); ++i) {
+        // Compare selector with case index
+        std::string cmpResult = newTemp();
+        std::ostringstream cmpOss;
+        cmpOss << cmpResult << " =" << type << " ceq" << type << " " 
+               << selector << ", " << i;
+        emitInstruction(cmpOss.str());
+        
+        // Create labels for next comparison or default
+        std::string nextLabel;
+        if (i + 1 < caseLabels.size()) {
+            // More cases to check - create intermediate label
+            nextLabel = "switch_next_" + std::to_string(labelCounter_++);
+        } else {
+            // Last case - jump to default if not equal
+            nextLabel = defaultLabel;
+        }
+        
+        // Conditional jump: if equal, jump to case label; otherwise continue
+        std::ostringstream jnzOss;
+        jnzOss << "jnz " << cmpResult << ", @" << caseLabels[i] 
+               << ", @" << nextLabel;
+        emitInstruction(jnzOss.str());
+        
+        // Emit next label if not last case
+        if (i + 1 < caseLabels.size()) {
+            emitLabel(nextLabel);
+        }
+    }
+}
+
 void QBEBuilder::emitReturn(const std::string& value) {
     std::ostringstream oss;
     oss << "ret";
@@ -177,6 +228,7 @@ void QBEBuilder::emitReturn(const std::string& value) {
     }
     emitInstruction(oss.str());
 }
+
 
 // === Function Calls ===
 

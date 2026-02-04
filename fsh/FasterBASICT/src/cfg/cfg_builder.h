@@ -426,6 +426,16 @@ private:
         SubroutineContext* outerSub
     );
     
+    // ON...CALL (computed call to named SUB with fallthrough)
+    BasicBlock* handleOnCall(
+        const OnCallStatement& stmt,
+        BasicBlock* incoming,
+        LoopContext* loop,
+        SelectContext* select,
+        TryContext* tryCtx,
+        SubroutineContext* outerSub
+    );
+    
     // Unified EXIT handler (dispatches based on ExitStatement type)
     BasicBlock* handleExit(
         const ExitStatement& stmt,
@@ -572,7 +582,8 @@ private:
     struct DeferredEdge {
         int sourceBlockId;
         int targetLineNumber;
-        std::string label;
+        std::string targetLabel;  // For label-based targets
+        std::string label;        // Edge label (e.g., "case_1")
     };
     std::vector<DeferredEdge> m_deferredEdges;        // Edges to resolve later
     

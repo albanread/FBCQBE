@@ -245,13 +245,52 @@ void CFGEmitter::emitBlock(const BasicBlock* block, const ControlFlowGraph* cfg)
 void CFGEmitter::emitBlockTerminator(const BasicBlock* block, const ControlFlowGraph* cfg) {
     std::vector<CFGEdge> outEdges = getOutEdges(block, cfg);
     
-    // Check if this block contains a RETURN statement that needs to be processed
+    builder_.emitComment("DEBUG: emitBlockTerminator for block " + std::to_string(block->id) + 
+                        " with " + std::to_string(block->statements.size()) + " statements");
+    
+    // Check for control flow statements that need special handling
     const ReturnStatement* returnStmt = nullptr;
+    const OnGotoStatement* onGotoStmt = nullptr;
+    const OnGosubStatement* onGosubStmt = nullptr;
+    const OnCallStatement* onCallStmt = nullptr;
+    
     for (const Statement* stmt : block->statements) {
-        if (stmt && stmt->getType() == ASTNodeType::STMT_RETURN) {
+        if (!stmt) continue;
+        
+        ASTNodeType stmtType = stmt->getType();
+        builder_.emitComment("  Statement type: " + std::to_string(static_cast<int>(stmtType)));
+        
+        if (stmtType == ASTNodeType::STMT_RETURN) {
             returnStmt = static_cast<const ReturnStatement*>(stmt);
-            break;
+            builder_.emitComment("  Found RETURN statement");
+        } else if (stmtType == ASTNodeType::STMT_ON_GOTO) {
+            onGotoStmt = static_cast<const OnGotoStatement*>(stmt);
+            builder_.emitComment("  Found ON GOTO statement");
+        } else if (stmtType == ASTNodeType::STMT_ON_GOSUB) {
+            onGosubStmt = static_cast<const OnGosubStatement*>(stmt);
+            builder_.emitComment("  Found ON GOSUB statement");
+        } else if (stmtType == ASTNodeType::STMT_ON_CALL) {
+            onCallStmt = static_cast<const OnCallStatement*>(stmt);
+            builder_.emitComment("  Found ON CALL statement");
         }
+    }
+    
+    // Handle ON GOTO first
+    if (onGotoStmt) {
+        emitOnGotoTerminator(onGotoStmt, block, cfg);
+        return;
+    }
+    
+    // Handle ON GOSUB
+    if (onGosubStmt) {
+        emitOnGosubTerminator(onGosubStmt, block, cfg);
+        return;
+    }
+    
+    // Handle ON CALL
+    if (onCallStmt) {
+        emitOnCallTerminator(onCallStmt, block, cfg);
+        return;
     }
     
     // If this block has a RETURN statement, process it here
@@ -413,32 +452,10 @@ void CFGEmitter::emitBlockTerminator(const BasicBlock* block, const ControlFlowG
         
         builder_.emitComment("GOSUB: push return point, jump to subroutine");
         
-        // Push return block ID onto the return stack
-        // 1. Load current stack pointer
-        std::string spTemp = builder_.newTemp();
-        builder_.emitRaw("    " + spTemp + " =w loadw $gosub_return_sp\n");
+        // Push return block ID onto the return stack (using shared helper)
+        emitPushReturnBlock(returnPoint);
         
-        // 2. Convert SP to long for address calculation
-        std::string spLong = builder_.newTemp();
-        builder_.emitRaw("    " + spLong + " =l extsw " + spTemp + "\n");
-        
-        // 3. Calculate byte offset: SP * 4 (word size)
-        std::string byteOffset = builder_.newTemp();
-        builder_.emitRaw("    " + byteOffset + " =l mul " + spLong + ", 4\n");
-        
-        // 4. Calculate stack address: $gosub_return_stack + offset
-        std::string stackAddr = builder_.newTemp();
-        builder_.emitRaw("    " + stackAddr + " =l add $gosub_return_stack, " + byteOffset + "\n");
-        
-        // 5. Store return block ID at that address
-        builder_.emitRaw("    storew " + std::to_string(returnPoint) + ", " + stackAddr + "\n");
-        
-        // 6. Increment stack pointer
-        std::string newSp = builder_.newTemp();
-        builder_.emitRaw("    " + newSp + " =w add " + spTemp + ", 1\n");
-        builder_.emitRaw("    storew " + newSp + ", $gosub_return_sp\n");
-        
-        // 7. Jump to subroutine
+        // Jump to subroutine
         emitFallthrough(callTarget);
         return;
     }
@@ -850,9 +867,11 @@ void CFGEmitter::emitBlockStatements(const BasicBlock* block) {
     
     for (const Statement* stmt : block->statements) {
         if (stmt) {
-            // Skip RETURN statements - they are control flow terminators
-            // and will be handled by emitBlockTerminator
-            if (stmt->getType() == ASTNodeType::STMT_RETURN) {
+            // Skip control flow terminators - they will be handled by emitBlockTerminator
+            ASTNodeType stmtType = stmt->getType();
+            if (stmtType == ASTNodeType::STMT_RETURN ||
+                stmtType == ASTNodeType::STMT_ON_GOTO ||
+                stmtType == ASTNodeType::STMT_ON_GOSUB) {
                 continue;
             }
             astEmitter_.emitStatement(stmt);
@@ -950,6 +969,306 @@ std::string CFGEmitter::getEdgeTypeName(EdgeType edgeType) {
         case EdgeType::RETURN: return "RETURN";
         case EdgeType::EXCEPTION: return "EXCEPTION";
         default: return "UNKNOWN";
+    }
+}
+
+// =============================================================================
+// ON GOTO/GOSUB Helpers
+// =============================================================================
+
+std::string CFGEmitter::emitSelectorWord(const Expression* expr) {
+    // Evaluate the selector expression
+    std::string selector = astEmitter_.emitExpression(expr);
+    
+    // Get the expression type
+    BaseType exprType = astEmitter_.getExpressionType(expr);
+    
+    // If already an integer type, return as-is
+    if (exprType == BaseType::INTEGER || exprType == BaseType::LONG ||
+        exprType == BaseType::SHORT || exprType == BaseType::BYTE) {
+        // Ensure it's a word type
+        if (exprType == BaseType::INTEGER) {
+            return selector;  // Already word
+        }
+        // Convert to word
+        std::string wordTemp = builder_.newTemp();
+        if (exprType == BaseType::LONG) {
+            builder_.emitRaw("    " + wordTemp + " =w copy " + selector + "\n");
+        } else if (exprType == BaseType::SHORT) {
+            builder_.emitExtend(wordTemp, "w", "extsh", selector);
+        } else if (exprType == BaseType::BYTE) {
+            builder_.emitExtend(wordTemp, "w", "extsb", selector);
+        }
+        return wordTemp;
+    }
+    
+    // Convert floating point to word
+    std::string wordTemp = builder_.newTemp();
+    if (exprType == BaseType::DOUBLE) {
+        builder_.emitConvert(wordTemp, "w", "dtosi", selector);
+    } else if (exprType == BaseType::SINGLE) {
+        builder_.emitConvert(wordTemp, "w", "stosi", selector);
+    } else {
+        // Default: copy as word
+        builder_.emitRaw("    " + wordTemp + " =w copy " + selector + "\n");
+    }
+    
+    return wordTemp;
+}
+
+void CFGEmitter::emitPushReturnBlock(int returnBlockId) {
+    builder_.emitComment("Push return block " + std::to_string(returnBlockId) + " onto GOSUB return stack");
+    
+    // 1. Load current stack pointer
+    std::string spTemp = builder_.newTemp();
+    builder_.emitRaw("    " + spTemp + " =w loadw $gosub_return_sp\n");
+    
+    // 2. Convert SP to long for address calculation
+    std::string spLong = builder_.newTemp();
+    builder_.emitRaw("    " + spLong + " =l extsw " + spTemp + "\n");
+    
+    // 3. Calculate byte offset: SP * 4 (word size)
+    std::string byteOffset = builder_.newTemp();
+    builder_.emitRaw("    " + byteOffset + " =l mul " + spLong + ", 4\n");
+    
+    // 4. Calculate stack address: $gosub_return_stack + offset
+    std::string stackAddr = builder_.newTemp();
+    builder_.emitRaw("    " + stackAddr + " =l add $gosub_return_stack, " + byteOffset + "\n");
+    
+    // 5. Store return block ID at that address
+    builder_.emitRaw("    storew " + std::to_string(returnBlockId) + ", " + stackAddr + "\n");
+    
+    // 6. Increment stack pointer
+    std::string newSp = builder_.newTemp();
+    builder_.emitRaw("    " + newSp + " =w add " + spTemp + ", 1\n");
+    builder_.emitRaw("    storew " + newSp + ", $gosub_return_sp\n");
+}
+
+void CFGEmitter::emitOnGotoTerminator(const OnGotoStatement* stmt, 
+                                      const BasicBlock* block,
+                                      const ControlFlowGraph* cfg) {
+    builder_.emitComment("ON GOTO statement - switch dispatch");
+    
+    // Get out edges
+    std::vector<CFGEdge> outEdges = getOutEdges(block, cfg);
+    
+    builder_.emitComment("DEBUG: Found " + std::to_string(outEdges.size()) + " out edges");
+    for (const auto& edge : outEdges) {
+        builder_.emitComment("  Edge to block " + std::to_string(edge.targetBlock) + 
+                           " type=" + getEdgeTypeName(edge.type) + 
+                           " label='" + edge.label + "'");
+    }
+    
+    // Find case edges and default edge
+    std::vector<int> caseTargets;
+    int defaultTarget = -1;
+    
+    for (const auto& edge : outEdges) {
+        if (edge.label.length() >= 5 && edge.label.substr(0, 5) == "case_") {
+            // Extract case number
+            int caseNum = std::stoi(edge.label.substr(5));
+            // Ensure vector is large enough
+            if (caseNum > (int)caseTargets.size()) {
+                caseTargets.resize(caseNum, -1);
+            }
+            // Store target (1-indexed to 0-indexed)
+            caseTargets[caseNum - 1] = edge.targetBlock;
+        } else if (edge.label == "default") {
+            defaultTarget = edge.targetBlock;
+        }
+    }
+    
+    // If no default found, look for fallthrough edge
+    if (defaultTarget == -1) {
+        for (const auto& edge : outEdges) {
+            if (edge.type == EdgeType::FALLTHROUGH || edge.type == EdgeType::JUMP) {
+                defaultTarget = edge.targetBlock;
+                break;
+            }
+        }
+    }
+    
+    if (defaultTarget == -1 || caseTargets.empty()) {
+        builder_.emitComment("ERROR: ON GOTO without valid targets or default");
+        builder_.emitReturn("0");
+        return;
+    }
+    
+    // Evaluate and normalize selector
+    std::string selector = emitSelectorWord(stmt->selector.get());
+    
+    // Subtract 1 to convert from 1-based (BASIC) to 0-based (QBE switch)
+    std::string zeroBasedSelector = builder_.newTemp();
+    builder_.emitBinary(zeroBasedSelector, "w", "sub", selector, "1");
+    
+    // Build case label list
+    std::vector<std::string> caseLabels;
+    for (int targetId : caseTargets) {
+        if (targetId >= 0) {
+            caseLabels.push_back(getBlockLabel(targetId));
+        } else {
+            // Gap in cases - use default
+            caseLabels.push_back(getBlockLabel(defaultTarget));
+        }
+    }
+    
+    // Emit switch instruction
+    builder_.emitSwitch("w", zeroBasedSelector, getBlockLabel(defaultTarget), caseLabels);
+}
+
+void CFGEmitter::emitOnGosubTerminator(const OnGosubStatement* stmt,
+                                       const BasicBlock* block,
+                                       const ControlFlowGraph* cfg) {
+    builder_.emitComment("ON GOSUB statement - switch dispatch to trampolines");
+    
+    // Get out edges
+    std::vector<CFGEdge> outEdges = getOutEdges(block, cfg);
+    
+    // Find call edges and return point
+    std::vector<int> callTargets;
+    int returnPoint = -1;
+    
+    for (const auto& edge : outEdges) {
+        if (edge.label.substr(0, 5) == "call_") {
+            // Extract case number
+            int caseNum = std::stoi(edge.label.substr(5));
+            // Ensure vector is large enough
+            if (caseNum > (int)callTargets.size()) {
+                callTargets.resize(caseNum, -1);
+            }
+            // Store target (1-indexed to 0-indexed)
+            callTargets[caseNum - 1] = edge.targetBlock;
+        } else if (edge.type == EdgeType::JUMP || edge.type == EdgeType::FALLTHROUGH) {
+            returnPoint = edge.targetBlock;
+        }
+    }
+    
+    if (returnPoint == -1 || callTargets.empty()) {
+        builder_.emitComment("ERROR: ON GOSUB without valid targets or return point");
+        builder_.emitReturn("0");
+        return;
+    }
+    
+    // Evaluate and normalize selector
+    std::string selector = emitSelectorWord(stmt->selector.get());
+    
+    // Subtract 1 to convert from 1-based (BASIC) to 0-based (QBE switch)
+    std::string zeroBasedSelector = builder_.newTemp();
+    builder_.emitBinary(zeroBasedSelector, "w", "sub", selector, "1");
+    
+    // Build trampoline labels - each trampoline will push return point and jump to target
+    std::vector<std::string> trampolineLabels;
+    for (size_t i = 0; i < callTargets.size(); i++) {
+        if (callTargets[i] >= 0) {
+            std::string trampolineLabel = "on_gosub_trampoline_" + std::to_string(block->id) + 
+                                         "_case_" + std::to_string(i);
+            trampolineLabels.push_back(trampolineLabel);
+        } else {
+            // Gap in cases - jump directly to return point (skip the call)
+            trampolineLabels.push_back(getBlockLabel(returnPoint));
+        }
+    }
+    
+    // Emit switch instruction to trampolines
+    builder_.emitSwitch("w", zeroBasedSelector, getBlockLabel(returnPoint), trampolineLabels);
+    
+    // Emit trampolines
+    for (size_t i = 0; i < callTargets.size(); i++) {
+        if (callTargets[i] >= 0) {
+            std::string trampolineLabel = trampolineLabels[i];
+            builder_.emitLabel(trampolineLabel);
+            builder_.emitComment("Trampoline for ON GOSUB case " + std::to_string(i + 1));
+            
+            // Push return point
+            emitPushReturnBlock(returnPoint);
+            
+            // Jump to target
+            builder_.emitJump(getBlockLabel(callTargets[i]));
+        }
+    }
+}
+
+// =============================================================================
+// ON CALL Terminator
+// =============================================================================
+
+void CFGEmitter::emitOnCallTerminator(const OnCallStatement* stmt,
+                                      const BasicBlock* block,
+                                      const ControlFlowGraph* cfg) {
+    builder_.emitComment("ON CALL statement - switch dispatch to SUB calls");
+    
+    // Get out edges
+    std::vector<CFGEdge> outEdges = getOutEdges(block, cfg);
+    
+    // Find SUB call edges and continuation point
+    std::vector<std::string> subNames;
+    int continuePoint = -1;
+    
+    for (const auto& edge : outEdges) {
+        if (edge.label.substr(0, 9) == "call_sub:") {
+            // Extract SUB name and case number from label "call_sub:<name>:case_N"
+            std::string remaining = edge.label.substr(9);
+            size_t casePos = remaining.find(":case_");
+            if (casePos != std::string::npos) {
+                std::string subName = remaining.substr(0, casePos);
+                int caseNum = std::stoi(remaining.substr(casePos + 6));
+                
+                // Ensure vector is large enough
+                if (caseNum > (int)subNames.size()) {
+                    subNames.resize(caseNum);
+                }
+                // Store SUB name (1-indexed to 0-indexed)
+                subNames[caseNum - 1] = subName;
+            }
+            continuePoint = edge.targetBlock;
+        } else if (edge.label == "call_default") {
+            continuePoint = edge.targetBlock;
+        }
+    }
+    
+    if (continuePoint == -1 || subNames.empty()) {
+        builder_.emitComment("ERROR: ON CALL without valid targets or continuation");
+        builder_.emitJump(getBlockLabel(continuePoint >= 0 ? continuePoint : block->id + 1));
+        return;
+    }
+    
+    // Evaluate and normalize selector
+    std::string selector = emitSelectorWord(stmt->selector.get());
+    
+    // Subtract 1 to convert from 1-based (BASIC) to 0-based (QBE switch)
+    std::string zeroBasedSelector = builder_.newTemp();
+    builder_.emitBinary(zeroBasedSelector, "w", "sub", selector, "1");
+    
+    // Build trampoline labels - each trampoline will call the SUB
+    std::vector<std::string> trampolineLabels;
+    for (size_t i = 0; i < subNames.size(); i++) {
+        if (!subNames[i].empty()) {
+            std::string trampolineLabel = "on_call_trampoline_" + std::to_string(block->id) + 
+                                         "_case_" + std::to_string(i);
+            trampolineLabels.push_back(trampolineLabel);
+        } else {
+            // Gap in cases - jump directly to continuation (skip the call)
+            trampolineLabels.push_back(getBlockLabel(continuePoint));
+        }
+    }
+    
+    // Emit switch instruction to trampolines
+    builder_.emitSwitch("w", zeroBasedSelector, getBlockLabel(continuePoint), trampolineLabels);
+    
+    // Emit trampolines
+    for (size_t i = 0; i < subNames.size(); i++) {
+        if (!subNames[i].empty()) {
+            std::string trampolineLabel = trampolineLabels[i];
+            builder_.emitLabel(trampolineLabel);
+            builder_.emitComment("Trampoline for ON CALL case " + std::to_string(i + 1) + " -> SUB " + subNames[i]);
+            
+            // Call the SUB (no arguments in current simple implementation)
+            // Format: call $sub_SubName()
+            builder_.emitCall("", "", "sub_" + subNames[i], "");
+            
+            // Continue to next statement
+            builder_.emitJump(getBlockLabel(continuePoint));
+        }
     }
 }
 

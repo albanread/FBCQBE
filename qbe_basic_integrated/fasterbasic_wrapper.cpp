@@ -144,6 +144,12 @@ char* compile_basic_to_qbe_string(const char *basic_path) {
                           << " dimensions=" << arr.dimensions.size() << "\n";
             }
             
+            std::cerr << "\nLabels (" << symbols.labels.size() << "):\n";
+            for (const auto& [name, label] : symbols.labels) {
+                std::cerr << "  " << name << ": labelId=" << label.labelId 
+                          << " programLineIndex=" << label.programLineIndex << "\n";
+            }
+            
             std::cerr << "\nFunctions (" << symbols.functions.size() << "):\n";
             for (const auto& [name, func] : symbols.functions) {
                 std::cerr << "  " << name << ": returnTypeDesc=" << func.returnTypeDesc.toString() << "\n";

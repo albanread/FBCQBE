@@ -142,7 +142,11 @@ void dumpStatement(const Statement& stmt, int indentLevel, std::ostream& os) {
         
         case ASTNodeType::STMT_GOTO: {
             const auto& gotoStmt = static_cast<const GotoStatement&>(stmt);
-            os << " (target=" << gotoStmt.lineNumber << ")\n";
+            if (gotoStmt.isLabel) {
+                os << " (target=:" << gotoStmt.label << ")\n";
+            } else {
+                os << " (target=" << gotoStmt.lineNumber << ")\n";
+            }
             return;
         }
         

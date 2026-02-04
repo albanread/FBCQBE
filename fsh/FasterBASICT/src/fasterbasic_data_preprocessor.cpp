@@ -326,7 +326,7 @@ DataPreprocessorResult DataPreprocessor::process(const std::string& source) {
     std::istringstream sourceStream(source);
     std::ostringstream cleanedStream;
     std::string line;
-    std::string pendingLabel;
+    std::string pendingLabelLine;  // Store the actual line, not just the label
     
     while (std::getline(sourceStream, line)) {
         // Check if this is a DATA line
@@ -341,8 +341,11 @@ DataPreprocessorResult DataPreprocessor::process(const std::string& source) {
             std::string label = extractLabel(line, pos);
             
             // Use pending label if no label on this line
-            if (label.empty() && !pendingLabel.empty()) {
-                label = pendingLabel;
+            if (label.empty() && !pendingLabelLine.empty()) {
+                // Extract label from pending line
+                size_t pendingPos = 0;
+                extractLineNumber(pendingLabelLine, pendingPos);
+                label = extractLabel(pendingLabelLine, pendingPos);
             }
             
             // Get current data index (where this DATA starts)
@@ -366,11 +369,17 @@ DataPreprocessorResult DataPreprocessor::process(const std::string& source) {
             }
             
             // Clear pending label after using it
-            pendingLabel.clear();
+            pendingLabelLine.clear();
             
             // Completely remove DATA line from cleaned source
             // Labels don't need to be in the AST - they're stored in DataManager
             continue;
+        }
+        
+        // If we have a pending label line and this isn't DATA, output the pending line
+        if (!pendingLabelLine.empty()) {
+            cleanedStream << pendingLabelLine << "\n";
+            pendingLabelLine.clear();
         }
         
         // Check if this line has only a label (could precede DATA on next line)
@@ -383,17 +392,19 @@ DataPreprocessorResult DataPreprocessor::process(const std::string& source) {
             pos++;
         }
         
-        // If line has only label (and maybe line number), save it for next DATA
+        // If line has only label (and maybe line number), save it for next line
         if (!label.empty() && pos >= line.length()) {
-            pendingLabel = label;
-            // Don't include label-only lines that precede DATA
-            // They'll be removed when DATA is found
+            pendingLabelLine = line;
+            // Don't output yet - wait to see if next line is DATA
         } else {
             // Regular line (not DATA) - include in cleaned source
             cleanedStream << line << "\n";
-            // Clear pending label if this isn't DATA
-            pendingLabel.clear();
         }
+    }
+    
+    // If we still have a pending label line at EOF, output it
+    if (!pendingLabelLine.empty()) {
+        cleanedStream << pendingLabelLine << "\n";
     }
     
     result.cleanedSource = cleanedStream.str();

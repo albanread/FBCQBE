@@ -608,6 +608,35 @@ std::string ASTEmitter::emitFunctionCall(const FunctionCallExpression* expr) {
 
 std::string ASTEmitter::emitArithmeticOp(const std::string& left, const std::string& right,
                                          TokenType op, BaseType type) {
+    // Special case: MOD operator with floating-point types needs to call fmod() runtime function
+    if (op == TokenType::MOD && (type == BaseType::SINGLE || type == BaseType::DOUBLE)) {
+        std::string result = builder_.newTemp();
+        
+        // Convert operands to double for fmod() call
+        std::string leftDouble = left;
+        std::string rightDouble = right;
+        
+        if (type == BaseType::SINGLE) {
+            leftDouble = builder_.newTemp();
+            rightDouble = builder_.newTemp();
+            builder_.emitInstruction(leftDouble + " =d exts " + left);
+            builder_.emitInstruction(rightDouble + " =d exts " + right);
+        }
+        
+        // Call fmod(double, double) -> double
+        std::string fmodResult = builder_.newTemp();
+        builder_.emitCall(fmodResult, "d", "fmod", "d " + leftDouble + ", d " + rightDouble);
+        
+        // Convert result back to original type if needed
+        if (type == BaseType::SINGLE) {
+            builder_.emitInstruction(result + " =s truncd " + fmodResult);
+        } else {
+            result = fmodResult;  // Already double
+        }
+        
+        return result;
+    }
+    
     // Special case: POWER operator needs to call pow() runtime function
     if (op == TokenType::POWER) {
         std::string result = builder_.newTemp();

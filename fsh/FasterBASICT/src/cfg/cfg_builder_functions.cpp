@@ -496,7 +496,7 @@ ProgramCFG* CFGBuilder::buildProgramCFG(const Program& program) {
         // Register line number if present and is a jump target
         if (line->lineNumber > 0) {
             if (isJumpTarget(line->lineNumber)) {
-                if (!currentBlock->statements.empty() || currentBlock == m_entryBlock) {
+                if (!currentBlock->statements.empty() || currentBlock == m_entryBlock || isTerminated(currentBlock)) {
                     // Need to split - create new block for this line
                     BasicBlock* targetBlock = createBlock("Line_" + std::to_string(line->lineNumber));
                     
@@ -566,6 +566,21 @@ ProgramCFG* CFGBuilder::buildProgramCFG(const Program& program) {
             
             if (auto* gosubStmt = dynamic_cast<const GosubStatement*>(stmt.get())) {
                 currentBlock = handleGosub(*gosubStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* onGotoStmt = dynamic_cast<const OnGotoStatement*>(stmt.get())) {
+                currentBlock = handleOnGoto(*onGotoStmt, currentBlock);
+                continue;
+            }
+            
+            if (auto* onGosubStmt = dynamic_cast<const OnGosubStatement*>(stmt.get())) {
+                currentBlock = handleOnGosub(*onGosubStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
+                continue;
+            }
+            
+            if (auto* onCallStmt = dynamic_cast<const OnCallStatement*>(stmt.get())) {
+                currentBlock = handleOnCall(*onCallStmt, currentBlock, nullptr, nullptr, nullptr, nullptr);
                 continue;
             }
             

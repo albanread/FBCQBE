@@ -155,6 +155,17 @@ public:
                    const std::string& falseLabel);
     
     /**
+     * Emit a switch/jump table instruction
+     * @param type Type of selector ("w" or "l")
+     * @param selector Selector temporary/value
+     * @param defaultLabel Label for default case
+     * @param caseLabels Vector of case labels (0-indexed)
+     */
+    void emitSwitch(const std::string& type, const std::string& selector,
+                   const std::string& defaultLabel,
+                   const std::vector<std::string>& caseLabels);
+    
+    /**
      * Emit a return instruction
      * @param value Value to return (empty for void functions)
      */

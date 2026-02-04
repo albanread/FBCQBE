@@ -227,21 +227,43 @@ void CFGBuilder::resolveDeferredEdges() {
         std::cout << "[CFG] Resolving " << m_deferredEdges.size() << " deferred edges" << std::endl;
     }
     
-    // Resolve forward references (GOTOs to later line numbers)
+    // Resolve forward references (GOTOs to later line numbers or labels)
     for (const auto& deferred : m_deferredEdges) {
-        int targetBlock = resolveLineNumberToBlock(deferred.targetLineNumber);
-        if (targetBlock >= 0) {
-            addEdge(deferred.sourceBlockId, targetBlock, deferred.label);
-            
-            if (m_debugMode) {
-                std::cout << "[CFG] Resolved deferred edge: block " << deferred.sourceBlockId
-                          << " -> line " << deferred.targetLineNumber 
-                          << " (block " << targetBlock << ")" << std::endl;
+        int targetBlock = -1;
+        
+        // Check if this is a label-based target
+        if (!deferred.targetLabel.empty()) {
+            targetBlock = resolveLabelToBlock(deferred.targetLabel);
+            if (targetBlock >= 0) {
+                addEdge(deferred.sourceBlockId, targetBlock, deferred.label);
+                
+                if (m_debugMode) {
+                    std::cout << "[CFG] Resolved deferred edge: block " << deferred.sourceBlockId
+                              << " -> label '" << deferred.targetLabel 
+                              << "' (block " << targetBlock << ")" << std::endl;
+                }
+            } else {
+                if (m_debugMode) {
+                    std::cout << "[CFG] Warning: Could not resolve label '" 
+                              << deferred.targetLabel << "' for deferred edge" << std::endl;
+                }
             }
         } else {
-            if (m_debugMode) {
-                std::cout << "[CFG] Warning: Could not resolve line number " 
-                          << deferred.targetLineNumber << " for deferred edge" << std::endl;
+            // Line number based target
+            targetBlock = resolveLineNumberToBlock(deferred.targetLineNumber);
+            if (targetBlock >= 0) {
+                addEdge(deferred.sourceBlockId, targetBlock, deferred.label);
+                
+                if (m_debugMode) {
+                    std::cout << "[CFG] Resolved deferred edge: block " << deferred.sourceBlockId
+                              << " -> line " << deferred.targetLineNumber 
+                              << " (block " << targetBlock << ")" << std::endl;
+                }
+            } else {
+                if (m_debugMode) {
+                    std::cout << "[CFG] Warning: Could not resolve line number " 
+                              << deferred.targetLineNumber << " for deferred edge" << std::endl;
+                }
             }
         }
     }

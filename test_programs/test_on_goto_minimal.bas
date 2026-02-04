@@ -1,0 +1,15 @@
+' Minimal ON GOTO test
+PRINT "Testing ON GOTO"
+LET x = 2
+ON x GOTO 100, 200, 300
+PRINT "ERROR: Fell through"
+END
+
+100 PRINT "Reached 100 - ERROR"
+END
+
+200 PRINT "Reached 200 - CORRECT"
+END
+
+300 PRINT "Reached 300 - ERROR"
+END

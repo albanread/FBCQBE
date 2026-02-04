@@ -191,30 +191,57 @@ BasicBlock* CFGBuilder::handleOnGoto(const OnGotoStatement& stmt, BasicBlock* in
     BasicBlock* fallthroughBlock = createBlock("OnGoto_Fallthrough");
     
     // Add conditional edges to all targets
-    for (size_t i = 0; i < stmt.lineNumbers.size(); i++) {
-        int targetLine = stmt.lineNumbers[i];
-        int targetBlockId = resolveLineNumberToBlock(targetLine);
+    for (size_t i = 0; i < stmt.isLabelList.size(); i++) {
+        int targetBlockId = -1;
         
+        if (stmt.isLabelList[i]) {
+            // Target is a label
+            const std::string& label = stmt.labels[i];
+            targetBlockId = resolveLabelToBlock(label);
+            
+            if (targetBlockId < 0) {
+                // Forward reference to label - defer
+                DeferredEdge edge;
+                edge.sourceBlockId = incoming->id;
+                edge.targetLabel = label;
+                edge.label = "case_" + std::to_string(i + 1);
+                m_deferredEdges.push_back(edge);
+                
+                if (m_debugMode) {
+                    std::cout << "[CFG] Deferred ON GOTO case " << (i + 1) 
+                              << " to label " << label << std::endl;
+                }
+                continue;
+            }
+        } else {
+            // Target is a line number
+            int targetLine = stmt.lineNumbers[i];
+            targetBlockId = resolveLineNumberToBlock(targetLine);
+            
+            if (targetBlockId < 0) {
+                // Forward reference to line number - defer
+                DeferredEdge edge;
+                edge.sourceBlockId = incoming->id;
+                edge.targetLineNumber = targetLine;
+                edge.label = "case_" + std::to_string(i + 1);
+                m_deferredEdges.push_back(edge);
+                
+                if (m_debugMode) {
+                    std::cout << "[CFG] Deferred ON GOTO case " << (i + 1) 
+                              << " to line " << targetLine << std::endl;
+                }
+                continue;
+            }
+        }
+        
+        // Target resolved - create edge
         if (targetBlockId >= 0) {
-            // Target already exists
             addConditionalEdge(incoming->id, targetBlockId, 
                              "case_" + std::to_string(i + 1));
             
             if (m_debugMode) {
                 std::cout << "[CFG] ON GOTO case " << (i + 1) 
                           << " -> block " << targetBlockId << std::endl;
-            }
-        } else {
-            // Forward reference - defer
-            DeferredEdge edge;
-            edge.sourceBlockId = incoming->id;
-            edge.targetLineNumber = targetLine;
-            edge.label = "case_" + std::to_string(i + 1);
-            m_deferredEdges.push_back(edge);
-            
-            if (m_debugMode) {
-                std::cout << "[CFG] Deferred ON GOTO case " << (i + 1) 
-                          << " to line " << targetLine << std::endl;
             }
         }
     }
@@ -259,30 +286,57 @@ BasicBlock* CFGBuilder::handleOnGosub(const OnGosubStatement& stmt, BasicBlock* 
     m_cfg->gosubReturnBlocks.insert(returnBlock->id);
     
     // Add call edges to all targets
-    for (size_t i = 0; i < stmt.lineNumbers.size(); i++) {
-        int targetLine = stmt.lineNumbers[i];
-        int targetBlockId = resolveLineNumberToBlock(targetLine);
+    for (size_t i = 0; i < stmt.isLabelList.size(); i++) {
+        int targetBlockId = -1;
         
+        if (stmt.isLabelList[i]) {
+            // Target is a label
+            const std::string& label = stmt.labels[i];
+            targetBlockId = resolveLabelToBlock(label);
+            
+            if (targetBlockId < 0) {
+                // Forward reference to label - defer
+                DeferredEdge edge;
+                edge.sourceBlockId = incoming->id;
+                edge.targetLabel = label;
+                edge.label = "call_" + std::to_string(i + 1);
+                m_deferredEdges.push_back(edge);
+                
+                if (m_debugMode) {
+                    std::cout << "[CFG] Deferred ON GOSUB case " << (i + 1) 
+                              << " to label " << label << std::endl;
+                }
+                continue;
+            }
+        } else {
+            // Target is a line number
+            int targetLine = stmt.lineNumbers[i];
+            targetBlockId = resolveLineNumberToBlock(targetLine);
+            
+            if (targetBlockId < 0) {
+                // Forward reference to line number - defer
+                DeferredEdge edge;
+                edge.sourceBlockId = incoming->id;
+                edge.targetLineNumber = targetLine;
+                edge.label = "call_" + std::to_string(i + 1);
+                m_deferredEdges.push_back(edge);
+                
+                if (m_debugMode) {
+                    std::cout << "[CFG] Deferred ON GOSUB case " << (i + 1) 
+                              << " to line " << targetLine << std::endl;
+                }
+                continue;
+            }
+        }
+        
+        // Target resolved - create edge
         if (targetBlockId >= 0) {
-            // Target already exists
             addConditionalEdge(incoming->id, targetBlockId, 
                              "call_" + std::to_string(i + 1));
             
             if (m_debugMode) {
                 std::cout << "[CFG] ON GOSUB case " << (i + 1) 
                           << " -> block " << targetBlockId << std::endl;
-            }
-        } else {
-            // Forward reference - defer
-            DeferredEdge edge;
-            edge.sourceBlockId = incoming->id;
-            edge.targetLineNumber = targetLine;
-            edge.label = "call_" + std::to_string(i + 1);
-            m_deferredEdges.push_back(edge);
-            
-            if (m_debugMode) {
-                std::cout << "[CFG] Deferred ON GOSUB case " << (i + 1) 
-                          << " to line " << targetLine << std::endl;
             }
         }
     }
@@ -296,6 +350,60 @@ BasicBlock* CFGBuilder::handleOnGosub(const OnGosubStatement& stmt, BasicBlock* 
     }
     
     return returnBlock;
+}
+
+// =============================================================================
+// ON...CALL Handler (Computed CALL to named SUB)
+// =============================================================================
+//
+// ON expression CALL Sub1, Sub2, Sub3, ...
+// Calls one of N named SUB procedures based on expression value (1-indexed)
+// Always continues to next statement (after SUB returns or if out of range)
+//
+BasicBlock* CFGBuilder::handleOnCall(const OnCallStatement& stmt, BasicBlock* incoming,
+                                    LoopContext* loop, SelectContext* select,
+                                    TryContext* tryCtx, SubroutineContext* outerSub) {
+    if (m_debugMode) {
+        std::cout << "[CFG] Handling ON...CALL with " << stmt.functionNames.size() 
+                  << " targets" << std::endl;
+    }
+    
+    // Add ON CALL statement to current block
+    addStatementToBlock(incoming, &stmt, getLineNumber(&stmt));
+    
+    // ON CALL is like multiple CALL statements with a selector
+    // It always continues to the next statement (after return or if out of range)
+    
+    // Create continuation block (where execution resumes after any SUB call)
+    BasicBlock* continueBlock = createBlock("OnCall_Continue");
+    
+    // For ON CALL, we create conditional edges to represent the dispatch
+    // Each edge represents "if selector == N, call SubN"
+    // The actual CALL codegen will be handled by the emitter based on these edges
+    
+    for (size_t i = 0; i < stmt.functionNames.size(); i++) {
+        const std::string& subName = stmt.functionNames[i];
+        
+        // Create edge with label indicating which SUB to call
+        // The label format "call_sub:<name>" tells the emitter this is a SUB call
+        addConditionalEdge(incoming->id, continueBlock->id, 
+                         "call_sub:" + subName + ":case_" + std::to_string(i + 1));
+        
+        if (m_debugMode) {
+            std::cout << "[CFG] ON CALL case " << (i + 1) 
+                      << " -> SUB " << subName << std::endl;
+        }
+    }
+    
+    // Fallthrough/out-of-range case also goes to continue block
+    addConditionalEdge(incoming->id, continueBlock->id, "call_default");
+    
+    if (m_debugMode) {
+        std::cout << "[CFG] ON...CALL from block " << incoming->id 
+                  << " continues at block " << continueBlock->id << std::endl;
+    }
+    
+    return continueBlock;
 }
 
 // =============================================================================

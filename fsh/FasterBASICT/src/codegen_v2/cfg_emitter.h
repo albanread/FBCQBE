@@ -246,6 +246,51 @@ private:
      * @return Human-readable name
      */
     std::string getEdgeTypeName(FasterBASIC::EdgeType edgeType);
+    
+    // === ON GOTO/GOSUB Helpers ===
+    
+    /**
+     * Evaluate selector expression and normalize to word type
+     * @param expr Selector expression
+     * @return Temporary containing word-type selector
+     */
+    std::string emitSelectorWord(const FasterBASIC::Expression* expr);
+    
+    /**
+     * Emit code to push a return block ID onto the GOSUB return stack
+     * @param returnBlockId Block ID to push
+     */
+    void emitPushReturnBlock(int returnBlockId);
+    
+    /**
+     * Emit ON GOTO terminator (switch-based dispatch)
+     * @param stmt ON GOTO statement
+     * @param block Current block
+     * @param cfg CFG
+     */
+    void emitOnGotoTerminator(const FasterBASIC::OnGotoStatement* stmt,
+                             const FasterBASIC::BasicBlock* block,
+                             const FasterBASIC::ControlFlowGraph* cfg);
+    
+    /**
+     * Emit ON GOSUB terminator (switch-based dispatch to trampolines)
+     * @param stmt ON GOSUB statement
+     * @param block Current block
+     * @param cfg CFG
+     */
+    void emitOnGosubTerminator(const FasterBASIC::OnGosubStatement* stmt,
+                              const FasterBASIC::BasicBlock* block,
+                              const FasterBASIC::ControlFlowGraph* cfg);
+
+    /**
+     * Emit ON CALL terminator (computed call to named SUB)
+     * @param stmt ON CALL statement
+     * @param block Current basic block
+     * @param cfg CFG
+     */
+    void emitOnCallTerminator(const FasterBASIC::OnCallStatement* stmt,
+                             const FasterBASIC::BasicBlock* block,
+                             const FasterBASIC::ControlFlowGraph* cfg);
 };
 
 } // namespace fbc
