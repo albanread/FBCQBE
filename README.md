@@ -1,3 +1,7 @@
+
+This repo has moved to the FasterBASIC repo here 
+This repo is retained for history.
+
 # FBCQBE - FasterBASIC QBE Backend
 
 Working on V2 of the CFG and V2 of the codegen, so right now everything is very broken, but it should be more maintainable when it works.
